@@ -43,10 +43,12 @@ bool gpsfix = false;
 int status = 0; // 0(red)=No Sync, 1(Yellow)=Wireless Connected, 2=(Blue)NTP Sync, 3(Blue/Green)=GPS Sync <= 3sats, 4=(Green/Blue)GPS Sync <= 7 sats. 5(Green)=GPS Sync > 7 sats
 double lat;
 double lon;
-RtcTemperature rtctemp;
+RtcTemperature rtcTemp;
+RtcDateTime currTime;
 bool gpssync = false;
 int currhue;
 int currbright;
+int lumens;
 
 unsigned long l1_time = 0L ;
 unsigned long l2_time = 0L ;
@@ -236,7 +238,7 @@ int getLumens() {
   }
   else {
     Serial.print(format("No Tsl2561 found. Check wiring: SCL=%u, SDA=%u\n", TSL2561_SCL, TSL2561_SDA));
-    return 0;
+    return 999;
   }
 }
 
@@ -314,7 +316,7 @@ void network_loop( void * pvParameters ) {
     }
     if (millis() - l2_time > T3S) {
       
-      Serial.println((String) "GPS Chars: " + GPS.charsProcessed() + "|With-Fix: " + GPS.sentencesWithFix() + "|Failed-checksum: " + GPS.failedChecksum() + "|Passed-checksum: " + GPS.passedChecksum() + "|RTC-Temp: " + rtctemp.AsFloatDegF() + "F|LightLevel: " + currbright + "|GPSFix: " + gpsfix + "|Sats:" + sats + "|Lat: " + lat + "|Lon: " + lon);
+      Serial.println((String) "GPS Chars: " + GPS.charsProcessed() + "|With-Fix: " + GPS.sentencesWithFix() + "|Failed-checksum: " + GPS.failedChecksum() + "|Passed-checksum: " + GPS.passedChecksum() + "|RTC-Temp: " + rtcTemp.AsFloatDegF() + "F|Lumens: " + lumens + "|Brightness: " + currbright + "|GPSFix: " + gpsfix + "|Sats:" + sats + "|Lat: " + lat + "|Lon: " + lon);
     l2_time = millis();
     }
     delay(10);
@@ -364,17 +366,18 @@ void setup () {
     Serial.println("RTC was not actively running, starting now");
     Rtc.SetIsRunning(true);
   }
-  RtcDateTime now = Rtc.GetDateTime();
-  if (now < compiled) 
+  currTime = Rtc.GetDateTime();
+  rtcTemp = Rtc.GetTemperature();
+  if (currTime < compiled) 
   {
     Serial.println("RTC is older than compile time!  (Updating DateTime)");
     Rtc.SetDateTime(compiled);
   }
-  else if (now > compiled) 
+  else if (currTime > compiled) 
   {
     Serial.println("RTC is newer than compile time. (this is expected)");
   }
-  else if (now == compiled) 
+  else if (currTime == compiled) 
   {
     Serial.println("RTC is the same as compile time! (not expected but all is fine)");
   }
@@ -407,9 +410,11 @@ void loop () {
     delay(100);
   }
   else if (Rtc.GetIsRunning()) {
-    RtcDateTime currTime = Rtc.GetDateTime();
+    currTime = Rtc.GetDateTime();
+    rtcTemp = Rtc.GetTemperature();
     int lum = getLumens();
-    currbright = map(lum, 0, 500, 1, 100);
+    if (lum != 999) lumens = lum;
+    currbright = map(lumens, 0, 500, 1, 100);
     FastLED.setBrightness(currbright);
     int myhours = currTime.Hour();
     int myhour = myhours%12; 
@@ -485,24 +490,30 @@ void setNum(byte number, byte pos) {
 void setColon(int onOff){  // turn the colon on (1) or off (0)
   int shue = currhue;
   int br;
-  if (onOff) {
+  int satu;
+  if (onOff)
+  {
     shue = currhue;
+    satu = 255;
     br = 255;
   }
   else if (gpsfix) {
     shue = currhue;
+    satu = 0;
     br = 0;
   }
   else if (WiFi.status() == WL_CONNECTED) {
     shue = 192;
+    satu = 255;
     br = 255;
   }
   else {
     shue = 32;
+    satu = 255;
     br = 255;
   }
-  leds[130] = CHSV(shue, 255, br);
-  leds[133] = CHSV(shue, 255, br);
+  leds[130] = CHSV(shue, satu, br);
+  leds[133] = CHSV(shue, satu, br);
   FastLED.show();
 }
 

@@ -11,6 +11,7 @@
 #include <Preferences.h>
 #include <TinyGPSPlus.h>
 #include <SPI.h>
+#include <Tsl2561.h>
 #include "FastLED.h"
 
 #define DEBUG true
@@ -23,7 +24,7 @@
 #define BRIGHTNESS  30
 
 #define T3S 1*30*1000L  // 30 seconds
-#define T2M 2*60*1000L  // 2 minutes
+#define T5M 5*60*1000L  // 2 minutes
 #define T1H 60*60*1000L  // 60 minutes
 
 #define kMatrixWidth  32
@@ -32,17 +33,20 @@
 #define NUM_LEDS (kMatrixWidth * kMatrixHeight)
 
 const int   GMToffset = -5;  // - 7 = US-MST;  set for your time zone)
-const int   format = 12; // time format can be 12 or 24 hour
+const int   tformat = 12; // time format can be 12 or 24 hour
 const char* ntpServer = "172.25.150.1";  // NTP server
 
 String ssid;
 String password;
 int sats = 0;
 bool gpsfix = false;
-int status = 0;  // 0(red)=No Sync, 1(Yellow)=Wireless Connected, 2=(Blue)NTP Sync, 3(Blue/Green)=GPS Sync <= 3sats, 4=(Green/Blue)GPS Sync <= 7 sats. 5(Green)=GPS Sync > 7 sats
+int status = 0; // 0(red)=No Sync, 1(Yellow)=Wireless Connected, 2=(Blue)NTP Sync, 3(Blue/Green)=GPS Sync <= 3sats, 4=(Green/Blue)GPS Sync <= 7 sats. 5(Green)=GPS Sync > 7 sats
 double lat;
 double lon;
 RtcTemperature rtctemp;
+bool gpssync = false;
+int currhue;
+int currbright;
 
 unsigned long l1_time = 0L ;
 unsigned long l2_time = 0L ;
@@ -53,10 +57,40 @@ Preferences preferences;
 RtcDS3231<TwoWire> Rtc(Wire); // instance of RTC
 WiFiUDP ntpUDP;  // instance of UDP
 TinyGPSPlus GPS;
+Tsl2561 Tsl(Wire);
 NTPClient timeClient(ntpUDP, ntpServer, GMToffset*3600);
 CRGB leds[NUM_LEDS];
 bool colon=false;
+
 byte myArray[8][32];  // display buffer
+
+byte let[3][8] = {
+    // our font for letters
+    {0x1E,  /* 011110   letter S */
+     0x33,  /* 110011 */
+     0x33,  /* 110000 */
+     0x33,  /* 111110 */
+     0x33,  /* 011111 */
+     0x33,  /* 000011 */
+     0x33,  /* 110011 */
+     0x1E}, /* 011110 */
+    {0x0C,  /* 111111   letter M */
+     0x1C,  /* 101101 */
+     0x0C,  /* 101101 */
+     0x0C,  /* 100001 */
+     0x0C,  /* 100001 */
+     0x0C,  /* 100001 */
+     0x0C,  /* 100001 */
+     0x1E}, /* 100001 */
+    {0x1E,  /* 011110   number 2  */
+     0x33,  /* 110011 */
+     0x03,  /* 000011 */
+     0x06,  /* 000110 */
+     0x0C,  /* 001100 */
+     0x18,  /* 011000 */
+     0x30,  /* 110000 */
+     0x3F}  /* 111111 */
+};
 
 byte num [10][8] = {  // our font for numbers 0-9
   { 0x1E,  /* 011110   number 0 */
@@ -141,6 +175,16 @@ byte num [10][8] = {  // our font for numbers 0-9
     0x1E}  /* 011110 */
 };
 
+char *format( const char *fmt, ... ) {
+  static char buf[128];
+  va_list arg;
+  va_start(arg, fmt);
+  vsnprintf(buf, sizeof(buf), fmt, arg);
+  buf[sizeof(buf)-1] = '\0';
+  va_end(arg);
+  return buf;
+}
+
 void network_connect() {
   Serial.print("Connecting to wifi...");
   WiFi.begin(ssid.c_str(), password.c_str());
@@ -177,30 +221,52 @@ time_t gpsunixtime() {
   return t_of_day;
 }
 
+int getLumens() {
+  Tsl.begin();
+  if( Tsl.available() ) {
+    Tsl.on();
+    Tsl.setSensitivity(true, Tsl2561::EXP_14);
+    delay(16);
+    uint16_t full, ir;
+    Tsl.fullLuminosity(full);
+    Tsl.irLuminosity(ir);
+    //if (DEBUG) Serial.print(format("luminosity is %5u (full) and %5u (ir)\n", full, ir));
+    Tsl.off();
+    return full;
+  }
+  else {
+    Serial.print(format("No Tsl2561 found. Check wiring: SCL=%u, SDA=%u\n", TSL2561_SCL, TSL2561_SDA));
+    return 0;
+  }
+}
+
 void gps_check() {
   while (Serial1.available() > 0) GPS.encode(Serial1.read());
   if (GPS.time.isUpdated()) {
-      Serial.println("GPS Time updated");
-      time_t GPStime = gpsunixtime() - 946684800UL - (GMToffset*3600);
+      //Serial.println("GPS Time updated");
+      time_t GPStime = gpsunixtime();
       int diff = Rtc.GetDateTime() - GPStime;
-      if (diff > 0 || diff < 0) {
-        Serial.println((String) "Time Diff (RTC-GPS): " + diff);
-        Rtc.SetDateTime(GPStime); // Set RTC to GPS time
+      if (GPS.time.age() == 0) {
+        if (diff < -1 && diff > 1) {
+          Serial.println((String) "Time Diff (RTC-GPS): " + diff);
+          Rtc.SetDateTime(GPStime); // Set RTC to GPS time
+        }
       }
   }
-  else if (GPS.satellites.isUpdated()) {
+  if (GPS.satellites.isUpdated()) {
     sats = GPS.satellites.value();
-    Serial.println((String)"Sats: " + sats);
+    //Serial.println((String)"Sats: " + sats);
     if (sats > 0 && !gpsfix)
     {
       gpsfix = true;
       Serial.println((String)"GPS fix aquired with "+sats+" satellites");
     }
+    if (sats == 0) gpsfix = false;
   }
-  else if (GPS.location.isUpdated()) {
+  if (GPS.location.isUpdated()) {
     lat = GPS.location.lat();
     lon = GPS.location.lng();
-    Serial.println((String)"Lat: " + lat + " Lon: " + lon);
+    //Serial.println((String)"Lat: " + lat + " Lon: " + lon);
   }
   if (GPS.charsProcessed() < 10) Serial.println("WARNING: No GPS data.  Check wiring.");
 }
@@ -212,20 +278,25 @@ void updateTime() {
   // So subtract the 30 extra yrs (946684800UL).
   unsigned long NTPtime = timeClient.getEpochTime() - 946684800UL;
   int diff = Rtc.GetDateTime() - NTPtime;
-  if (diff < 0 || diff > 0) {
-    Serial.println((String) "Time Diff (RTC-NTP): " + diff);
-    Serial.println("Updating NTP time to RTC...");
-    Rtc.SetDateTime(NTPtime); // Set RTC to NTP time
+  if (!gpsfix) {
+    if (diff < 0 || diff > 0) {
+      Serial.println((String) "Time Diff (RTC-NTP): " + diff);
+      Serial.println("Updating NTP time to RTC...");
+      Rtc.SetDateTime(NTPtime); // Set RTC to NTP time
+    } else {
+      Serial.println("NTP time matches RTC time, skipping NTP time update");
+    }
   } else {
-    Serial.println("NTP time matches RTC time, skipping update");
+    Serial.println("GPS time synced, skipping NTP time update");
   }
 }
 
 void network_loop( void * pvParameters ) {
   esp_task_wdt_add(NULL);
   Serial.println((String)"Network loop running on CPU core: " + xPortGetCoreID());
-  Serial.println("Initializing GPS Module...\n\r");
+  Serial.print("Initializing GPS Module...");
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
+  Serial.println("SUCCESS.");
   delay(2000);
   l1_time = millis();
   if (DEBUG) l2_time = millis();
@@ -237,27 +308,21 @@ void network_loop( void * pvParameters ) {
     {
       network_connect();
     }
-    if (millis() - l1_time > T1H) {
+    if (millis() - l1_time > T5M) {
       l1_time = millis();
       updateTime();
     }
     if (millis() - l2_time > T3S) {
-    rtctemp = Rtc.GetTemperature();
-      if (DEBUG)
-        Serial.println((String) "GPS Chars: " + GPS.charsProcessed() + "|With-Fix: " + GPS.sentencesWithFix() + "|Failed-checksum: " + GPS.failedChecksum() + "|Passed-checksum: " + GPS.passedChecksum() + "|RTC-Temp: " + rtctemp.AsFloatDegF() + "F|Sats:" + sats + "|Lat: " + lat + "|Lon: " + lon);
-      l2_time = millis();
+      
+      Serial.println((String) "GPS Chars: " + GPS.charsProcessed() + "|With-Fix: " + GPS.sentencesWithFix() + "|Failed-checksum: " + GPS.failedChecksum() + "|Passed-checksum: " + GPS.passedChecksum() + "|RTC-Temp: " + rtctemp.AsFloatDegF() + "F|LightLevel: " + currbright + "|GPSFix: " + gpsfix + "|Sats:" + sats + "|Lat: " + lat + "|Lon: " + lon);
+    l2_time = millis();
     }
-    delay(500);
+    delay(10);
   }
 }
 
 void setup () {
   Serial.begin(115200);
-  if (DEBUG) {
-    Serial.println("DEBUG ENABLED - Executing startup delay...");
-    delay(10000);
-    Serial.println("Starting after debug delay...");
-  }
   preferences.begin("credentials", false); 
   ssid = preferences.getString("ssid", "");
   //ssid = "MS";
@@ -269,11 +334,12 @@ void setup () {
   } else {
     Serial.println("Wifi credentials retrieved successfully");
   }
-  Serial.println("Initializing Hardware Watchdog...\n\r");
+  Serial.print("Initializing Hardware Watchdog...");
   esp_task_wdt_init(WDT_TIMEOUT, true);                //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);                              //add current thread to WDT watch
+  Serial.println("SUCCESS.");
   Serial.println("Initializing the RTC module...");
-  Serial.print("compiled: ");
+  Serial.print("RTC Compiled: ");
   Serial.print(__DATE__);
   Serial.println(__TIME__);
   Rtc.Begin();
@@ -284,7 +350,7 @@ void setup () {
   {
     if (Rtc.LastError() != 0)
     {
-      Serial.print("RTC communications error = ");
+      Serial.print("RTC communications error: ");
       Serial.println(Rtc.LastError());
     }
     else
@@ -313,48 +379,74 @@ void setup () {
     Serial.println("RTC is the same as compile time! (not expected but all is fine)");
   }
   Rtc.Enable32kHzPin(false);
-  Rtc.SetSquareWavePin(DS3231SquareWavePin_ModeNone); 
-  rtctemp = Rtc.GetTemperature();
-  Serial.print(rtctemp.AsFloatDegF());
-  Serial.println("F");
-
+  Rtc.SetSquareWavePin(DS3231SquareWavePin_ModeNone);
+  Wire.begin(TSL2561_SDA, TSL2561_SCL);
   Serial.println((String) "Display loop running on CPU core: " + xPortGetCoreID());
   xTaskCreatePinnedToCore(network_loop, "NETLoop", 10000, NULL, 1, &NETLoop, 0);
   Serial.println("Initializing the display...");
   FastLED.addLeds<CHIPSET, HSPI_MOSI, COLOR_ORDER>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
   FastLED.setBrightness( BRIGHTNESS );
   FastLED.clear();  //clear the display
-  FastLED.show();  
-} 
+  FastLED.show();
+  Serial.println("Display initialization complete.");
+}
 
 void loop () {
   esp_task_wdt_reset();
-  RtcDateTime currTime = Rtc.GetDateTime();
-  int myhour = currTime.Hour();
-  if (format==12) {  // if we are using a 12 hour format
-    myhour = myhour%12; 
-    if (myhour==0)myhour=12;
+  if (!Rtc.IsDateTimeValid()) 
+  {
+    if (Rtc.LastError() != 0)
+    {
+      Serial.print("RTC communications error: ");
+      Serial.println(Rtc.LastError());
+    }
+    else
+    {
+      Serial.println("RTC lost confidence in the DateTime!");
+    }
+    delay(100);
   }
-  setNum(myhour/10,0);  // set first digit of hour
-  setNum(myhour%10,1); // set second digit of hour
-  int myminute = currTime.Minute();
-  setNum(myminute/10,2); // set first digig of minute
-  setNum(myminute%10,3);  // set second digit of minute
-  int mysecs= currTime.Second();
-  setColon(1); // turn colon on
-  setStatus();
-  refreshDisplay(myHue(mysecs));
-  delay(1000); // wait 1 sec
-  setColon(0); // turn colon off
-  setStatus();
-  refreshDisplay(myHue(mysecs));
-  delay(50);
-  while (mysecs == currTime.Second())
-  { // now wait until seconds change
-    delay(10); 
-    currTime = Rtc.GetDateTime();
+  else if (Rtc.GetIsRunning()) {
+    RtcDateTime currTime = Rtc.GetDateTime();
+    int lum = getLumens();
+    currbright = map(lum, 0, 500, 1, 100);
+    FastLED.setBrightness(currbright);
+    int myhours = currTime.Hour();
+    int myhour = myhours%12; 
+    if (myhours==0) myhour=12;
+    if (myhour / 10 != 0) setNum(myhour / 10, 0); // set first digit of hour
+    setNum(myhour%10,1); // set second digit of hour
+    int myminute = currTime.Minute();
+    setNum(myminute/10,2); // set first digig of minute
+    setNum(myminute%10,3);  // set second digit of minute
+    int mysecs= currTime.Second();
+    myHue(myhours, myminute);
+    refreshDisplay(currhue);
+    setColon(0);
+    delay(100);  // wait 1 sec
+    setColon(1); // turn colon off
+    while (mysecs == currTime.Second())
+    { // now wait until seconds change
+      esp_task_wdt_reset();
+      delay(100);
+      if (!Rtc.IsDateTimeValid())
+      {
+        if (Rtc.LastError() != 0)
+        {
+          Serial.print("RTC communications error: ");
+          Serial.println(Rtc.LastError());
+        }
+        else
+        {
+          Serial.println("RTC lost confidence in the DateTime!");
+        }
+      }
+      else if (Rtc.GetIsRunning()) {
+        currTime = Rtc.GetDateTime();
+      }
+    }
+    memset(myArray, 0, sizeof myArray);  // clear the display buffer 
   }
-  memset(myArray, 0, sizeof myArray);  // clear the display buffer
 }
 
 // Sets the LED display to match content of display buffer at a specified color (myHue).
@@ -376,13 +468,10 @@ void refreshDisplay(byte myHue) {
   FastLED.show();
 }
 
-void setStatus() {
-  myArray[7][31] = 1;
-}
 
 // put numbers onto the display using our num[][] font in positions 0-3. 
 void setNum(byte number, byte pos) {
-  if (pos==0) pos=1;   // change pos to the real location in the array
+  if (pos==0) pos=2;   // change pos to the real location in the array
   else if (pos==1) pos=8;
   else if (pos==2) pos=17;
   else if (pos==3) pos=24;
@@ -394,15 +483,35 @@ void setNum(byte number, byte pos) {
 }
 
 void setColon(int onOff){  // turn the colon on (1) or off (0)
-  myArray[2][15]=onOff;
-  myArray[5][15]=onOff;
+  int shue = currhue;
+  int br;
+  if (onOff) {
+    shue = currhue;
+    br = 255;
+  }
+  else if (gpsfix) {
+    shue = currhue;
+    br = 0;
+  }
+  else if (WiFi.status() == WL_CONNECTED) {
+    shue = 192;
+    br = 255;
+  }
+  else {
+    shue = 32;
+    br = 255;
+  }
+  leds[130] = CHSV(shue, 255, br);
+  leds[133] = CHSV(shue, 255, br);
+  FastLED.show();
 }
 
-byte myHue(int mySeconds) {     // make display color change from green
-  return 160;
-  // if (mySeconds<2) return 85;   // through blue to red as seconds advance
-  // else if (mySeconds > 57)return 0;  // by returning the correct hue
-  // else return 85 + mySeconds*3;
+void myHue(int myHours, int myMinutes) {     // make display color change from green
+  int dayhue = 64;
+  int nighthue = 160;
+  if (myHours * 60 >= 1320) currhue = nighthue;
+  else if (myHours * 60 < 360) currhue = nighthue;
+  else currhue = map(myHours * 60 + myMinutes, 360, 1319, dayhue, nighthue);
 }
 
 #define countof(a) (sizeof(a) / sizeof(a[0]))
@@ -420,5 +529,5 @@ void printDateTime(const RtcDateTime& dt)
             dt.Hour(),
             dt.Minute(),
             dt.Second() );
-    Serial.print(datestring);
+    Serial.println(datestring);
 }

@@ -99,6 +99,7 @@
                 "/home/ip/.arduino15/packages/esp32/hardware/esp32/1.0.6/libraries/Preferences/src",
                 "/home/ip/Arduino/arduino-1.8.19/Sketches/libraries/TinyGPSPlus-ESP32/src",
                 "/home/ip/.arduino15/packages/esp32/hardware/esp32/1.0.6/libraries/SPI/src",
+                "/home/ip/Arduino/arduino-1.8.19/Sketches/libraries/Joba_Tsl2561_Library/src",
                 "/home/ip/Arduino/arduino-1.8.19/Sketches/libraries/FastLED/src",
                 "/home/ip/.arduino15/packages/esp32/tools/xtensa-esp32-elf-gcc/1.22.0-97-gc752ad5-5.2.0/xtensa-esp32-elf/include/c++/5.2.0",
                 "/home/ip/.arduino15/packages/esp32/tools/xtensa-esp32-elf-gcc/1.22.0-97-gc752ad5-5.2.0/xtensa-esp32-elf/include/c++/5.2.0/xtensa-esp32-elf",

@@ -5,51 +5,65 @@
 #include <NTPClient.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include <Wire.h> 
 #include <RtcDS3231.h>
+#include <Wire.h> // TwoWire, Wire
 #include <esp_task_wdt.h>
 #include <Preferences.h>
 #include <TinyGPSPlus.h>
 #include <SPI.h>
 #include <Tsl2561.h>
-#include "FastLED.h"
+#include <Adafruit_GFX.h>
+#include <FastLED_NeoMatrix.h>
+#include <FastLED.h>
+
+// Allow temporaly dithering, does not work with ESP32 right now
+#ifndef ESP32
+#define delay FastLED.delay
+#endif
 
 #define DEBUG true
 #define WDT_TIMEOUT 10             // Watchdog Timeout
 #define GPS_BAUD 9600              // GPS UART gpsSpeed
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
-#define COLOR_ORDER GRB
-#define CHIPSET     WS2812B
 #define BRIGHTNESS  30
+
+#define DAYHUE 40
+#define NIGHTHUE 184
 
 #define T3S 1*30*1000L  // 30 seconds
 #define T5M 5*60*1000L  // 2 minutes
 #define T1H 60*60*1000L  // 60 minutes
 
-#define kMatrixWidth  32
-#define kMatrixHeight 8
+#define mw 32
+#define mh 8
+#define NUMMATRIX (mw*mh)
+CRGB leds[NUMMATRIX];
+FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(leds, mw, mh, 
+  NEO_MATRIX_BOTTOM     + NEO_MATRIX_RIGHT +
+    NEO_MATRIX_COLUMNS + NEO_MATRIX_ZIGZAG);
 
-#define NUM_LEDS (kMatrixWidth * kMatrixHeight)
-
-const int   GMToffset = -5;  // - 7 = US-MST;  set for your time zone)
-const int   tformat = 12; // time format can be 12 or 24 hour
+const int8_t   GMToffset = -5;  // - 7 = US-MST;  set for your time zone)
+const uint8_t   tformat = 12; // time format can be 12 or 24 hour
 const char* ntpServer = "172.25.150.1";  // NTP server
 
 String ssid;
 String password;
-int sats = 0;
+uint8_t sats = 0;
 bool gpsfix = false;
-int status = 0; // 0(red)=No Sync, 1(Yellow)=Wireless Connected, 2=(Blue)NTP Sync, 3(Blue/Green)=GPS Sync <= 3sats, 4=(Green/Blue)GPS Sync <= 7 sats. 5(Green)=GPS Sync > 7 sats
+uint8_t status = 0; // 0(red)=No Sync, 1(Yellow)=Wireless Connected, 2=(Blue)NTP Sync, 3(Blue/Green)=GPS Sync <= 3sats, 4=(Green/Blue)GPS Sync <= 7 sats. 5(Green)=GPS Sync > 7 sats
 double lat;
 double lon;
+RtcDateTime currTime;
 RtcTemperature rtctemp;
 bool gpssync = false;
-int currhue;
-int currbright;
+uint8_t currhue;
+uint8_t currbright;
+uint32_t l1_time = 0L ;
+uint32_t l2_time = 0L ;
 
-unsigned long l1_time = 0L ;
-unsigned long l2_time = 0L ;
+
+uint16_t RGB16(uint8_t r, uint8_t g, uint8_t b);
 
 TaskHandle_t NETLoop; 
 
@@ -59,121 +73,190 @@ WiFiUDP ntpUDP;  // instance of UDP
 TinyGPSPlus GPS;
 Tsl2561 Tsl(Wire);
 NTPClient timeClient(ntpUDP, ntpServer, GMToffset*3600);
-CRGB leds[NUM_LEDS];
 bool colon=false;
 
-byte myArray[8][32];  // display buffer
+uint16_t BLACK	=	RGB16(0, 0, 0);
+uint16_t RED	  =	RGB16(255, 0, 0);
+uint16_t GREEN	=	RGB16(0, 255, 0);
+uint16_t BLUE 	=	RGB16(0, 0, 255);
+uint16_t YELLOW	=	RGB16(255, 255, 0);
+uint16_t CYAN 	=	RGB16(0, 255, 255);
+uint16_t PINK	=	RGB16(255, 0, 255);
+uint16_t WHITE	=	RGB16(255, 255, 255);
+uint16_t ORANGE	=	RGB16(255, 128, 0);
+uint16_t PURPLE	=	RGB16(128, 0, 255);
+uint16_t DAYBLUE=	RGB16(0, 128, 255);
+uint16_t LIME 	=	RGB16(128, 255, 0);
 
-byte let[3][8] = {
-    // our font for letters
-    {0x1E,  /* 011110   letter S */
-     0x33,  /* 110011 */
-     0x33,  /* 110000 */
-     0x33,  /* 111110 */
-     0x33,  /* 011111 */
-     0x33,  /* 000011 */
-     0x33,  /* 110011 */
-     0x1E}, /* 011110 */
-    {0x0C,  /* 111111   letter M */
-     0x1C,  /* 101101 */
-     0x0C,  /* 101101 */
-     0x0C,  /* 100001 */
-     0x0C,  /* 100001 */
-     0x0C,  /* 100001 */
-     0x0C,  /* 100001 */
-     0x1E}, /* 100001 */
-    {0x1E,  /* 011110   number 2  */
-     0x33,  /* 110011 */
-     0x03,  /* 000011 */
-     0x06,  /* 000110 */
-     0x0C,  /* 001100 */
-     0x18,  /* 011000 */
-     0x30,  /* 110000 */
-     0x3F}  /* 111111 */
-};
+typedef struct RgbColor
+{
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+} RgbColor;
 
-byte num [10][8] = {  // our font for numbers 0-9
-  { 0x1E,  /* 011110   number 0 */
-    0x33,  /* 110011 */
-    0x33,  /* 110011 */
-    0x33,  /* 110011 */
-    0x33,  /* 110011 */
-    0x33,  /* 110011 */
-    0x33,  /* 110011 */
-    0x1E}, /* 011110 */      
-  { 0x0C,  /* 001100   number 1 */
-    0x1C,  /* 011100 */
-    0x0C,  /* 001100 */
-    0x0C,  /* 001100 */
-    0x0C,  /* 001100 */
-    0x0C,  /* 001100 */
-    0x0C,  /* 001100 */
-    0x1E}, /* 011110 */
-  { 0x1E,  /* 011110   number 2  */
-    0x33,  /* 110011 */
-    0x03,  /* 000011 */
-    0x06,  /* 000110 */
-    0x0C,  /* 001100 */
-    0x18,  /* 011000 */
-    0x30,  /* 110000 */
-    0x3F}, /* 111111 */
-  { 0x1E,  /* 011110   number 3  */
-    0x33,  /* 110011 */
-    0x03,  /* 000011 */
-    0x0E,  /* 001110 */
-    0x03,  /* 000011 */
-    0x03,  /* 000011 */
-    0x33,  /* 110011 */
-    0x1E}, /* 011110 */
-  { 0x06,  /* 000110   number 4  */
-    0x0C,  /* 001100 */
-    0x18,  /* 011000 */
-    0x30,  /* 110000 */
-    0x36,  /* 110110 */
-    0x3F,  /* 111111 */
-    0x06,  /* 000110 */
-    0x06}, /* 000110 */
-  { 0x3F,  /* 111111   number 5  */
-    0x30,  /* 110000 */
-    0x30,  /* 110000 */
-    0x3E,  /* 111110 */
-    0x03,  /* 000011 */
-    0x03,  /* 000011 */
-    0x33,  /* 110011 */
-    0x1E}, /* 011110 */
-  { 0x1E,  /* 011110   number 6  */
-    0x33,  /* 110011 */
-    0x30,  /* 110000 */
-    0x30,  /* 110000 */
-    0x3E,  /* 111110 */
-    0x33,  /* 110011 */
-    0x33,  /* 110011 */
-    0x1E}, /* 011110 */
-  { 0x3F,  /* 111111   number 7  */
-    0x03,  /* 000011 */
-    0x03,  /* 000011 */
-    0x06,  /* 000110 */
-    0x0C,  /* 001100 */
-    0x0C,  /* 001100 */
-    0x0C,  /* 001100 */
-    0x0C}, /* 001100 */
-  { 0x1E,  /* 011110   number 8  */
-    0x33,  /* 110011 */
-    0x33,  /* 110011 */
-    0x1E,  /* 011110 */
-    0x33,  /* 110011 */
-    0x33,  /* 110011 */
-    0x33,  /* 110011 */
-    0x1E}, /* 011110 */
-  { 0x1E,  /* 011110   number 9  */
-    0x33,  /* 110011 */
-    0x33,  /* 110011 */
-    0x33,  /* 110011 */
-    0x1F,  /* 011111 */
-    0x03,  /* 000011 */
-    0x33,  /* 110011 */
-    0x1E}  /* 011110 */
-};
+typedef struct HsvColor
+{
+    unsigned char h;
+    unsigned char s;
+    unsigned char v;
+} HsvColor;
+
+static const uint8_t PROGMEM
+   num[][8] =
+    {
+	{   // 0
+	    B011110,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B011110
+			},
+ 	{   // 1
+	    B001100,
+	    B011100,
+	    B001100,
+	    B001100,
+	    B001100,
+	    B001100,
+	    B001100,
+	    B111111
+			},
+    	{   // 2
+	    B011110,
+	    B110011,
+	    B000011,
+	    B000110,
+	    B001100,
+	    B011000,
+	    B110000,
+	    B111111
+			},
+    	{   // 3
+	    B011110,
+	    B110011,
+	    B000011,
+	    B001110,
+	    B000011,
+	    B000011,
+	    B110011,
+	    B011110
+			},
+    	{   // 4
+	    B011110,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B011110
+			},
+    	{   // 5
+	    B011110,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B011110
+			},
+    	{   // 6
+	    B011110,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B011110
+			},
+    	{   // 7
+	    B011110,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B011110
+			},
+    	{   // 8
+	    B011110,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B011110
+			},
+    	{   // 9
+	    B011110,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B110011,
+	    B011110
+			},     
+    };
+
+uint16_t RGB16(uint8_t r, uint8_t g, uint8_t b) {
+ return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xF8) >> 3);
+}
+
+uint16_t hsv2rgb(uint8_t hsvr)
+{
+    RgbColor rgb;
+    unsigned char region, remainder, p, q, t;
+    HsvColor hsv;
+    hsv.h = hsvr;
+    hsv.s = 255;
+    hsv.v = 255;
+    region = hsv.h / 43;
+    remainder = (hsv.h - (region * 43)) * 6; 
+    p = (hsv.v * (255 - hsv.s)) >> 8;
+    q = (hsv.v * (255 - ((hsv.s * remainder) >> 8))) >> 8;
+    t = (hsv.v * (255 - ((hsv.s * (255 - remainder)) >> 8))) >> 8;
+    switch (region)
+    {
+        case 0:
+            rgb.r = hsv.v; rgb.g = t; rgb.b = p;
+            break;
+        case 1:
+            rgb.r = q; rgb.g = hsv.v; rgb.b = p;
+            break;
+        case 2:
+            rgb.r = p; rgb.g = hsv.v; rgb.b = t;
+            break;
+        case 3:
+            rgb.r = p; rgb.g = q; rgb.b = hsv.v;
+            break;
+        case 4:
+            rgb.r = t; rgb.g = p; rgb.b = hsv.v;
+            break;
+        default:
+            rgb.r = hsv.v; rgb.g = p; rgb.b = q;
+            break;
+    }
+    return RGB16(rgb.r, rgb.g, rgb.b);
+}
+
+void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) { 
+    if (position == 0) position = 0;
+    else if (position == 1) position = 7;
+    else if (position == 2) position = 16;
+    else if (position == 3) position = 23;
+    matrix->drawBitmap(position, 0, num[bmp_num], 8, 8, color);    
+}
+
+
 
 char *format( const char *fmt, ... ) {
   static char buf[128];
@@ -221,22 +304,20 @@ time_t gpsunixtime() {
   return t_of_day;
 }
 
-int getLumens() {
+void display_set_brightness() {
   Tsl.begin();
   if( Tsl.available() ) {
     Tsl.on();
     Tsl.setSensitivity(true, Tsl2561::EXP_14);
     delay(16);
-    uint16_t full, ir;
+    uint16_t full;
     Tsl.fullLuminosity(full);
-    Tsl.irLuminosity(ir);
-    //if (DEBUG) Serial.print(format("luminosity is %5u (full) and %5u (ir)\n", full, ir));
+    currbright = map(full, 0, 500, 1, 50);
     Tsl.off();
-    return full;
+    matrix->setBrightness(currbright);
   }
   else {
     Serial.print(format("No Tsl2561 found. Check wiring: SCL=%u, SDA=%u\n", TSL2561_SCL, TSL2561_SDA));
-    return 0;
   }
 }
 
@@ -291,6 +372,72 @@ void updateTime() {
   }
 }
 
+void setColon(int onOff){  // turn the colon on (1) or off (0)
+  uint16_t clr;
+  if (onOff) {
+    clr = hsv2rgb(currhue);
+  }
+  else if (gpsfix) {
+    clr = BLACK;
+  }
+  else if (WiFi.status() == WL_CONNECTED) {
+    clr = PURPLE;
+  }
+  else {
+    clr = ORANGE;
+  }
+  matrix->drawPixel(16, 5, clr);
+  matrix->drawPixel(16, 2, clr);
+  matrix->show();
+}
+
+void display_setHue() {     // make display color change from green
+  uint8_t myHours = currTime.Hour();
+  uint8_t myMinutes = currTime.Minute();
+  if (myHours * 60 >= 1320)
+    currhue = NIGHTHUE;
+  else if (myHours * 60 < 360)
+    currhue = NIGHTHUE;
+  else currhue = map(myHours * 60 + myMinutes, 360, 1319, DAYHUE, NIGHTHUE);
+}
+
+#define countof(a) (sizeof(a) / sizeof(a[0]))
+
+void printDateTime(const RtcDateTime& dt)
+{
+    char datestring[20];
+
+    snprintf_P(datestring, 
+            countof(datestring),
+            PSTR("%02u/%02u/%04u %02u:%02u:%02u"),
+            dt.Month(),
+            dt.Day(),
+            dt.Year(),
+            dt.Hour(),
+            dt.Minute(),
+            dt.Second() );
+    Serial.print(datestring);
+}
+
+void display_time() {
+  matrix->clear();
+  uint8_t myhours = currTime.Hour();
+    uint8_t myminute = currTime.Minute();
+    uint8_t myhour = myhours%12; 
+    if (myhours==0) myhour=12;
+    if (myhour%10 == 0) {
+      display_setclockDigit(1, 0, hsv2rgb(currhue));
+      display_setclockDigit(2, 1, hsv2rgb(currhue)); 
+    } 
+    else {
+      if (myhour / 10 != 0) display_setclockDigit(myhour / 10, 0, hsv2rgb(currhue)); // set first digit of hour
+      display_setclockDigit(myhour%10,1, hsv2rgb(currhue)); // set second digit of hour
+    }
+    display_setclockDigit(myminute/10,2, hsv2rgb(currhue)); // set first digig of minute
+    display_setclockDigit(myminute%10,3, hsv2rgb(currhue));  // set second digit of minute
+    matrix->show();
+}
+
 void network_loop( void * pvParameters ) {
   esp_task_wdt_add(NULL);
   Serial.println((String)"Network loop running on CPU core: " + xPortGetCoreID());
@@ -321,6 +468,58 @@ void network_loop( void * pvParameters ) {
   }
 }
 
+void display_loop () {
+  esp_task_wdt_reset();
+  display_set_brightness();
+  if (!Rtc.IsDateTimeValid()) 
+  {
+    if (Rtc.LastError() != 0)
+    {
+      Serial.print("RTC communications error: ");
+      Serial.println(Rtc.LastError());
+    }
+    else
+    {
+      Serial.println("RTC lost confidence in the DateTime!");
+    }
+    delay(100);
+  }
+  else if (Rtc.GetIsRunning()) {
+    
+    currTime = Rtc.GetDateTime();
+    display_setHue();
+    display_time();
+    setColon(0);
+    delay(100);  // wait 1 sec
+    setColon(1); // turn colon off
+    uint8_t mysecs= currTime.Second();
+    while (mysecs == currTime.Second())
+    { // now wait until seconds change
+      esp_task_wdt_reset();
+      delay(100);
+      if (!Rtc.IsDateTimeValid())
+      {
+        if (Rtc.LastError() != 0)
+        {
+          Serial.print("RTC communications error: ");
+          Serial.println(Rtc.LastError());
+        }
+        else
+        {
+          Serial.println("RTC lost confidence in the DateTime!");
+        }
+      }
+      else if (Rtc.GetIsRunning()) {
+        currTime = Rtc.GetDateTime();
+      }
+    }
+  }
+}
+
+void loop() {
+  display_loop();
+}
+
 void setup () {
   Serial.begin(115200);
   preferences.begin("credentials", false); 
@@ -338,6 +537,8 @@ void setup () {
   esp_task_wdt_init(WDT_TIMEOUT, true);                //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);                              //add current thread to WDT watch
   Serial.println("SUCCESS.");
+
+
   Serial.println("Initializing the RTC module...");
   Serial.print("RTC Compiled: ");
   Serial.print(__DATE__);
@@ -380,154 +581,15 @@ void setup () {
   }
   Rtc.Enable32kHzPin(false);
   Rtc.SetSquareWavePin(DS3231SquareWavePin_ModeNone);
+  
+  
   Wire.begin(TSL2561_SDA, TSL2561_SCL);
   Serial.println((String) "Display loop running on CPU core: " + xPortGetCoreID());
   xTaskCreatePinnedToCore(network_loop, "NETLoop", 10000, NULL, 1, &NETLoop, 0);
   Serial.println("Initializing the display...");
-  FastLED.addLeds<CHIPSET, HSPI_MOSI, COLOR_ORDER>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
-  FastLED.setBrightness( BRIGHTNESS );
-  FastLED.clear();  //clear the display
-  FastLED.show();
+  FastLED.addLeds<NEOPIXEL,HSPI_MOSI>(  leds, NUMMATRIX  ).setCorrection(TypicalLEDStrip);
+  matrix->begin();
+  matrix->setTextWrap(false);
+  matrix->setBrightness(BRIGHTNESS);
   Serial.println("Display initialization complete.");
-}
-
-void loop () {
-  esp_task_wdt_reset();
-  if (!Rtc.IsDateTimeValid()) 
-  {
-    if (Rtc.LastError() != 0)
-    {
-      Serial.print("RTC communications error: ");
-      Serial.println(Rtc.LastError());
-    }
-    else
-    {
-      Serial.println("RTC lost confidence in the DateTime!");
-    }
-    delay(100);
-  }
-  else if (Rtc.GetIsRunning()) {
-    RtcDateTime currTime = Rtc.GetDateTime();
-    int lum = getLumens();
-    currbright = map(lum, 0, 500, 1, 100);
-    FastLED.setBrightness(currbright);
-    int myhours = currTime.Hour();
-    int myhour = myhours%12; 
-    if (myhours==0) myhour=12;
-    if (myhour / 10 != 0) setNum(myhour / 10, 0); // set first digit of hour
-    setNum(myhour%10,1); // set second digit of hour
-    int myminute = currTime.Minute();
-    setNum(myminute/10,2); // set first digig of minute
-    setNum(myminute%10,3);  // set second digit of minute
-    int mysecs= currTime.Second();
-    myHue(myhours, myminute);
-    refreshDisplay(currhue);
-    setColon(0);
-    delay(100);  // wait 1 sec
-    setColon(1); // turn colon off
-    while (mysecs == currTime.Second())
-    { // now wait until seconds change
-      esp_task_wdt_reset();
-      delay(100);
-      if (!Rtc.IsDateTimeValid())
-      {
-        if (Rtc.LastError() != 0)
-        {
-          Serial.print("RTC communications error: ");
-          Serial.println(Rtc.LastError());
-        }
-        else
-        {
-          Serial.println("RTC lost confidence in the DateTime!");
-        }
-      }
-      else if (Rtc.GetIsRunning()) {
-        currTime = Rtc.GetDateTime();
-      }
-    }
-    memset(myArray, 0, sizeof myArray);  // clear the display buffer 
-  }
-}
-
-// Sets the LED display to match content of display buffer at a specified color (myHue).
-// Takes into account the zig-zap order of the array up and down from right to left
-void refreshDisplay(byte myHue) {
-  //Serial.println((String)"Refeshing Display Hue: " + myHue);
-  int myCount = 0;
-  FastLED.clear();
-  for (int x = 31; x > -1; x -= 2) {
-    for (int y = 7; y > -1; y--) {
-      if (myArray[y][x]) leds[myCount] = CHSV(myHue, 255, 255);
-      myCount++;
-    }
-    for (int y = 0; y < 8; y++) {
-      if (myArray[y][x - 1] == 1) leds[myCount] = CHSV(myHue, 255, 255);
-      myCount++;
-    }
-  }
-  FastLED.show();
-}
-
-
-// put numbers onto the display using our num[][] font in positions 0-3. 
-void setNum(byte number, byte pos) {
-  if (pos==0) pos=2;   // change pos to the real location in the array
-  else if (pos==1) pos=8;
-  else if (pos==2) pos=17;
-  else if (pos==3) pos=24;
-  for (int x = 0; x < 6; x++) {  // now place the digit's 6x8 font in the display buffer
-    for (int y = 0; y < 8; y++) {
-     if (num[number][y] & (0b00100000 >> x)) myArray[y][pos+ x] = 1;
-    }
-  }
-}
-
-void setColon(int onOff){  // turn the colon on (1) or off (0)
-  int shue = currhue;
-  int br;
-  if (onOff) {
-    shue = currhue;
-    br = 255;
-  }
-  else if (gpsfix) {
-    shue = currhue;
-    br = 0;
-  }
-  else if (WiFi.status() == WL_CONNECTED) {
-    shue = 192;
-    br = 255;
-  }
-  else {
-    shue = 32;
-    br = 255;
-  }
-  leds[130] = CHSV(shue, 255, br);
-  leds[133] = CHSV(shue, 255, br);
-  FastLED.show();
-}
-
-void myHue(int myHours, int myMinutes) {     // make display color change from green
-  int dayhue = 64;
-  int nighthue = 160;
-  if (myHours * 60 >= 1320) currhue = nighthue;
-  else if (myHours * 60 < 360) currhue = nighthue;
-  else currhue = map(myHours * 60 + myMinutes, 360, 1319, dayhue, nighthue);
-}
-
-#define countof(a) (sizeof(a) / sizeof(a[0]))
-
-void printDateTime(const RtcDateTime& dt)
-{
-    char datestring[20];
-
-    snprintf_P(datestring, 
-            countof(datestring),
-            PSTR("%02u/%02u/%04u %02u:%02u:%02u"),
-            dt.Month(),
-            dt.Day(),
-            dt.Year(),
-            dt.Hour(),
-            dt.Minute(),
-            dt.Second() );
-    Serial.println(datestring);
 }

@@ -32,7 +32,7 @@
 #define NIGHTHUE 184
 
 #define T3S 1*30*1000L  // 30 seconds
-#define T5M 5*60*1000L  // 2 minutes
+#define T5M 1*60*1000L  // 2 minutes
 #define T1H 60*60*1000L  // 60 minutes
 
 #define mw 32
@@ -61,7 +61,7 @@ uint8_t currhue;
 uint8_t currbright;
 uint32_t l1_time = 0L ;
 uint32_t l2_time = 0L ;
-
+bool displaying_alert = false;
 
 uint16_t RGB16(uint8_t r, uint8_t g, uint8_t b);
 
@@ -146,50 +146,50 @@ static const uint8_t PROGMEM
 	    B011110
 			},
     	{   // 4
-	    B011110,
-	    B110011,
-	    B110011,
-	    B110011,
-	    B110011,
-	    B110011,
-	    B110011,
-	    B011110
+	    B000110,
+	    B001100,
+	    B011000,
+	    B110000,
+	    B110110,
+	    B111111,
+	    B000110,
+	    B000110
 			},
     	{   // 5
-	    B011110,
-	    B110011,
-	    B110011,
-	    B110011,
-	    B110011,
-	    B110011,
+	    B111111,
+	    B110000,
+	    B110000,
+	    B111110,
+	    B000011,
+	    B000011,
 	    B110011,
 	    B011110
 			},
     	{   // 6
 	    B011110,
 	    B110011,
-	    B110011,
-	    B110011,
-	    B110011,
+	    B110000,
+	    B110000,
+	    B111110,
 	    B110011,
 	    B110011,
 	    B011110
 			},
     	{   // 7
-	    B011110,
-	    B110011,
-	    B110011,
-	    B110011,
-	    B110011,
-	    B110011,
-	    B110011,
-	    B011110
+	    B111111,
+	    B000011,
+	    B000011,
+	    B000110,
+	    B001100,
+	    B001100,
+	    B001100,
+	    B001100
 			},
     	{   // 8
 	    B011110,
 	    B110011,
 	    B110011,
-	    B110011,
+	    B011110,
 	    B110011,
 	    B110011,
 	    B110011,
@@ -200,8 +200,8 @@ static const uint8_t PROGMEM
 	    B110011,
 	    B110011,
 	    B110011,
-	    B110011,
-	    B110011,
+	    B011111,
+	    B000011,
 	    B110011,
 	    B011110
 			},     
@@ -391,6 +391,40 @@ void setColon(int onOff){  // turn the colon on (1) or off (0)
   matrix->show();
 }
 
+void display_alertFlash(uint16_t clr) {
+  for (uint8_t i=0; i<3; i++) {
+    Serial.println(clr);
+    delay(250);
+    matrix->clear();
+    matrix->fillScreen(clr);
+    matrix->show();
+    delay(250);
+    matrix->clear();
+    matrix->show();
+  }
+}
+
+void display_scrollText(String message, uint8_t spd, uint16_t clr) {
+    uint8_t speed = map(spd, 1, 10, 200, 10);
+    uint16_t size = message.length()*6;
+    matrix->clear();
+    matrix->setTextWrap(false);  // we don't wrap text so it scrolls nicely
+    matrix->setTextSize(1);
+    matrix->setRotation(0);
+    Serial.println(size * 5);
+    for (int16_t x=mw; x>=size - size - size; x--) {
+	    yield();
+      esp_task_wdt_reset();
+	    matrix->clear();
+	    matrix->setCursor(x,1);
+	    matrix->setTextColor(clr);
+	    matrix->print(message);      
+	    matrix->show();
+      delay(speed);
+    }
+    displaying_alert = false;
+}
+
 void display_setHue() {     // make display color change from green
   uint8_t myHours = currTime.Hour();
   uint8_t myMinutes = currTime.Minute();
@@ -421,20 +455,20 @@ void printDateTime(const RtcDateTime& dt)
 
 void display_time() {
   matrix->clear();
-  int myhours = currTime.Hour();
-  int myminute = currTime.Minute();
-  int myhour = myhours%12; 
+  uint8_t myhours = currTime.Hour();
+  uint8_t myminute = currTime.Minute();
+  uint8_t myhour = myhours % 12;
   if (myhour%10 == 0) {
-      display_setclockDigit(1, 0, hsv2rgb(currhue));
-      display_setclockDigit(2, 1, hsv2rgb(currhue)); 
-    } 
-    else {
-      if (myhour / 10 != 0) display_setclockDigit(myhour / 10, 0, hsv2rgb(currhue)); // set first digit of hour
-      display_setclockDigit(myhour%10,1, hsv2rgb(currhue)); // set second digit of hour
-    }
-    display_setclockDigit(myminute/10,2, hsv2rgb(currhue)); // set first digig of minute
-    display_setclockDigit(myminute%10,3, hsv2rgb(currhue));  // set second digit of minute
-    matrix->show();
+    display_setclockDigit(1, 0, hsv2rgb(currhue));
+    display_setclockDigit(2, 1, hsv2rgb(currhue)); 
+  } 
+  else {
+    if (myhour / 10 != 0) display_setclockDigit(myhour / 10, 0, hsv2rgb(currhue)); // set first digit of hour
+    display_setclockDigit(myhour%10, 1, hsv2rgb(currhue)); // set second digit of hour
+  }
+  display_setclockDigit(myminute/10, 2, hsv2rgb(currhue)); // set first digig of minute
+  display_setclockDigit(myminute%10, 3, hsv2rgb(currhue));  // set second digit of minute
+  matrix->show();
 }
 
 void network_loop( void * pvParameters ) {
@@ -457,6 +491,7 @@ void network_loop( void * pvParameters ) {
     if (millis() - l1_time > T5M) {
       l1_time = millis();
       updateTime();
+      displaying_alert = true;
     }
     if (millis() - l2_time > T3S) {
       
@@ -486,22 +521,23 @@ void display_loop () {
   else if (Rtc.GetIsRunning()) {
     currTime = Rtc.GetDateTime();
     display_setHue();
-    display_time();
-    setColon(0);
-    delay(100);  // wait 1 sec
-    setColon(1); // turn colon off
-    int mysecs= currTime.Second();
-    while (mysecs == currTime.Second())
-    { // now wait until seconds change
-      esp_task_wdt_reset();
-      delay(100);
-      if (!Rtc.IsDateTimeValid())
-      {
-        if (Rtc.LastError() != 0)
+    if (!displaying_alert) { 
+      display_time();
+      setColon(0);
+      delay(100);  // wait 1 sec
+      setColon(1); // turn colon off
+      int mysecs= currTime.Second();
+      while (mysecs == currTime.Second())
+      { // now wait until seconds change
+        esp_task_wdt_reset();
+        delay(100);
+        if (!Rtc.IsDateTimeValid())
         {
-          Serial.print("RTC communications error: ");
-          Serial.println(Rtc.LastError());
-        }
+          if (Rtc.LastError() != 0)
+          {
+            Serial.print("RTC communications error: ");
+            Serial.println(Rtc.LastError());
+          }
         else
         {
           Serial.println("RTC lost confidence in the DateTime!");
@@ -510,8 +546,12 @@ void display_loop () {
       else if (Rtc.GetIsRunning()) {
         currTime = Rtc.GetDateTime();
       }
+      }
+    } else {
+      display_alertFlash(RED);
+      display_scrollText("Alert!!", 5, RED);
     }
-  }
+}
 }
 
 void loop() {

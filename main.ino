@@ -421,11 +421,10 @@ void printDateTime(const RtcDateTime& dt)
 
 void display_time() {
   matrix->clear();
-  uint8_t myhours = currTime.Hour();
-    uint8_t myminute = currTime.Minute();
-    uint8_t myhour = myhours%12; 
-    if (myhours==0) myhour=12;
-    if (myhour%10 == 0) {
+  int myhours = currTime.Hour();
+  int myminute = currTime.Minute();
+  int myhour = myhours%12; 
+  if (myhour%10 == 0) {
       display_setclockDigit(1, 0, hsv2rgb(currhue));
       display_setclockDigit(2, 1, hsv2rgb(currhue)); 
     } 
@@ -485,14 +484,13 @@ void display_loop () {
     delay(100);
   }
   else if (Rtc.GetIsRunning()) {
-    
     currTime = Rtc.GetDateTime();
     display_setHue();
     display_time();
     setColon(0);
     delay(100);  // wait 1 sec
     setColon(1); // turn colon off
-    uint8_t mysecs= currTime.Second();
+    int mysecs= currTime.Second();
     while (mysecs == currTime.Second())
     { // now wait until seconds change
       esp_task_wdt_reset();

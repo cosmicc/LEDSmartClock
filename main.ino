@@ -491,7 +491,6 @@ void network_loop( void * pvParameters ) {
     if (millis() - l1_time > T5M) {
       l1_time = millis();
       updateTime();
-      displaying_alert = true;
     }
     if (millis() - l2_time > T3S) {
       

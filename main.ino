@@ -29,7 +29,6 @@
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
 #define BRIGHTNESS  30
-
 #define DAYHUE 40
 #define NIGHTHUE 184
 
@@ -54,7 +53,6 @@ using ace_time::zonedb::kZoneAmerica_New_York;
 static BasicZoneProcessor zoneProcessor;
 static NtpClock ntpClock;
 
-const char* ntpServer = "172.25.150.1";  // NTP server
 String ssid;
 String password;
 uint8_t sats = 0;
@@ -268,16 +266,6 @@ void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) {
     matrix->drawBitmap(position, 0, num[bmp_num], 8, 8, color);    
 }
 
-char *format( const char *fmt, ... ) {
-  static char buf[128];
-  va_list arg;
-  va_start(arg, fmt);
-  vsnprintf(buf, sizeof(buf), fmt, arg);
-  buf[sizeof(buf)-1] = '\0';
-  va_end(arg);
-  return buf;
-}
-
 void network_connect() {
   Serial.print("Connecting to wifi...");
   WiFi.begin(ssid.c_str(), password.c_str());
@@ -323,7 +311,7 @@ void display_set_brightness() {
     matrix->setBrightness(currbright);
   }
   else {
-    Serial.print(format("No Tsl2561 found. Check wiring: SCL=%u, SDA=%u\n", TSL2561_SCL, TSL2561_SDA));
+    Serial.println((String)"No Tsl2561 found. Check wiring: SCL=" + TSL2561_SCL + " SDA=" + TSL2561_SDA);
   }
 }
 
@@ -380,25 +368,6 @@ void setStatus() {
   }
   matrix->drawPixel(0, 7, clr);
   matrix->drawPixel(0, 0, wclr);
-  matrix->show();
-}
-
-void setColon(int onOff){  // turn the colon on (1) or off (0)
-  uint16_t clr;
-  if (onOff) {
-    clr = hsv2rgb(currhue);
-  }
-  else if (gpsfix) {
-    clr = BLACK;
-  }
-  else if (WiFi.status() == WL_CONNECTED) {
-    clr = BLACK;
-  }
-  else {
-    clr = BLACK;
-  }
-  matrix->drawPixel(16, 5, clr);
-  matrix->drawPixel(16, 2, clr);
   matrix->show();
 }
 
@@ -463,8 +432,8 @@ void display_time() {
   }
   display_setclockDigit(myminute/10, 2, hsv2rgb(currhue)); // set first digig of minute
   display_setclockDigit(myminute%10, 3, hsv2rgb(currhue));  // set second digit of minute
-  matrix->drawPixel(16, 5, hsv2rgb(currhue));
-  matrix->drawPixel(16, 2, hsv2rgb(currhue));
+  matrix->drawPixel(16, 5, hsv2rgb(currhue)); // draw colon
+  matrix->drawPixel(16, 2, hsv2rgb(currhue)); // draw colon
   setStatus();
   matrix->show();
 }
@@ -499,15 +468,9 @@ void loop() {
       display_time();
       ace_time::ZonedDateTime ldt = getSystemTime();
       uint32_t mysecs = ldt.second();
-      //colon = false;
-      //l3_time = millis();
       while (mysecs == ldt.second())
       { // now wait until seconds change
         esp_task_wdt_reset();
-        //if (millis() - l3_time > 250 && !colon) {
-        //  setColon(1); // turn colon off
-        //  colon = true;
-        //}
         ldt = getSystemTime();
       }
     } else {

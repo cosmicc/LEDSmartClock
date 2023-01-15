@@ -43,9 +43,17 @@
 #define mw 32
 #define mh 8
 #define NUMMATRIX (mw*mh)
+#define PARAM_LEN 128
 
 const char thingName[] = "LedSmartClock";
 const char wifiInitialApPassword[] = "setmeup";
+
+
+char currTimezone[PARAM_LEN];
+
+
+static char timezoneValues[][PARAM_LEN] = { "kZoneEST5EDT", "kZoneCST6CDT", "kZoneMST", "kZonePST8PDT" };
+static char timezoneNames[][PARAM_LEN] = { "EST", "CST", "MST", "PST" };
 
 using namespace ace_time;
 using ace_time::acetime_t;
@@ -55,7 +63,10 @@ using ace_time::BasicZoneProcessor;
 using ace_time::clock::SystemClockLoop;
 using ace_time::clock::DS3231Clock;
 using ace_time::clock::NtpClock;
-using ace_time::zonedb::kZoneAmerica_New_York;
+using ace_time::zonedb::kZoneEST5EDT;
+using ace_time::zonedb::kZoneCST6CDT;
+using ace_time::zonedb::kZoneMST;
+using ace_time::zonedb::kZonePST8PDT;
 
 static BasicZoneProcessor zoneProcessor;
 static NtpClock ntpClock;
@@ -82,6 +93,7 @@ bool colon=false;
 // Function Declorations
 void wifiConnected();
 void handleRoot();
+bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper);
 uint16_t RGB16(uint8_t r, uint8_t g, uint8_t b);
 
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
@@ -95,6 +107,7 @@ Tsl2561 Tsl(Wire);
 DNSServer dnsServer;
 WebServer server(80);
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
+
 // Display Colors
 uint16_t BLACK	=	RGB16(0, 0, 0);
 uint16_t RED	  =	RGB16(255, 0, 0);
@@ -433,19 +446,19 @@ void display_time() {
 
 void printSystemTime() {
   acetime_t now = systemClock.getNow();
-  auto EasternTz = TimeZone::forZoneInfo(&kZoneAmerica_New_York, &zoneProcessor);
-  auto ESTime = ZonedDateTime::forEpochSeconds(now, EasternTz);
-  ESTime.printTo(SERIAL_PORT_MONITOR);
+  auto Tz = TimeZone::forZoneInfo(&kZoneEST5EDT, &zoneProcessor);
+  auto TimeWZ = ZonedDateTime::forEpochSeconds(now, Tz);
+  TimeWZ.printTo(SERIAL_PORT_MONITOR);
   SERIAL_PORT_MONITOR.println();
 }
 
 ace_time::ZonedDateTime getSystemTime() {
   acetime_t now = systemClock.getNow();
-  auto EasternTz = TimeZone::forZoneInfo(&kZoneAmerica_New_York, &zoneProcessor);
-  auto ESTime = ZonedDateTime::forEpochSeconds(now, EasternTz);
+  auto Tz = TimeZone::forZoneInfo(&kZoneEST5EDT, &zoneProcessor);
+  auto TimeWZ = ZonedDateTime::forEpochSeconds(now, Tz);
   //ESTime.printTo(SERIAL_PORT_MONITOR);
   //SERIAL_PORT_MONITOR.println();
-  return ESTime;
+  return TimeWZ;
 }
 
 void wifiConnected() {

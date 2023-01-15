@@ -2,15 +2,13 @@
 #define FASTLED_ALL_PINS_HARDWARE_SPI
 #define FASTLED_ESP32_SPI_BUS HSPI
 
-#include <NTPClient.h>
-#include <WiFi.h>
-#include <WiFiUdp.h>
+#include <IotWebConf.h>
+#include <IotWebConfUsing.h> 
 #include <AceWire.h> // TwoWireInterface
 #include <Wire.h> // TwoWire, Wire
 #include <AceTime.h>
 #include <AceTimeClock.h>
 #include <esp_task_wdt.h>
-#include <Preferences.h>
 #include <TinyGPSPlus.h>
 #include <SPI.h>
 #include <Tsl2561.h>
@@ -31,6 +29,12 @@
 #define BRIGHTNESS  30
 #define DAYHUE 40
 #define NIGHTHUE 184
+#define CONFIG_PIN 2
+
+// -- Status indicator pin.
+//      First it will light up (kept LOW), on Wifi connection it will blink,
+//      when connected to the Wifi it will turn off (kept HIGH).
+#define STATUS_PIN 15
 
 #define T1S 250L  // 30 seconds
 #define T5S 1*5*1000L  // 2 minutes
@@ -39,6 +43,9 @@
 #define mw 32
 #define mh 8
 #define NUMMATRIX (mw*mh)
+
+const char thingName[] = "LedSmartClock";
+const char wifiInitialApPassword[] = "setmeup";
 
 using namespace ace_time;
 using ace_time::acetime_t;
@@ -66,24 +73,28 @@ uint8_t currbright;
 uint32_t l1_time = 0L ;
 uint32_t l2_time = 0L ;
 uint32_t l3_time = 0L ;
+bool wifi_connected = false;
 bool displaying_alert = false;
 bool weather_watch = false;
 bool weather_warning = false;
 bool colon=false;
 
+// Function Declorations
+void wifiConnected();
+void handleRoot();
 uint16_t RGB16(uint8_t r, uint8_t g, uint8_t b);
 
-Preferences preferences;
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 WireInterface wireInterface(Wire);
 DS3231Clock<WireInterface> dsClock(wireInterface);
 SystemClockLoop systemClock(&ntpClock /*reference*/, &dsClock /*backup*/);
-WiFiUDP ntpUDP;  // instance of UDP
 CRGB leds[NUMMATRIX];
 FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(leds, mw, mh, NEO_MATRIX_BOTTOM+NEO_MATRIX_RIGHT+NEO_MATRIX_COLUMNS+NEO_MATRIX_ZIGZAG);
 TinyGPSPlus GPS;
 Tsl2561 Tsl(Wire);
-
+DNSServer dnsServer;
+WebServer server(80);
+IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
 // Display Colors
 uint16_t BLACK	=	RGB16(0, 0, 0);
 uint16_t RED	  =	RGB16(255, 0, 0);
@@ -266,24 +277,6 @@ void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) {
     matrix->drawBitmap(position, 0, num[bmp_num], 8, 8, color);    
 }
 
-void network_connect() {
-  Serial.print("Connecting to wifi...");
-  WiFi.begin(ssid.c_str(), password.c_str());
-  int pass = 0;
-  while (WiFi.status() != WL_CONNECTED && pass < 60)
-  {
-    esp_task_wdt_reset();
-    delay(500);
-    Serial.print(".");
-    pass++;
-  }
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    Serial.print("CONNECTED IP: ");
-    Serial.println(WiFi.localIP());  
-  }
-}
-
 time_t gpsunixtime() {
   struct tm t;
   t.tm_year = GPS.date.year() - 1900;
@@ -351,7 +344,7 @@ void setStatus() {
   if (gpsfix) {
     clr = BLACK;
   }
-  else if (WiFi.status() == WL_CONNECTED) {
+  else if (wifi_connected) {
     clr = BLACK;
   }
   else {
@@ -422,7 +415,7 @@ void display_time() {
   uint8_t myhours = ldt.hour();
   uint8_t myminute = ldt.minute();
   uint8_t myhour = myhours % 12;
-  if (myhour%10 == 0) {
+  if (myhour/10 == 0 && myhour%10 == 0) {
     display_setclockDigit(1, 0, hsv2rgb(currhue));
     display_setclockDigit(2, 1, hsv2rgb(currhue)); 
   } 
@@ -455,8 +448,15 @@ ace_time::ZonedDateTime getSystemTime() {
   return ESTime;
 }
 
+void wifiConnected() {
+  Serial.println("WiFi was connected.");
+  wifi_connected = true;
+  ntpClock.setup();
+}
+
 void loop() {
     systemClock.loop();
+    iotWebConf.doLoop();
     esp_task_wdt_reset();
     if (millis() - l1_time > T1S) {
       l1_time = millis();
@@ -477,10 +477,6 @@ void loop() {
       display_alertFlash(RED);
       display_scrollText("Alert!!", 5, RED);
     }
-    if (WiFi.status() != WL_CONNECTED)
-    {
-      network_connect();
-    }
     if (millis() - l2_time > T5S) {
       Serial.println((String) "GPS Chars: " + GPS.charsProcessed() + "|With-Fix: " + GPS.sentencesWithFix() + "|Failed-checksum: " + GPS.failedChecksum() + "|Passed-checksum: " + GPS.passedChecksum() + "F|LightLevel: " + currbright + "|GPSFix: " + gpsfix + "|Sats:" + sats + "|Lat: " + lat + "|Lon: " + lon);
       l2_time = millis();
@@ -489,27 +485,25 @@ void loop() {
 
 void setup () {
   Serial.begin(115200);
-  preferences.begin("credentials", false); 
-  ssid = preferences.getString("ssid", "");
-  password = preferences.getString("password", "");
-  if (ssid == "" || password == ""){
-    Serial.println("No values saved for ssid or password, needs setup, halting");
-    disableCore0WDT();
-    disableCore1WDT();
-  } else {
-    Serial.println("Wifi credentials retrieved successfully");
-  }
   Serial.print("Initializing Hardware Watchdog...");
   esp_task_wdt_init(WDT_TIMEOUT, true);                //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);                              //add current thread to WDT watch
   Serial.println("SUCCESS.");
-  network_connect();
+  Serial.println("Initializing IotWebConf...");
+  iotWebConf.setWifiConnectionCallback(&wifiConnected);
+  iotWebConf.setStatusPin(STATUS_PIN);
+  //iotWebConf.setConfigPin(CONFIG_PIN);
+  iotWebConf.init();
+  server.on("/", handleRoot);
+  server.on("/config", []{ iotWebConf.handleConfig(); });
+  server.onNotFound([](){ iotWebConf.handleNotFound(); });
+  Serial.println("IotWebConf is READY.");
   Serial.print("Initializing the RTC module...");
   Wire.begin();
   wireInterface.begin();
   systemClock.setup();
   dsClock.setup();
-  ntpClock.setup();
+  
   if (!ntpClock.isSetup()) {
     Serial.println(F("FAILED!"));
   } else {
@@ -517,8 +511,6 @@ void setup () {
   }
   Serial.print("System Clock: ");
   printSystemTime();
-  // xTaskCreatePinnedToCore(display_loop, "DISPLAYLoop", 10000, NULL, 1, &DISPLAYLoop, 0);
-  // Serial.println((String) "Display loop running on CPU core: " + xPortGetCoreID());
   Serial.println("Initializing the display...");
   FastLED.addLeds<NEOPIXEL,HSPI_MOSI>(  leds, NUMMATRIX  ).setCorrection(TypicalLEDStrip);
   matrix->begin();
@@ -526,9 +518,24 @@ void setup () {
   matrix->setBrightness(BRIGHTNESS);
   Serial.println("Display initalization complete.");
   Wire.begin(TSL2561_SDA, TSL2561_SCL);
-  //Serial.println((String)"Logic loop running on CPU core: " + xPortGetCoreID());
   Serial.print("Initializing GPS Module...");
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
   Serial.println("SUCCESS.");
   l2_time = millis();
+}
+
+void handleRoot()
+{
+  // -- Let IotWebConf test and handle captive portal requests.
+  if (iotWebConf.handleCaptivePortal())
+  {
+    // -- Captive portal request were already served.
+    return;
+  }
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  s += "<title>IotWebConf 01 Minimal</title></head><body>";
+  s += "Go to <a href='config'>configure page</a> to change settings.";
+  s += "</body></html>\n";
+
+  server.send(200, "text/html", s);
 }

@@ -5,8 +5,10 @@
 #include <NTPClient.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include <RtcDS3231.h>
+#include <AceWire.h> // TwoWireInterface
 #include <Wire.h> // TwoWire, Wire
+#include <AceTime.h>
+#include <AceTimeClock.h>
 #include <esp_task_wdt.h>
 #include <Preferences.h>
 #include <TinyGPSPlus.h>
@@ -27,25 +29,29 @@
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
 #define BRIGHTNESS  30
-
 #define DAYHUE 40
 #define NIGHTHUE 184
 
-#define T3S 1*30*1000L  // 30 seconds
-#define T5M 1*60*1000L  // 2 minutes
+#define T1S 250L  // 30 seconds
+#define T5S 1*5*1000L  // 2 minutes
 #define T1H 60*60*1000L  // 60 minutes
 
 #define mw 32
 #define mh 8
 #define NUMMATRIX (mw*mh)
-CRGB leds[NUMMATRIX];
-FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(leds, mw, mh, 
-  NEO_MATRIX_BOTTOM     + NEO_MATRIX_RIGHT +
-    NEO_MATRIX_COLUMNS + NEO_MATRIX_ZIGZAG);
 
-const int8_t   GMToffset = -5;  // - 7 = US-MST;  set for your time zone)
-const uint8_t   tformat = 12; // time format can be 12 or 24 hour
-const char* ntpServer = "172.25.150.1";  // NTP server
+using namespace ace_time;
+using ace_time::acetime_t;
+using ace_time::ZonedDateTime;
+using ace_time::TimeZone;
+using ace_time::BasicZoneProcessor;
+using ace_time::clock::SystemClockLoop;
+using ace_time::clock::DS3231Clock;
+using ace_time::clock::NtpClock;
+using ace_time::zonedb::kZoneAmerica_New_York;
+
+static BasicZoneProcessor zoneProcessor;
+static NtpClock ntpClock;
 
 String ssid;
 String password;
@@ -54,27 +60,31 @@ bool gpsfix = false;
 uint8_t status = 0; // 0(red)=No Sync, 1(Yellow)=Wireless Connected, 2=(Blue)NTP Sync, 3(Blue/Green)=GPS Sync <= 3sats, 4=(Green/Blue)GPS Sync <= 7 sats. 5(Green)=GPS Sync > 7 sats
 double lat;
 double lon;
-RtcDateTime currTime;
-RtcTemperature rtctemp;
 bool gpssync = false;
 uint8_t currhue;
 uint8_t currbright;
 uint32_t l1_time = 0L ;
 uint32_t l2_time = 0L ;
+uint32_t l3_time = 0L ;
 bool displaying_alert = false;
+bool weather_watch = false;
+bool weather_warning = false;
+bool colon=false;
 
 uint16_t RGB16(uint8_t r, uint8_t g, uint8_t b);
 
-TaskHandle_t NETLoop; 
-
 Preferences preferences;
-RtcDS3231<TwoWire> Rtc(Wire); // instance of RTC
+using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
+WireInterface wireInterface(Wire);
+DS3231Clock<WireInterface> dsClock(wireInterface);
+SystemClockLoop systemClock(&ntpClock /*reference*/, &dsClock /*backup*/);
 WiFiUDP ntpUDP;  // instance of UDP
+CRGB leds[NUMMATRIX];
+FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(leds, mw, mh, NEO_MATRIX_BOTTOM+NEO_MATRIX_RIGHT+NEO_MATRIX_COLUMNS+NEO_MATRIX_ZIGZAG);
 TinyGPSPlus GPS;
 Tsl2561 Tsl(Wire);
-NTPClient timeClient(ntpUDP, ntpServer, GMToffset*3600);
-bool colon=false;
 
+// Display Colors
 uint16_t BLACK	=	RGB16(0, 0, 0);
 uint16_t RED	  =	RGB16(255, 0, 0);
 uint16_t GREEN	=	RGB16(0, 255, 0);
@@ -256,18 +266,6 @@ void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) {
     matrix->drawBitmap(position, 0, num[bmp_num], 8, 8, color);    
 }
 
-
-
-char *format( const char *fmt, ... ) {
-  static char buf[128];
-  va_list arg;
-  va_start(arg, fmt);
-  vsnprintf(buf, sizeof(buf), fmt, arg);
-  buf[sizeof(buf)-1] = '\0';
-  va_end(arg);
-  return buf;
-}
-
 void network_connect() {
   Serial.print("Connecting to wifi...");
   WiFi.begin(ssid.c_str(), password.c_str());
@@ -283,10 +281,6 @@ void network_connect() {
   {
     Serial.print("CONNECTED IP: ");
     Serial.println(WiFi.localIP());  
-    Serial.println("Starting NTP time client...");
-    timeClient.begin();  // Start NTP Time Client
-    delay(2000);
-    updateTime();
   }
 }
 
@@ -317,7 +311,7 @@ void display_set_brightness() {
     matrix->setBrightness(currbright);
   }
   else {
-    Serial.print(format("No Tsl2561 found. Check wiring: SCL=%u, SDA=%u\n", TSL2561_SCL, TSL2561_SDA));
+    Serial.println((String)"No Tsl2561 found. Check wiring: SCL=" + TSL2561_SCL + " SDA=" + TSL2561_SDA);
   }
 }
 
@@ -326,13 +320,12 @@ void gps_check() {
   if (GPS.time.isUpdated()) {
       //Serial.println("GPS Time updated");
       time_t GPStime = gpsunixtime();
-      int diff = Rtc.GetDateTime() - GPStime;
-      if (GPS.time.age() == 0) {
-        if (diff < -1 && diff > 1) {
-          Serial.println((String) "Time Diff (RTC-GPS): " + diff);
-          Rtc.SetDateTime(GPStime); // Set RTC to GPS time
-        }
-      }
+      //nt diff = Rtc.GetDateTime() - GPStime;
+      //if (GPS.time.age() == 0) {
+      //  if (diff < -1 && diff > 1) {
+      //    Serial.println((String) "Time Diff (RTC-GPS): " + diff);
+      //    Rtc.SetDateTime(GPStime); // Set RTC to GPS time
+      //  }
   }
   if (GPS.satellites.isUpdated()) {
     sats = GPS.satellites.value();
@@ -352,42 +345,29 @@ void gps_check() {
   if (GPS.charsProcessed() < 10) Serial.println("WARNING: No GPS data.  Check wiring.");
 }
 
-void updateTime() {
-  Serial.println("Fetching NTP time...");
-  timeClient.update();
-  // NTP/Epoch time starts in 1970.  RTC library starts in 2000.
-  // So subtract the 30 extra yrs (946684800UL).
-  unsigned long NTPtime = timeClient.getEpochTime() - 946684800UL;
-  int diff = Rtc.GetDateTime() - NTPtime;
-  if (!gpsfix) {
-    if (diff < 0 || diff > 0) {
-      Serial.println((String) "Time Diff (RTC-NTP): " + diff);
-      Serial.println("Updating NTP time to RTC...");
-      Rtc.SetDateTime(NTPtime); // Set RTC to NTP time
-    } else {
-      Serial.println("NTP time matches RTC time, skipping NTP time update");
-    }
-  } else {
-    Serial.println("GPS time synced, skipping NTP time update");
-  }
-}
-
-void setColon(int onOff){  // turn the colon on (1) or off (0)
+void setStatus() {
   uint16_t clr;
-  if (onOff) {
-    clr = hsv2rgb(currhue);
-  }
-  else if (gpsfix) {
+  uint16_t wclr;
+  if (gpsfix) {
     clr = BLACK;
   }
   else if (WiFi.status() == WL_CONNECTED) {
-    clr = PURPLE;
+    clr = BLACK;
   }
   else {
-    clr = ORANGE;
+    clr = YELLOW;
   }
-  matrix->drawPixel(16, 5, clr);
-  matrix->drawPixel(16, 2, clr);
+  if (weather_warning) {
+    wclr = RED;
+  }
+  else if (weather_watch) {
+    wclr = YELLOW;
+  }
+  else {
+    wclr = BLACK;
+  }
+  matrix->drawPixel(0, 7, clr);
+  matrix->drawPixel(0, 0, wclr);
   matrix->show();
 }
 
@@ -425,38 +405,22 @@ void display_scrollText(String message, uint8_t spd, uint16_t clr) {
     displaying_alert = false;
 }
 
-void display_setHue() {     // make display color change from green
-  uint8_t myHours = currTime.Hour();
-  uint8_t myMinutes = currTime.Minute();
-  if (myHours * 60 >= 1320)
-    currhue = NIGHTHUE;
-  else if (myHours * 60 < 360)
-    currhue = NIGHTHUE;
-  else currhue = map(myHours * 60 + myMinutes, 360, 1319, DAYHUE, NIGHTHUE);
-}
-
-#define countof(a) (sizeof(a) / sizeof(a[0]))
-
-void printDateTime(const RtcDateTime& dt)
-{
-    char datestring[20];
-
-    snprintf_P(datestring, 
-            countof(datestring),
-            PSTR("%02u/%02u/%04u %02u:%02u:%02u"),
-            dt.Month(),
-            dt.Day(),
-            dt.Year(),
-            dt.Hour(),
-            dt.Minute(),
-            dt.Second() );
-    Serial.print(datestring);
+void display_setHue() { 
+  ace_time::ZonedDateTime ldt = getSystemTime();
+  uint8_t myHours = ldt.hour();
+  uint8_t myMinutes = ldt.minute();
+    if (myHours * 60 >= 1320)
+      currhue = NIGHTHUE;
+    else if (myHours * 60 < 360)
+      currhue = NIGHTHUE;
+    else currhue = map(myHours * 60 + myMinutes, 360, 1319, DAYHUE, NIGHTHUE);
 }
 
 void display_time() {
+  ace_time::ZonedDateTime ldt = getSystemTime();
   matrix->clear();
-  uint8_t myhours = currTime.Hour();
-  uint8_t myminute = currTime.Minute();
+  uint8_t myhours = ldt.hour();
+  uint8_t myminute = ldt.minute();
   uint8_t myhour = myhours % 12;
   if (myhour%10 == 0) {
     display_setclockDigit(1, 0, hsv2rgb(currhue));
@@ -468,100 +432,65 @@ void display_time() {
   }
   display_setclockDigit(myminute/10, 2, hsv2rgb(currhue)); // set first digig of minute
   display_setclockDigit(myminute%10, 3, hsv2rgb(currhue));  // set second digit of minute
+  matrix->drawPixel(16, 5, hsv2rgb(currhue)); // draw colon
+  matrix->drawPixel(16, 2, hsv2rgb(currhue)); // draw colon
+  setStatus();
   matrix->show();
 }
 
-void network_loop( void * pvParameters ) {
-  esp_task_wdt_add(NULL);
-  Serial.println((String)"Network loop running on CPU core: " + xPortGetCoreID());
-  Serial.print("Initializing GPS Module...");
-  Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
-  Serial.println("SUCCESS.");
-  delay(2000);
-  l1_time = millis();
-  if (DEBUG) l2_time = millis();
-  while (true)
-  {
-    esp_task_wdt_reset();
-    gps_check();
-    if (WiFi.status() != WL_CONNECTED)
-    {
-      network_connect();
-    }
-    if (millis() - l1_time > T5M) {
-      l1_time = millis();
-      updateTime();
-    }
-    if (millis() - l2_time > T3S) {
-      
-      Serial.println((String) "GPS Chars: " + GPS.charsProcessed() + "|With-Fix: " + GPS.sentencesWithFix() + "|Failed-checksum: " + GPS.failedChecksum() + "|Passed-checksum: " + GPS.passedChecksum() + "|RTC-Temp: " + rtctemp.AsFloatDegF() + "F|LightLevel: " + currbright + "|GPSFix: " + gpsfix + "|Sats:" + sats + "|Lat: " + lat + "|Lon: " + lon);
-    l2_time = millis();
-    }
-    delay(10);
-  }
+void printSystemTime() {
+  acetime_t now = systemClock.getNow();
+  auto EasternTz = TimeZone::forZoneInfo(&kZoneAmerica_New_York, &zoneProcessor);
+  auto ESTime = ZonedDateTime::forEpochSeconds(now, EasternTz);
+  ESTime.printTo(SERIAL_PORT_MONITOR);
+  SERIAL_PORT_MONITOR.println();
 }
 
-void display_loop () {
-  esp_task_wdt_reset();
-  display_set_brightness();
-  if (!Rtc.IsDateTimeValid()) 
-  {
-    if (Rtc.LastError() != 0)
-    {
-      Serial.print("RTC communications error: ");
-      Serial.println(Rtc.LastError());
+ace_time::ZonedDateTime getSystemTime() {
+  acetime_t now = systemClock.getNow();
+  auto EasternTz = TimeZone::forZoneInfo(&kZoneAmerica_New_York, &zoneProcessor);
+  auto ESTime = ZonedDateTime::forEpochSeconds(now, EasternTz);
+  //ESTime.printTo(SERIAL_PORT_MONITOR);
+  //SERIAL_PORT_MONITOR.println();
+  return ESTime;
+}
+
+void loop() {
+    systemClock.loop();
+    esp_task_wdt_reset();
+    if (millis() - l1_time > T1S) {
+      l1_time = millis();
+      gps_check();
+      display_set_brightness();
+      display_setHue();
     }
-    else
-    {
-      Serial.println("RTC lost confidence in the DateTime!");
-    }
-    delay(100);
-  }
-  else if (Rtc.GetIsRunning()) {
-    currTime = Rtc.GetDateTime();
-    display_setHue();
     if (!displaying_alert) { 
       display_time();
-      setColon(0);
-      delay(100);  // wait 1 sec
-      setColon(1); // turn colon off
-      int mysecs= currTime.Second();
-      while (mysecs == currTime.Second())
+      ace_time::ZonedDateTime ldt = getSystemTime();
+      uint32_t mysecs = ldt.second();
+      while (mysecs == ldt.second())
       { // now wait until seconds change
         esp_task_wdt_reset();
-        delay(100);
-        if (!Rtc.IsDateTimeValid())
-        {
-          if (Rtc.LastError() != 0)
-          {
-            Serial.print("RTC communications error: ");
-            Serial.println(Rtc.LastError());
-          }
-        else
-        {
-          Serial.println("RTC lost confidence in the DateTime!");
-        }
-      }
-      else if (Rtc.GetIsRunning()) {
-        currTime = Rtc.GetDateTime();
-      }
+        ldt = getSystemTime();
       }
     } else {
       display_alertFlash(RED);
       display_scrollText("Alert!!", 5, RED);
     }
-}
-}
-
-void loop() {
-  display_loop();
-}
+    if (WiFi.status() != WL_CONNECTED)
+    {
+      network_connect();
+    }
+    if (millis() - l2_time > T5S) {
+      Serial.println((String) "GPS Chars: " + GPS.charsProcessed() + "|With-Fix: " + GPS.sentencesWithFix() + "|Failed-checksum: " + GPS.failedChecksum() + "|Passed-checksum: " + GPS.passedChecksum() + "F|LightLevel: " + currbright + "|GPSFix: " + gpsfix + "|Sats:" + sats + "|Lat: " + lat + "|Lon: " + lon);
+      l2_time = millis();
+    }
+  }
 
 void setup () {
   Serial.begin(115200);
   preferences.begin("credentials", false); 
   ssid = preferences.getString("ssid", "");
-  //ssid = "MS";
   password = preferences.getString("password", "");
   if (ssid == "" || password == ""){
     Serial.println("No values saved for ssid or password, needs setup, halting");
@@ -574,59 +503,32 @@ void setup () {
   esp_task_wdt_init(WDT_TIMEOUT, true);                //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);                              //add current thread to WDT watch
   Serial.println("SUCCESS.");
-
-
-  Serial.println("Initializing the RTC module...");
-  Serial.print("RTC Compiled: ");
-  Serial.print(__DATE__);
-  Serial.println(__TIME__);
-  Rtc.Begin();
-  RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
-  printDateTime(compiled);
-  Serial.println();
-  if (!Rtc.IsDateTimeValid()) 
-  {
-    if (Rtc.LastError() != 0)
-    {
-      Serial.print("RTC communications error: ");
-      Serial.println(Rtc.LastError());
-    }
-    else
-    {
-      Serial.println("RTC lost confidence in the DateTime!");
-      Rtc.SetDateTime(compiled);
-    }
+  network_connect();
+  Serial.print("Initializing the RTC module...");
+  Wire.begin();
+  wireInterface.begin();
+  systemClock.setup();
+  dsClock.setup();
+  ntpClock.setup();
+  if (!ntpClock.isSetup()) {
+    Serial.println(F("FAILED!"));
+  } else {
+    Serial.println("SUCCESS.");
   }
-  if (!Rtc.GetIsRunning())
-  {
-    Serial.println("RTC was not actively running, starting now");
-    Rtc.SetIsRunning(true);
-  }
-  RtcDateTime now = Rtc.GetDateTime();
-  if (now < compiled) 
-  {
-    Serial.println("RTC is older than compile time!  (Updating DateTime)");
-    Rtc.SetDateTime(compiled);
-  }
-  else if (now > compiled) 
-  {
-    Serial.println("RTC is newer than compile time. (this is expected)");
-  }
-  else if (now == compiled) 
-  {
-    Serial.println("RTC is the same as compile time! (not expected but all is fine)");
-  }
-  Rtc.Enable32kHzPin(false);
-  Rtc.SetSquareWavePin(DS3231SquareWavePin_ModeNone);
-  
-  
-  Wire.begin(TSL2561_SDA, TSL2561_SCL);
-  Serial.println((String) "Display loop running on CPU core: " + xPortGetCoreID());
-  xTaskCreatePinnedToCore(network_loop, "NETLoop", 10000, NULL, 1, &NETLoop, 0);
+  Serial.print("System Clock: ");
+  printSystemTime();
+  // xTaskCreatePinnedToCore(display_loop, "DISPLAYLoop", 10000, NULL, 1, &DISPLAYLoop, 0);
+  // Serial.println((String) "Display loop running on CPU core: " + xPortGetCoreID());
   Serial.println("Initializing the display...");
   FastLED.addLeds<NEOPIXEL,HSPI_MOSI>(  leds, NUMMATRIX  ).setCorrection(TypicalLEDStrip);
   matrix->begin();
   matrix->setTextWrap(false);
   matrix->setBrightness(BRIGHTNESS);
-  Serial.println("Display initialization complete.");
+  Serial.println("Display initalization complete.");
+  Wire.begin(TSL2561_SDA, TSL2561_SCL);
+  //Serial.println((String)"Logic loop running on CPU core: " + xPortGetCoreID());
+  Serial.print("Initializing GPS Module...");
+  Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
+  Serial.println("SUCCESS.");
+  l2_time = millis();
 }

@@ -33,8 +33,8 @@
 #define DAYHUE 40
 #define NIGHTHUE 184
 
-#define T3S 1*30*1000L  // 30 seconds
-#define T5M 1*60*1000L  // 2 minutes
+#define T1S 250L  // 30 seconds
+#define T5S 1*5*1000L  // 2 minutes
 #define T1H 60*60*1000L  // 60 minutes
 
 #define mw 32
@@ -46,12 +46,13 @@ using ace_time::acetime_t;
 using ace_time::ZonedDateTime;
 using ace_time::TimeZone;
 using ace_time::BasicZoneProcessor;
-//using ace_time::clock::SystemClockLoop;
+using ace_time::clock::SystemClockLoop;
 using ace_time::clock::DS3231Clock;
-//using ace_time::clock::NtpClock;
+using ace_time::clock::NtpClock;
 using ace_time::zonedb::kZoneAmerica_New_York;
 
 static BasicZoneProcessor zoneProcessor;
+static NtpClock ntpClock;
 
 const char* ntpServer = "172.25.150.1";  // NTP server
 String ssid;
@@ -66,6 +67,7 @@ uint8_t currhue;
 uint8_t currbright;
 uint32_t l1_time = 0L ;
 uint32_t l2_time = 0L ;
+uint32_t l3_time = 0L ;
 bool displaying_alert = false;
 bool weather_watch = false;
 bool weather_warning = false;
@@ -73,14 +75,11 @@ bool colon=false;
 
 uint16_t RGB16(uint8_t r, uint8_t g, uint8_t b);
 
-TaskHandle_t DISPLAYLoop; 
-
 Preferences preferences;
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 WireInterface wireInterface(Wire);
 DS3231Clock<WireInterface> dsClock(wireInterface);
-//NtpClock ntpClock("GH", 352345236);
-//SystemClockLoop systemClock(&dsClock /*reference*/, &dsClock /*backup*/);
+SystemClockLoop systemClock(&ntpClock /*reference*/, &dsClock /*backup*/);
 WiFiUDP ntpUDP;  // instance of UDP
 CRGB leds[NUMMATRIX];
 FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(leds, mw, mh, NEO_MATRIX_BOTTOM+NEO_MATRIX_RIGHT+NEO_MATRIX_COLUMNS+NEO_MATRIX_ZIGZAG);
@@ -365,7 +364,7 @@ void setStatus() {
     clr = BLACK;
   }
   else if (WiFi.status() == WL_CONNECTED) {
-    clr = BLUE;
+    clr = BLACK;
   }
   else {
     clr = YELLOW;
@@ -438,21 +437,21 @@ void display_scrollText(String message, uint8_t spd, uint16_t clr) {
 }
 
 void display_setHue() { 
-  LocalDateTime ldt = LocalDateTime::forEpochSeconds(dsClock.getNow());
+  ace_time::ZonedDateTime ldt = getSystemTime();
   uint8_t myHours = ldt.hour();
   uint8_t myMinutes = ldt.minute();
-  if (myHours * 60 >= 1320)
-    currhue = NIGHTHUE;
-  else if (myHours * 60 < 360)
-    currhue = NIGHTHUE;
-  else currhue = map(myHours * 60 + myMinutes, 360, 1319, DAYHUE, NIGHTHUE);
+    if (myHours * 60 >= 1320)
+      currhue = NIGHTHUE;
+    else if (myHours * 60 < 360)
+      currhue = NIGHTHUE;
+    else currhue = map(myHours * 60 + myMinutes, 360, 1319, DAYHUE, NIGHTHUE);
 }
 
 void display_time() {
-  LocalDateTime ldt = LocalDateTime::forEpochSeconds(dsClock.getNow());
+  ace_time::ZonedDateTime ldt = getSystemTime();
   matrix->clear();
   uint8_t myhours = ldt.hour();
-  uint8_t myminute = ldt.hour();
+  uint8_t myminute = ldt.minute();
   uint8_t myhour = myhours % 12;
   if (myhour%10 == 0) {
     display_setclockDigit(1, 0, hsv2rgb(currhue));
@@ -464,67 +463,66 @@ void display_time() {
   }
   display_setclockDigit(myminute/10, 2, hsv2rgb(currhue)); // set first digig of minute
   display_setclockDigit(myminute%10, 3, hsv2rgb(currhue));  // set second digit of minute
+  matrix->drawPixel(16, 5, hsv2rgb(currhue));
+  matrix->drawPixel(16, 2, hsv2rgb(currhue));
   setStatus();
   matrix->show();
 }
 
 void printSystemTime() {
-  acetime_t now = dsClock.getNow();
+  acetime_t now = systemClock.getNow();
   auto EasternTz = TimeZone::forZoneInfo(&kZoneAmerica_New_York, &zoneProcessor);
   auto ESTime = ZonedDateTime::forEpochSeconds(now, EasternTz);
   ESTime.printTo(SERIAL_PORT_MONITOR);
   SERIAL_PORT_MONITOR.println();
 }
 
-void display_loop( void * pvParameters ) {
-  esp_task_wdt_add(NULL);
-  Serial.println((String) "Display loop running on CPU core: " + xPortGetCoreID());
-  Serial.println("Initializing the display...");
-  FastLED.addLeds<NEOPIXEL,HSPI_MOSI>(  leds, NUMMATRIX  ).setCorrection(TypicalLEDStrip);
-  matrix->begin();
-  matrix->setTextWrap(false);
-  matrix->setBrightness(BRIGHTNESS);
-  Serial.println("Display initalization complete.");
-  while (true){
+ace_time::ZonedDateTime getSystemTime() {
+  acetime_t now = systemClock.getNow();
+  auto EasternTz = TimeZone::forZoneInfo(&kZoneAmerica_New_York, &zoneProcessor);
+  auto ESTime = ZonedDateTime::forEpochSeconds(now, EasternTz);
+  //ESTime.printTo(SERIAL_PORT_MONITOR);
+  //SERIAL_PORT_MONITOR.println();
+  return ESTime;
+}
+
+void loop() {
+    systemClock.loop();
     esp_task_wdt_reset();
-    display_set_brightness();
-    display_setHue();
+    if (millis() - l1_time > T1S) {
+      l1_time = millis();
+      gps_check();
+      display_set_brightness();
+      display_setHue();
+    }
     if (!displaying_alert) { 
       display_time();
-      setColon(0);
-      delay(100);  // wait 1 sec
-      setColon(1); // turn colon off
-      LocalDateTime ldt = LocalDateTime::forEpochSeconds(dsClock.getNow());
+      ace_time::ZonedDateTime ldt = getSystemTime();
       uint32_t mysecs = ldt.second();
-      Serial.print("mysecs: ");
-      Serial.println(mysecs);
+      //colon = false;
+      //l3_time = millis();
       while (mysecs == ldt.second())
       { // now wait until seconds change
         esp_task_wdt_reset();
-        ldt = LocalDateTime::forEpochSeconds(dsClock.getNow());
-        Serial.println(ldt.second());
-        delay(250);
+        //if (millis() - l3_time > 250 && !colon) {
+        //  setColon(1); // turn colon off
+        //  colon = true;
+        //}
+        ldt = getSystemTime();
       }
     } else {
       display_alertFlash(RED);
       display_scrollText("Alert!!", 5, RED);
     }
-  }
-}
-
-void loop() {
-    //systemClock.loop();
-    esp_task_wdt_reset();
-    gps_check();
     if (WiFi.status() != WL_CONNECTED)
     {
       network_connect();
     }
-    if (millis() - l2_time > T3S) {
+    if (millis() - l2_time > T5S) {
       Serial.println((String) "GPS Chars: " + GPS.charsProcessed() + "|With-Fix: " + GPS.sentencesWithFix() + "|Failed-checksum: " + GPS.failedChecksum() + "|Passed-checksum: " + GPS.passedChecksum() + "F|LightLevel: " + currbright + "|GPSFix: " + gpsfix + "|Sats:" + sats + "|Lat: " + lat + "|Lon: " + lon);
       l2_time = millis();
     }
-}
+  }
 
 void setup () {
   Serial.begin(115200);
@@ -542,20 +540,32 @@ void setup () {
   esp_task_wdt_init(WDT_TIMEOUT, true);                //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);                              //add current thread to WDT watch
   Serial.println("SUCCESS.");
+  network_connect();
   Serial.print("Initializing the RTC module...");
   Wire.begin();
   wireInterface.begin();
+  systemClock.setup();
   dsClock.setup();
-  //ntpClock.setup();
-  //systemClock.setup();
-  Serial.println("SUCCESS.");
-  xTaskCreatePinnedToCore(display_loop, "DISPLAYLoop", 10000, NULL, 1, &DISPLAYLoop, 0);
+  ntpClock.setup();
+  if (!ntpClock.isSetup()) {
+    Serial.println(F("FAILED!"));
+  } else {
+    Serial.println("SUCCESS.");
+  }
+  Serial.print("System Clock: ");
+  printSystemTime();
+  // xTaskCreatePinnedToCore(display_loop, "DISPLAYLoop", 10000, NULL, 1, &DISPLAYLoop, 0);
+  // Serial.println((String) "Display loop running on CPU core: " + xPortGetCoreID());
+  Serial.println("Initializing the display...");
+  FastLED.addLeds<NEOPIXEL,HSPI_MOSI>(  leds, NUMMATRIX  ).setCorrection(TypicalLEDStrip);
+  matrix->begin();
+  matrix->setTextWrap(false);
+  matrix->setBrightness(BRIGHTNESS);
+  Serial.println("Display initalization complete.");
   Wire.begin(TSL2561_SDA, TSL2561_SCL);
-  Serial.println((String)"Logic loop running on CPU core: " + xPortGetCoreID());
-  delay(50);
+  //Serial.println((String)"Logic loop running on CPU core: " + xPortGetCoreID());
   Serial.print("Initializing GPS Module...");
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
-  delay(100);
   Serial.println("SUCCESS.");
   l2_time = millis();
 }

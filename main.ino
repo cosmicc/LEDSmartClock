@@ -231,8 +231,8 @@ void gps_check() {
   }
   if (GPS.location.isUpdated()) {
     if (!use_fixed_loc.isChecked()) {
-      gps.lat = GPS.location.lat();
-      gps.lon = GPS.location.lng();
+      gps.lat = (String(GPS.location.lat(),6));
+      gps.lon = (String(GPS.location.lng(),6));
     }
     else {
       gps.lat = fixedLat.value();
@@ -277,15 +277,15 @@ void display_set_brightness() {
     if (brightness_level.value() == 1)
     {
       min = 2;
-      max = 50;
+      max = 52;
     } else if (brightness_level.value() == 2){
-      min = 6;
-      max = 60;     
+      min = 5;
+      max = 55;     
     } else if (brightness_level.value() == 3){
-      min = 11;
-      max = 81;     
+      min = 10;
+      max = 60;     
     } else {
-      min = 6;
+      min = 5;
       max = 60;     
     }
     currbright = map(full, 0, 500, min, max);
@@ -450,7 +450,6 @@ void fillAlertsFromJson(Alerts* alerts) {
     sprintf(alerts->status1, "%s", (const char *)alertsJson["features"][0]["properties"]["status"]);
     sprintf(alerts->severity1, "%s", (const char *)alertsJson["features"][0]["properties"]["severity"]);
     sprintf(alerts->certainty1, "%s", (const char *)alertsJson["features"][0]["properties"]["certainty"]);
-    Serial.println(alerts->certainty1);
     sprintf(alerts->urgency1, "%s", (const char *)alertsJson["features"][0]["properties"]["urgency"]);
     sprintf(alerts->event1, "%s", (const char *)alertsJson["features"][0]["properties"]["event"]);
     sprintf(alerts->description1, "%s", (const char *)alertsJson["features"][0]["properties"]["parameters"]["NWSheadline"][0]);
@@ -484,7 +483,8 @@ void fillAlertsFromJson(Alerts* alerts) {
 }
 
 void getAlerts() {
-  if (wifi_connected) {
+  if (wifi_connected && (gps.lat).length() > 1) {
+    Serial.println((gps.lat).length());
     Serial.println("Checking weather alerts...");
     int64_t retries = 1;
     boolean jsonParsed = false;
@@ -508,7 +508,7 @@ void getAlerts() {
       }
     }
   } else {
-    Serial.println("Weather alert check skipped, no wifi.");
+    Serial.println("Weather alert check skipped, no wifi or loc.");
   }
   alert_time = millis();
 }
@@ -570,7 +570,7 @@ void fillWeatherFromJson(Weather* weather) {
 }
 
 void getWeather() {
-  if (wifi_connected) {
+  if (wifi_connected && (gps.lat).length() > 1) {
     Serial.println("Checking weather forcast...");
     int64_t retries = 1;
     boolean jsonParsed = false;
@@ -588,7 +588,7 @@ void getWeather() {
       Serial.println("Weather forcast check complete.");
     }
   } else {
-    Serial.println("Weather forcast check skipped, no wifi.");
+    Serial.println("Weather forcast check skipped, no wifi or loc");
   }
 }
 
@@ -602,11 +602,11 @@ void buildURLs() {
   }
   else
   {
-    ulat = lat;
-    ulat = lon;
+    ulat = gps.lat;
+    ulon = gps.lon;
   }
   wurl = (String) "http://api.openweathermap.org/data/2.5/onecall?units=metric&exclude=minutely&appid=" + weatherapi.value() + "&lat=" + ulat + "&lon=" + ulon + "&lang=en";
-  aurl = (String) "https://api.weather.gov/alerts?active=true&status=actual&point=" + lat + "%2C" + lon + "&limit=500";
+  aurl = (String) "https://api.weather.gov/alerts?active=true&status=actual&point=" + ulat + "%2C" + ulon + "&limit=500";
 }
 
 void printSystemTime() {
@@ -693,7 +693,7 @@ void loop() {
   }
   if (millis() - l2_time > 10000) { // Every minute
     l2_time = millis();
-    Serial.println((String) "GPSChars:" + GPS.charsProcessed() + "|With-Fix:" + GPS.sentencesWithFix() + "|Failed:" + GPS.failedChecksum() + "|Passed:" + GPS.passedChecksum() + "|Brightness:" + currbright + "|Fix:" + gps.sats + "|Hdop:" + gps.hdop + "|Elev:" + gps.elevation + "|Lat:" + lat + "|Lon:" + lon);
+    Serial.println((String) "GPSChars:" + GPS.charsProcessed() + "|With-Fix:" + GPS.sentencesWithFix() + "|Failed:" + GPS.failedChecksum() + "|Passed:" + GPS.passedChecksum() + "|Brightness:" + currbright + "|Fix:" + gps.sats + "|Hdop:" + gps.hdop + "|Elev:" + gps.elevation + "|Lat:" + gps.lat + "|Lon:" + gps.lon);
     if (((String)alerts.event1).length() > 0) {
       Serial.println((String) "AlertStatus:" + alerts.status1 + "|Severity:" + alerts.severity1 + "|Certainty:" + alerts.certainty1 + "|Urgency:" + alerts.urgency1 + "|Event:" + alerts.event1 + "|Desc:" + alerts.description1);
     }
@@ -748,10 +748,6 @@ void setup () {
   Serial.print("Initializing the RTC module...");
   Wire.begin();
   wireInterface.begin();
-  if (use_fixed_loc.isChecked()) {
-    gps.lat = fixedLat.value();
-    gps.lon = fixedLon.value();
-  }
   systemClock.setup();
   dsClock.setup();
   
@@ -762,6 +758,15 @@ void setup () {
   }
   Serial.print("System Clock: ");
   printSystemTime();
+
+  if (use_fixed_loc.isChecked())
+  {
+    Serial.println((String)"Setting Fixed GPS Location Lat: " + fixedLat.value()+ " Lon: " + fixedLon.value());
+    gps.lat = fixedLat.value();
+    gps.lon = fixedLon.value();
+  }
+
+
   Serial.println("Initializing the display...");
   display_setHue();
   display_set_brightness();
@@ -812,6 +817,7 @@ void handleRoot()
 
 void configSaved()
 {
+  buildURLs();
   Serial.println("Configuration was updated.");
 }
 

@@ -92,6 +92,7 @@
                 "/home/ip/.arduino15/packages/esp32/hardware/esp32/1.0.6/tools/sdk/include/fb_gfx",
                 "/home/ip/.arduino15/packages/esp32/hardware/esp32/1.0.6/cores/esp32",
                 "/home/ip/.arduino15/packages/esp32/hardware/esp32/1.0.6/variants/esp32",
+                "/home/ip/.arduino15/packages/esp32/hardware/esp32/1.0.6/libraries/Preferences/src",
                 "/home/ip/Arduino/arduino-1.8.19/Sketches/libraries/IotWebConf/src",
                 "/home/ip/.arduino15/packages/esp32/hardware/esp32/1.0.6/libraries/WiFi/src",
                 "/home/ip/.arduino15/packages/esp32/hardware/esp32/1.0.6/libraries/WebServer/src",

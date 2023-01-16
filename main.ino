@@ -2,6 +2,7 @@
 #define FASTLED_ALL_PINS_HARDWARE_SPI
 #define FASTLED_ESP32_SPI_BUS HSPI
 
+#include <Preferences.h>
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h>
 #include <IotWebConfTParameter.h>
@@ -82,6 +83,7 @@ TinyGPSPlus GPS;
 Tsl2561 Tsl(Wire);
 DNSServer dnsServer;
 WebServer server(80);
+Preferences preferences;
 JSONVar weatherJson;
 JSONVar alertsJson;
 Weather weather;
@@ -101,7 +103,7 @@ String lon;                             // Latest auto gps Lat
 // Internal globals
 String wurl;
 String aurl;
-uint32_t l1_time, l2_time, l3_time, alert_time = 0L;
+uint32_t l1_time, l2_time, l3_time, alert_time, alert_check_time = 0L;
 uint16_t currbright;
 uint8_t clock_display_offset;
 uint16_t brightness_running_avg;
@@ -204,6 +206,29 @@ time_t gpsunixtime() {
   return t_of_day;
 }
 
+void gps_processLoc(String lat, String lon){
+  if ((gps.lon).length() == 0) {  // if no values were ever stored yet
+    gps.lat = lat;
+    gps.lon = lon;
+    preferences.putString("lat", lat);
+    preferences.putString("lon", lon);
+    Serial.println("First location ever received, saving values");
+  }
+  else {  // handle major loc changes
+    double nlat = lat.toDouble();
+    double nlon = lon.toDouble();
+    double olat = gps.lat.toDouble();
+    double olon = gps.lon.toDouble();
+    if (abs(nlat - olat) > 0.001 || abs(nlon - olon) > 0.001) {
+      preferences.putString("lat", lat);
+      preferences.putString("lon", lon);
+      Serial.println("Major location shift, saving values");
+    }
+    gps.lat = lat;
+    gps.lon = lon;
+  }
+}
+
 void gps_check() {
   while (Serial1.available() > 0) GPS.encode(Serial1.read());
   if (GPS.time.isUpdated()) {
@@ -231,8 +256,7 @@ void gps_check() {
   }
   if (GPS.location.isUpdated()) {
     if (!use_fixed_loc.isChecked()) {
-      gps.lat = (String(GPS.location.lat(),6));
-      gps.lon = (String(GPS.location.lng(),6));
+      gps_processLoc(String(GPS.location.lat(),6), String(GPS.location.lng(),6));
     }
     else {
       gps.lat = fixedLat.value();
@@ -307,10 +331,10 @@ void display_setStatus() {
     clr = BLACK;
   }
   else if (wifi_connected) {
-    clr = BLACK;
+    clr = DARKGREEN;
   }
   else {
-    clr = ORANGE;
+    clr = DARKRED;
   }
   if (alerts.inWarning) {
     wclr = RED;
@@ -354,7 +378,6 @@ void display_scrollText(String message, uint8_t spd, uint16_t clr) {
   Serial.println(message);
   uint8_t speed = map(spd, 1, 10, 200, 20);
   uint16_t size = message.length() * 6;
-  Serial.println(size * 5);
   uint32_t scrollmilli;
   for (int16_t x = mw; x >= size - size - size; x--)
   {
@@ -484,7 +507,6 @@ void fillAlertsFromJson(Alerts* alerts) {
 
 void getAlerts() {
   if (wifi_connected && (gps.lat).length() > 1) {
-    Serial.println((gps.lat).length());
     Serial.println("Checking weather alerts...");
     int64_t retries = 1;
     boolean jsonParsed = false;
@@ -502,10 +524,9 @@ void getAlerts() {
     else
     {
       fillAlertsFromJson(&alerts);
-      if (alerts.active) {
+      if (alerts.active && alert_time > T5M)
         displaying_alert = true;
       Serial.println("Weather alert check complete.");
-      }
     }
   } else {
     Serial.println("Weather alert check skipped, no wifi or loc.");
@@ -545,7 +566,6 @@ void fillWeatherFromJson(Weather* weather) {
   sprintf(weather->windSpeedH1, "%3i", (int) weatherJson["hourly"][1]["wind_speed"]);
   sprintf(weather->windGustH1, "%3i", (int) weatherJson["hourly"][1]["wind_gust"]);
   sprintf(weather->descriptionH1, "%s", (const char*) weatherJson["hourly"][1]["weather"][0]["description"]);
-
   sprintf(weather->iconD, "%s", (const char*) weatherJson["daily"][0]["weather"][0]["icon"]);
   sprintf(weather->tempMinD, "%2i", (int) round((double) weatherJson["daily"][0]["temp"]["min"]));
   sprintf(weather->tempMaxD, "%2i", (int) round((double) weatherJson["daily"][0]["temp"]["max"]));
@@ -553,8 +573,6 @@ void fillWeatherFromJson(Weather* weather) {
   sprintf(weather->windSpeedD, "%3i", (int) weatherJson["daily"][0]["wind_speed"]);
   sprintf(weather->windGustD, "%3i", (int)weatherJson["daily"][0]["wind_gust"]);
   sprintf(weather->descriptionD, "%s", (const char*) weatherJson["daily"][0]["weather"][0]["description"]);
-
-
   sprintf(weather->iconD1, "%s", (const char*) weatherJson["daily"][1]["weather"][0]["icon"]);
   sprintf(weather->tempMinD1, "%2i", (int) round((double) weatherJson["daily"][1]["temp"]["min"]));
   sprintf(weather->tempMaxD1, "%2i", (int) round((double) weatherJson["daily"][1]["temp"]["max"]));
@@ -668,13 +686,21 @@ void loop() {
     ace_time::ZonedDateTime ldt = getSystemTime();
     uint32_t mysecs = ldt.second();
     colon = true;
+    uint32_t flickertime = millis();
+    uint16_t fstop;
+    if (true) // TODO: use user defined value for filcker speed
+        fstop = 20;
+    else
+        fstop = 250;
     while (mysecs == ldt.second())
     { // now wait until seconds change
-      if (colon && colonflicker.isChecked()) {
-        if (clock_display_offset) {
-          matrix->drawPixel(13, 5, hsv2rgb(currhue)); // draw colon
-          matrix->drawPixel(13, 2, hsv2rgb(currhue)); // draw colon
-        } else {
+        if (colon && colonflicker.isChecked() && millis() - flickertime > fstop)
+        {
+          if (clock_display_offset)
+          {
+            matrix->drawPixel(13, 5, hsv2rgb(currhue)); // draw colon
+            matrix->drawPixel(13, 2, hsv2rgb(currhue)); // draw colon
+          } else {
           matrix->drawPixel(16, 5, hsv2rgb(currhue)); // draw colon
           matrix->drawPixel(16, 2, hsv2rgb(currhue)); // draw colon     
         }
@@ -685,7 +711,7 @@ void loop() {
         display_set_brightness();
         runMaintenance();
     }
-  }
+    }
   if (millis() - l1_time > 250) { // 4 times per second
     l1_time = millis();
     gps_check();
@@ -702,12 +728,14 @@ void loop() {
     getWeather();
     l3_time = millis();
   }
-  if (millis() - alert_time > alert_check_interval.value()*60*1000) { 
-    alert_time = millis();
+  if (millis() - alert_check_time > alert_check_interval.value()*60*1000) { // Every Hour
     getAlerts();
+    alert_check_time = millis();
+  }
+  if (millis() - alert_time > T5M) { 
+    alert_time = millis();
     if (alerts.active)
     {
-      Serial.println(alerts.active);
       displaying_alert = true;
     }
   }
@@ -719,6 +747,11 @@ void setup () {
   esp_task_wdt_init(WDT_TIMEOUT, true);                //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);                              //add current thread to WDT watch
   Serial.println("SUCCESS.");
+  Serial.print("Reading stored preferences...");
+  preferences.begin("location", false);
+  gps.lat = preferences.getString("lat", "");
+  gps.lon = preferences.getString("lon", "");
+  Serial.println("COMPLETE");
   Serial.println("Initializing IotWebConf...");
   group1.addItem(&brightness_level);
   group1.addItem(&text_scroll_speed);
@@ -752,7 +785,7 @@ void setup () {
   dsClock.setup();
   
   if (!ntpClock.isSetup()) {
-    Serial.println(F("FAILED!"));
+    Serial.println("FAILED!");
   } else {
     Serial.println("SUCCESS.");
   }
@@ -779,7 +812,7 @@ void setup () {
   Serial.print("Initializing GPS Module...");
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
   Serial.println("SUCCESS.");
-  l1_time, l2_time, l3_time, alert_time = millis();
+  l1_time, l2_time, l3_time, alert_time, alert_check_time = millis();
 }
 
 void handleRoot()

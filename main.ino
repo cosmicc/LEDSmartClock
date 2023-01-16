@@ -6,8 +6,8 @@
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h>
 #include <IotWebConfTParameter.h>
-#include <AceWire.h> // TwoWireInterface
-#include <Wire.h> // TwoWire, Wire
+#include <AceWire.h> 
+#include <Wire.h>
 #include <AceTime.h>
 #include <AceTimeClock.h>
 #include <esp_task_wdt.h>
@@ -23,33 +23,29 @@
 #include "src/colors/colors.h"
 #include "src/bitmaps/bitmaps.h"
 
-// Allow temporaly dithering, does not work with ESP32 right now
-#ifndef ESP32
-#define delay FastLED.delay
-#endif
+// DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock
 
-#define DEBUG_GPS false
-#define DEBUG_LIGHT false
+#define DEBUG_GPS false            // Show gps debug serial messages
+#define DEBUG_LIGHT false          // Show light debug serial messages
 #define WDT_TIMEOUT 20             // Watchdog Timeout
 #define GPS_BAUD 9600              // GPS UART gpsSpeed
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
-#define DAYHUE 40
-#define NIGHTHUE 184
-#define CONFIG_PIN 2
+#define DAYHUE 40                  // 6am daytime hue start
+#define NIGHTHUE 184               // 10pm nighttime hue end
+#define CONFIG_PIN 2               // Pin for the IotWebConf config pushbutton
 
 #define T1S 1*1*1000L  // 1 second
 #define T1M 1*60*1000L  // 1 minute
 #define T5M 5*60*1000L  // 5 minutes
 #define T1H 60*60*1000L  // 1 hour
 
-#define mw 32
-#define mh 8
+#define mw 32                      // Width of led matrix
+#define mh 8                       // Hight of led matrix
 #define NUMMATRIX (mw*mh)
-#define PARAM_LEN 128
 
-const char thingName[] = "LedSmartClock";
-const char wifiInitialApPassword[] = "setmeup";
+const char thingName[] = "LedSmartClock";           // Default SSID used for new setup
+const char wifiInitialApPassword[] = "setmeup";     // Default AP password for new setup
 
 using namespace ace_time;
 using ace_time::acetime_t;
@@ -73,6 +69,7 @@ void handleRoot();
 void configSaved();
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper);
 
+// Global Variables
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 WireInterface wireInterface(Wire);
 DS3231Clock<WireInterface> dsClock(wireInterface);
@@ -90,33 +87,27 @@ Weather weather;
 Alerts alerts;
 GPSData gps;
 
-// User Defined Iotwebconf Variables
-//char currTimezone[PARAM_LEN];
-static char timezoneValues[][PARAM_LEN] = { "kZoneEST5EDT", "kZoneCST6CDT", "kZoneMST", "kZonePST8PDT" };
-static char timezoneNames[][PARAM_LEN] = { "EST", "CST", "MST", "PST" };
+String wurl;                    // Built Openweather API URL
+String aurl;                    // Built AWS API URL
+String gurl;                    // Built IPGeolocation.io API URL
+uint16_t currbright;            // Current calculated brightness level
+bool clock_display_offset;      // Clock display offset for single digit hour
+uint16_t brightness_running_avg;// Running avg to smooth out brightness transitions
+bool wifi_connected;            // Wifi is connected or not
+bool displaying_alert;          // Alert is displaying or ready to display
+bool colon;                     // colon on/off status
+uint8_t currhue;                // Current calculated hue based on time of day
+uint32_t l1_time, l2_time, l3_time, alert_time, alert_check_time = 0L;  // Delay timers
 
-// TODO: save these values to the RTC EEPROM
+// TODO: save these values to the esp32 eeprom parameters
 String timezone;                        // Latest auto detected Timezone
-String lat;                             // Latest auto gps Lon
-String lon;                             // Latest auto gps Lat
-
-// Internal globals
-String wurl;
-String aurl;
-uint32_t l1_time, l2_time, l3_time, alert_time, alert_check_time = 0L;
-uint16_t currbright;
-uint8_t clock_display_offset;
-uint16_t brightness_running_avg;
-bool wifi_connected;
-bool displaying_alert;
-bool colon;
-uint8_t currhue;
 
 // IotWebConf User custom settings
 // Group 1 (Display)
 // uint8_t brightness_level;           // 1 low - 3 high
 // uint8_t text_scroll_speed;          // 1 slow - 10 fast
 // bool colonflicker;                  // flicker the colon ;)
+// bool flickerfast;                   // flicker fast
 // Group 2 (Weather)
 // String weatherapi;                  // OpenWeather API Key
 // uint8_t alert_check_interval;       // Time between alert checks
@@ -127,6 +118,10 @@ uint8_t currhue;
 // bool used_fixed_loc;                // Use fixed GPS coordinates
 // String fixedLat;                    // Fixed GPS Lattitude
 // String fixedLon;                    // Fixed GPS Longitude
+// String ipgeoapi                     // IP Geolocation API
+
+//static char timezoneValues[][PARAM_LEN] = { "kZoneEST5EDT", "kZoneCST6CDT", "kZoneMST", "kZonePST8PDT" };
+//static char timezoneNames[][PARAM_LEN] = { "EST", "CST", "MST", "PST" };
 
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
 iotwebconf::ParameterGroup group1 = iotwebconf::ParameterGroup("Display", "Display Settings");
@@ -151,6 +146,11 @@ iotwebconf::IntTParameter<int8_t> text_scroll_speed =
 iotwebconf::CheckboxTParameter colonflicker =
    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("colonflicker").
    label("Clock Colon Flicker").
+   defaultValue(true).
+   build();
+iotwebconf::CheckboxTParameter flickerfast =
+   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("flickerfast").
+   label("Fast Colon Flicker").
    defaultValue(true).
    build();
 iotwebconf::ParameterGroup group2 = iotwebconf::ParameterGroup("Weather", "Weather Settings");
@@ -191,7 +191,13 @@ iotwebconf::TextTParameter<12> fixedLon =
   label("Fixed Longitude").
   defaultValue("").
   build();
+iotwebconf::TextTParameter<33> ipgeoapi =
+  iotwebconf::Builder<iotwebconf::TextTParameter<33>>("ipgeoapi").
+  label("IPGeolocation.io API Key").
+  defaultValue("").
+  build();
 
+// Functions
 time_t gpsunixtime() {
   struct tm t;
   t.tm_year = GPS.date.year() - 1900;
@@ -234,12 +240,6 @@ void gps_check() {
   if (GPS.time.isUpdated()) {
       time_t GPStime = gpsunixtime();
       if (DEBUG_GPS) Serial.println((String)"GPS Time updated: " + GPStime);
-      //nt diff = Rtc.GetDateTime() - GPStime;
-      //if (GPS.time.age() == 0) {
-      //  if (diff < -1 && diff > 1) {
-      //    Serial.println((String) "Time Diff (RTC-GPS): " + diff);
-      //    Rtc.SetDateTime(GPStime); // Set RTC to GPS time
-      //  }
   }
   if (GPS.satellites.isUpdated()) {
     gps.sats = GPS.satellites.value();
@@ -256,7 +256,10 @@ void gps_check() {
   }
   if (GPS.location.isUpdated()) {
     if (!use_fixed_loc.isChecked()) {
-      gps_processLoc(String(GPS.location.lat(),6), String(GPS.location.lng(),6));
+      double lat = GPS.location.lat();
+      double lon = GPS.location.lng();
+      if (DEBUG_GPS) Serial.println((String)"GPS Location updated: " + lat + "," + lon);
+      gps_processLoc(String(lat, 6), String(lon, 6));
     }
     else {
       gps.lat = fixedLat.value();
@@ -442,7 +445,253 @@ void display_showClock() {
   display_setStatus();
   matrix->show();
 }
-//const_cast<char*>(aurl.c_str())
+
+void printSystemTime() {
+  acetime_t now = systemClock.getNow();
+  auto Tz = TimeZone::forZoneInfo(&kZoneEST5EDT, &zoneProcessor);
+  auto TimeWZ = ZonedDateTime::forEpochSeconds(now, Tz);
+  TimeWZ.printTo(SERIAL_PORT_MONITOR);
+  SERIAL_PORT_MONITOR.println();
+}
+
+ace_time::ZonedDateTime getSystemTime() {
+  acetime_t now = systemClock.getNow();
+  auto Tz = TimeZone::forZoneInfo(&kZoneEST5EDT, &zoneProcessor);
+  auto TimeWZ = ZonedDateTime::forEpochSeconds(now, Tz);
+  //ESTime.printTo(SERIAL_PORT_MONITOR);
+  //SERIAL_PORT_MONITOR.println();
+  return TimeWZ;
+}
+
+void wifiConnected() {
+  Serial.println("WiFi was connected.");
+  wifi_connected = true;
+  ntpClock.setup();
+  //getWeather(const_cast<char*>(wurl.c_str()));
+  getAlerts();
+}
+
+void runMaintenance() {
+  esp_task_wdt_reset();
+  systemClock.loop();
+  iotWebConf.doLoop();
+}
+
+void loop() {
+  runMaintenance();
+  if (displaying_alert) // Scroll the alert
+    {
+      uint16_t acolor;
+      uint8_t laps;
+      if (alerts.inWarning)
+      {
+        acolor = RED;
+        laps = 3;
+      }
+      else if (alerts.inWatch)
+      {
+        acolor = YELLOW;
+        laps = 3;
+      }
+      else 
+      {
+        acolor = BLUE;
+        laps = 1;
+      }
+      display_alertFlash(acolor, laps);
+      display_scrollText(alerts.description1, text_scroll_speed.value(), acolor);
+  } else { // Show the clock
+    display_showClock();
+    ace_time::ZonedDateTime ldt = getSystemTime();
+    uint32_t mysecs = ldt.second();
+    colon = true;
+    uint32_t flickertime = millis();
+    uint16_t fstop;
+    if (flickerfast.isChecked()) 
+        fstop = 20;
+    else
+        fstop = 250;
+    while (mysecs == ldt.second())
+    { // now wait until seconds change
+        if (colon && colonflicker.isChecked() && millis() - flickertime > fstop)
+        {
+          if (clock_display_offset)
+          {
+            matrix->drawPixel(13, 5, hsv2rgb(currhue)); // draw colon
+            matrix->drawPixel(13, 2, hsv2rgb(currhue)); // draw colon
+          } else {
+          matrix->drawPixel(16, 5, hsv2rgb(currhue)); // draw colon
+          matrix->drawPixel(16, 2, hsv2rgb(currhue)); // draw colon     
+        }
+        matrix->show();
+        colon = false;
+      }
+        ldt = getSystemTime();
+        display_set_brightness();
+        runMaintenance();
+    }
+    }
+  if (millis() - l1_time > 250) { // 4 times per second
+    l1_time = millis();
+    gps_check();
+    display_setHue();
+  }
+  if (millis() - l2_time > 10000) { // Every minute
+    l2_time = millis();
+    Serial.println((String) "GPSChars:" + GPS.charsProcessed() + "|With-Fix:" + GPS.sentencesWithFix() + "|Failed:" + GPS.failedChecksum() + "|Passed:" + GPS.passedChecksum() + "|Brightness:" + currbright + "|Fix:" + gps.sats + "|Hdop:" + gps.hdop + "|Elev:" + gps.elevation + "|Lat:" + gps.lat + "|Lon:" + gps.lon);
+    if (((String)alerts.event1).length() > 0) {
+      Serial.println((String) "AlertStatus:" + alerts.status1 + "|Severity:" + alerts.severity1 + "|Certainty:" + alerts.certainty1 + "|Urgency:" + alerts.urgency1 + "|Event:" + alerts.event1 + "|Desc:" + alerts.description1);
+    }
+  }
+  if (millis() - l3_time > T1H) { // Every Hour
+    getWeather();
+    l3_time = millis();
+  }
+  if (millis() - alert_check_time > alert_check_interval.value()*60*1000) { // Every Hour
+    getAlerts();
+    alert_check_time = millis();
+  }
+  if (millis() - alert_time > T5M) { 
+    alert_time = millis();
+    if (alerts.active)
+    {
+      displaying_alert = true;
+    }
+  }
+}
+
+void setup () {
+  Serial.begin(115200);
+  Serial.print("Initializing Hardware Watchdog...");
+  esp_task_wdt_init(WDT_TIMEOUT, true);                //enable panic so ESP32 restarts
+  esp_task_wdt_add(NULL);                              //add current thread to WDT watch
+  Serial.println("SUCCESS.");
+  Serial.print("Reading stored preferences...");
+  preferences.begin("location", false);
+  gps.lat = preferences.getString("lat", "");
+  gps.lon = preferences.getString("lon", "");
+  gurl = (String)"https://api.ipgeolocation.io/ipgeo?apiKey=" + preferences.getString("ipgeoapi", "");
+  Serial.println("COMPLETE");
+  Serial.println("Initializing IotWebConf...");
+  group1.addItem(&brightness_level);
+  group1.addItem(&text_scroll_speed);
+  group1.addItem(&colonflicker);
+  group1.addItem(&flickerfast);
+  group2.addItem(&weatherapi);
+  group2.addItem(&alert_check_interval);
+  group3.addItem(&use_fixed_tz);
+  //group3.addItem(&fixedTz);
+  group4.addItem(&use_fixed_loc);
+  group4.addItem(&fixedLat);
+  group4.addItem(&fixedLon);
+  group4.addItem(&ipgeoapi);
+  iotWebConf.addParameterGroup(&group1);
+  iotWebConf.addParameterGroup(&group2);
+  iotWebConf.addParameterGroup(&group3);
+  iotWebConf.addParameterGroup(&group4);
+  iotWebConf.setWifiConnectionCallback(&wifiConnected);
+  iotWebConf.setConfigSavedCallback(&configSaved);
+  iotWebConf.setFormValidator(&formValidator);
+  iotWebConf.getApTimeoutParameter()->visible = true;
+  //iotWebConf.setStatusPin(STATUS_PIN);
+  //iotWebConf.setConfigPin(CONFIG_PIN);
+  iotWebConf.init();
+  server.on("/", handleRoot);
+  server.on("/config", []{ iotWebConf.handleConfig(); });
+  server.onNotFound([](){ iotWebConf.handleNotFound(); });
+  Serial.println("IotWebConf is READY.");
+  Serial.print("Initializing the RTC module...");
+  Wire.begin();
+  wireInterface.begin();
+  systemClock.setup();
+  dsClock.setup();
+  
+  if (!ntpClock.isSetup()) {
+    Serial.println("FAILED!");
+  } else {
+    Serial.println("SUCCESS.");
+  }
+  Serial.print("System Clock: ");
+  printSystemTime();
+
+  if (use_fixed_loc.isChecked())
+  {
+    Serial.println((String)"Setting Fixed GPS Location Lat: " + fixedLat.value()+ " Lon: " + fixedLon.value());
+    gps.lat = fixedLat.value();
+    gps.lon = fixedLon.value();
+  }
+
+
+  Serial.println("Initializing the display...");
+  display_setHue();
+  display_set_brightness();
+  FastLED.addLeds<NEOPIXEL, HSPI_MOSI>(leds, NUMMATRIX).setCorrection(TypicalLEDStrip);
+  matrix->begin();
+  matrix->setTextWrap(false);
+  matrix->setBrightness(currbright);
+  Serial.println("Display initalization complete.");
+  Wire.begin(TSL2561_SDA, TSL2561_SCL);
+  Serial.print("Initializing GPS Module...");
+  Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
+  Serial.println("SUCCESS.");
+  l1_time, l2_time, l3_time, alert_time, alert_check_time = millis();
+}
+
+void handleRoot()
+{
+  // -- Let IotWebConf test and handle captive portal requests.
+  if (iotWebConf.handleCaptivePortal())
+  {
+    // -- Captive portal request were already served.
+    return;
+  }
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  s += "<title>Smart Led Matrix Clock</title></head><body>Hello world!";
+  s += "<ul>";
+  s += "<li>Display Brightness: ";
+  s += brightness_level.value();
+  s += "<li>Text Scroll Speed: ";
+  s += text_scroll_speed.value();
+  s += "<li>Clock Colon Flicker: ";
+  s += colonflicker.isChecked();
+  s += "<li>Fast Flicker: ";
+  s += flickerfast.isChecked();
+  s += "<li>Weather Alert Check Interval Min: ";
+  s += alert_check_interval.value();
+  s += "<li>Use Fixed Location: ";
+  s += use_fixed_loc.isChecked();
+  s += "<li>Fixed Lattitude: ";
+  s += fixedLat.value();
+  s += "<li>Fixed Longitude: ";
+  s += fixedLon.value();
+  s += "</ul>";
+  s += "Go to <a href='config'>configure page</a> to change values.";
+  s += "</body></html>\n";
+  server.send(200, "text/html", s);
+}
+
+void configSaved()
+{
+  buildURLs();
+  Serial.println("Configuration was updated.");
+}
+
+bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
+{
+  Serial.println("Validating web form...");
+  bool valid = true;
+
+/*
+  int l = webRequestWrapper->arg(stringParam.getId()).length();
+  if (l < 3)
+  {
+    stringParam.errorMessage = "Please provide at least 3 characters for this test!";
+    valid = false;
+  }
+*/
+  return valid;
+}
+
 boolean getAlertJSON() {
   boolean success = false;
   Serial.print("Connecting to ");
@@ -580,11 +829,6 @@ void fillWeatherFromJson(Weather* weather) {
   sprintf(weather->windSpeedD1, "%3i", (int) weatherJson["daily"][1]["wind_speed"]);
   sprintf(weather->windGustD1, "%3i", (int)weatherJson["daily"][1]["wind_gust"]);
   sprintf(weather->descriptionD1, "%s", (const char*) weatherJson["daily"][1]["weather"][0]["description"]); 
-
-  //int timezone_offset = (int) weatherJson["timezone_offset"];
-  //int dt = (int) weatherJson["current"]["dt"];
-  //int t = dt + timezone_offset;
-  //sprintf(weather->updated, "MAJ : %02d/%02d %02d:%02d", day(t), month(t), hour(t), minute(t));
 }
 
 void getWeather() {
@@ -625,247 +869,4 @@ void buildURLs() {
   }
   wurl = (String) "http://api.openweathermap.org/data/2.5/onecall?units=metric&exclude=minutely&appid=" + weatherapi.value() + "&lat=" + ulat + "&lon=" + ulon + "&lang=en";
   aurl = (String) "https://api.weather.gov/alerts?active=true&status=actual&point=" + ulat + "%2C" + ulon + "&limit=500";
-}
-
-void printSystemTime() {
-  acetime_t now = systemClock.getNow();
-  auto Tz = TimeZone::forZoneInfo(&kZoneEST5EDT, &zoneProcessor);
-  auto TimeWZ = ZonedDateTime::forEpochSeconds(now, Tz);
-  TimeWZ.printTo(SERIAL_PORT_MONITOR);
-  SERIAL_PORT_MONITOR.println();
-}
-
-ace_time::ZonedDateTime getSystemTime() {
-  acetime_t now = systemClock.getNow();
-  auto Tz = TimeZone::forZoneInfo(&kZoneEST5EDT, &zoneProcessor);
-  auto TimeWZ = ZonedDateTime::forEpochSeconds(now, Tz);
-  //ESTime.printTo(SERIAL_PORT_MONITOR);
-  //SERIAL_PORT_MONITOR.println();
-  return TimeWZ;
-}
-
-void wifiConnected() {
-  Serial.println("WiFi was connected.");
-  wifi_connected = true;
-  ntpClock.setup();
-  //getWeather(const_cast<char*>(wurl.c_str()));
-  getAlerts();
-}
-
-void runMaintenance() {
-  esp_task_wdt_reset();
-  systemClock.loop();
-  iotWebConf.doLoop();
-}
-
-void loop() {
-  runMaintenance();
-  if (displaying_alert) // Scroll the alert
-    {
-      uint16_t acolor;
-      uint8_t laps;
-      if (alerts.inWarning)
-      {
-        acolor = RED;
-        laps = 3;
-      }
-      else if (alerts.inWatch)
-      {
-        acolor = YELLOW;
-        laps = 3;
-      }
-      else 
-      {
-        acolor = BLUE;
-        laps = 1;
-      }
-      display_alertFlash(acolor, laps);
-      display_scrollText(alerts.description1, text_scroll_speed.value(), acolor);
-  } else { // Show the clock
-    display_showClock();
-    ace_time::ZonedDateTime ldt = getSystemTime();
-    uint32_t mysecs = ldt.second();
-    colon = true;
-    uint32_t flickertime = millis();
-    uint16_t fstop;
-    if (true) // TODO: use user defined value for filcker speed
-        fstop = 20;
-    else
-        fstop = 250;
-    while (mysecs == ldt.second())
-    { // now wait until seconds change
-        if (colon && colonflicker.isChecked() && millis() - flickertime > fstop)
-        {
-          if (clock_display_offset)
-          {
-            matrix->drawPixel(13, 5, hsv2rgb(currhue)); // draw colon
-            matrix->drawPixel(13, 2, hsv2rgb(currhue)); // draw colon
-          } else {
-          matrix->drawPixel(16, 5, hsv2rgb(currhue)); // draw colon
-          matrix->drawPixel(16, 2, hsv2rgb(currhue)); // draw colon     
-        }
-        matrix->show();
-        colon = false;
-      }
-        ldt = getSystemTime();
-        display_set_brightness();
-        runMaintenance();
-    }
-    }
-  if (millis() - l1_time > 250) { // 4 times per second
-    l1_time = millis();
-    gps_check();
-    display_setHue();
-  }
-  if (millis() - l2_time > 10000) { // Every minute
-    l2_time = millis();
-    Serial.println((String) "GPSChars:" + GPS.charsProcessed() + "|With-Fix:" + GPS.sentencesWithFix() + "|Failed:" + GPS.failedChecksum() + "|Passed:" + GPS.passedChecksum() + "|Brightness:" + currbright + "|Fix:" + gps.sats + "|Hdop:" + gps.hdop + "|Elev:" + gps.elevation + "|Lat:" + gps.lat + "|Lon:" + gps.lon);
-    if (((String)alerts.event1).length() > 0) {
-      Serial.println((String) "AlertStatus:" + alerts.status1 + "|Severity:" + alerts.severity1 + "|Certainty:" + alerts.certainty1 + "|Urgency:" + alerts.urgency1 + "|Event:" + alerts.event1 + "|Desc:" + alerts.description1);
-    }
-  }
-  if (millis() - l3_time > T1H) { // Every Hour
-    getWeather();
-    l3_time = millis();
-  }
-  if (millis() - alert_check_time > alert_check_interval.value()*60*1000) { // Every Hour
-    getAlerts();
-    alert_check_time = millis();
-  }
-  if (millis() - alert_time > T5M) { 
-    alert_time = millis();
-    if (alerts.active)
-    {
-      displaying_alert = true;
-    }
-  }
-}
-
-void setup () {
-  Serial.begin(115200);
-  Serial.print("Initializing Hardware Watchdog...");
-  esp_task_wdt_init(WDT_TIMEOUT, true);                //enable panic so ESP32 restarts
-  esp_task_wdt_add(NULL);                              //add current thread to WDT watch
-  Serial.println("SUCCESS.");
-  Serial.print("Reading stored preferences...");
-  preferences.begin("location", false);
-  gps.lat = preferences.getString("lat", "");
-  gps.lon = preferences.getString("lon", "");
-  Serial.println("COMPLETE");
-  Serial.println("Initializing IotWebConf...");
-  group1.addItem(&brightness_level);
-  group1.addItem(&text_scroll_speed);
-  group1.addItem(&colonflicker);
-  group2.addItem(&weatherapi);
-  group2.addItem(&alert_check_interval);
-  group3.addItem(&use_fixed_tz);
-  //group3.addItem(&fixedTz);
-  group4.addItem(&use_fixed_loc);
-  group4.addItem(&fixedLat);
-  group4.addItem(&fixedLon);
-  iotWebConf.addParameterGroup(&group1);
-  iotWebConf.addParameterGroup(&group2);
-  iotWebConf.addParameterGroup(&group3);
-  iotWebConf.addParameterGroup(&group4);
-  iotWebConf.setWifiConnectionCallback(&wifiConnected);
-  iotWebConf.setConfigSavedCallback(&configSaved);
-  iotWebConf.setFormValidator(&formValidator);
-  iotWebConf.getApTimeoutParameter()->visible = true;
-  //iotWebConf.setStatusPin(STATUS_PIN);
-  //iotWebConf.setConfigPin(CONFIG_PIN);
-  iotWebConf.init();
-  server.on("/", handleRoot);
-  server.on("/config", []{ iotWebConf.handleConfig(); });
-  server.onNotFound([](){ iotWebConf.handleNotFound(); });
-  Serial.println("IotWebConf is READY.");
-  Serial.print("Initializing the RTC module...");
-  Wire.begin();
-  wireInterface.begin();
-  systemClock.setup();
-  dsClock.setup();
-  
-  if (!ntpClock.isSetup()) {
-    Serial.println("FAILED!");
-  } else {
-    Serial.println("SUCCESS.");
-  }
-  Serial.print("System Clock: ");
-  printSystemTime();
-
-  if (use_fixed_loc.isChecked())
-  {
-    Serial.println((String)"Setting Fixed GPS Location Lat: " + fixedLat.value()+ " Lon: " + fixedLon.value());
-    gps.lat = fixedLat.value();
-    gps.lon = fixedLon.value();
-  }
-
-
-  Serial.println("Initializing the display...");
-  display_setHue();
-  display_set_brightness();
-  FastLED.addLeds<NEOPIXEL, HSPI_MOSI>(leds, NUMMATRIX).setCorrection(TypicalLEDStrip);
-  matrix->begin();
-  matrix->setTextWrap(false);
-  matrix->setBrightness(currbright);
-  Serial.println("Display initalization complete.");
-  Wire.begin(TSL2561_SDA, TSL2561_SCL);
-  Serial.print("Initializing GPS Module...");
-  Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
-  Serial.println("SUCCESS.");
-  l1_time, l2_time, l3_time, alert_time, alert_check_time = millis();
-}
-
-void handleRoot()
-{
-  // -- Let IotWebConf test and handle captive portal requests.
-  if (iotWebConf.handleCaptivePortal())
-  {
-    // -- Captive portal request were already served.
-    return;
-  }
-  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-  s += "<title>Smart Led Matrix Clock</title></head><body>Hello world!";
-  s += "<ul>";
-  s += "<li>Display Brightness: ";
-  s += brightness_level.value();
-  s += "<li>Text Scroll Speed: ";
-  s += text_scroll_speed.value();
-  s += "<li>Clock Colon Flicker: ";
-  s += colonflicker.isChecked();
-  s += "<li>OpenWeather API Key: ";
-  s += weatherapi.value();
-  s += "<li>Weather Alert Check Interval Min: ";
-  s += alert_check_interval.value();
-  s += "<li>Use Fixed Location: ";
-  s += use_fixed_loc.isChecked();
-  s += "<li>Fixed Lattitude: ";
-  s += fixedLat.value();
-  s += "<li>Fixed Longitude: ";
-  s += fixedLon.value();
-  s += "</ul>";
-  s += "Go to <a href='config'>configure page</a> to change values.";
-  s += "</body></html>\n";
-  server.send(200, "text/html", s);
-}
-
-void configSaved()
-{
-  buildURLs();
-  Serial.println("Configuration was updated.");
-}
-
-bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
-{
-  Serial.println("Validating web form...");
-  bool valid = true;
-
-/*
-  int l = webRequestWrapper->arg(stringParam.getId()).length();
-  if (l < 3)
-  {
-    stringParam.errorMessage = "Please provide at least 3 characters for this test!";
-    valid = false;
-  }
-*/
-  return valid;
 }

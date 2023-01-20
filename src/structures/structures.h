@@ -6,6 +6,7 @@ typedef struct GPSData
   String lon;
   double elevation;
   double hdop;
+  acetime_t timestamp;
 } GPSData;
 
 typedef struct RgbColor
@@ -74,4 +75,10 @@ struct Alerts {
   char urgency3[15];
   char event3[50];
   char description3[256];
+};
+
+struct Ipgeo {
+  char timezone[32];
+  char lat[32];
+  char lon[15];
 };

@@ -1,4 +1,7 @@
-uint16_t RGB16(uint8_t r, uint8_t g, uint8_t b);
+
+uint16_t RGB16(uint8_t r, uint8_t g, uint8_t b) {
+ return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xF8) >> 3);
+}
 
 // Display Colors
 uint16_t BLACK	=	RGB16(0, 0, 0);
@@ -15,10 +18,6 @@ uint16_t DAYBLUE=	RGB16(0, 128, 255);
 uint16_t LIME 	=	RGB16(128, 255, 0);
 uint16_t DARKGREEN	=	RGB16(0, 150, 0);
 uint16_t DARKRED    =	RGB16(150, 0, 0);
-
-uint16_t RGB16(uint8_t r, uint8_t g, uint8_t b) {
- return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xF8) >> 3);
-}
 
 uint16_t hsv2rgb(uint8_t hsvr)
 {

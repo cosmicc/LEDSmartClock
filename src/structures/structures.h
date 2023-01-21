@@ -25,30 +25,30 @@ typedef struct HsvColor
 
 struct Weather {
   char iconH1[10];
-  char tempH1[10];
-  char feelsLikeH1[10];
-  char humidityH1[6];
+  int tempH1;
+  int feelsLikeH1;
+  int humidityH1;
   char descriptionH1[20];
-  char windSpeedH1[6];
-  char windGustH1[6];
+  int windSpeedH1;
+  int windGustH1;
 
   char iconD[10];
-  char tempMinD[10];
-  char tempMaxD[10];
-  char humidityD[6];
+  int tempMinD;
+  int tempMaxD;
+  int humidityD;
   char descriptionD[20];
-  char windSpeedD[6];
-  char windGustD[6];
+  int windSpeedD;
+  int windGustD;
 
   char iconD1[10];
-  char tempMinD1[10];
-  char tempMaxD1[10];
-  char humidityD1[6];
+  int tempMinD1;
+  int tempMaxD1;
+  int humidityD1;
   char descriptionD1[20];
-  char windSpeedD1[6];
-  char windGustD1[6];
+  int windSpeedD1;
+  int windGustD1;
 
-  char updated[20];
+  acetime_t timestamp;
 };
 
 struct Alerts {
@@ -79,6 +79,6 @@ struct Alerts {
 
 struct Ipgeo {
   char timezone[32];
-  char lat[32];
-  char lon[15];
+  char lat[12];
+  char lon[12];
 };

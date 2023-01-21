@@ -30,7 +30,7 @@
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
 #define DAYHUE 40                  // 6am daytime hue start
-#define NIGHTHUE 184               // 10pm nighttime hue end
+#define NIGHTHUE 175               // 10pm nighttime hue end
 #define CONFIG_PIN 2               // Pin for the IotWebConf config pushbutton
 #define mw 32                      // Width of led matrix
 #define mh 8                       // Hight of led matrix
@@ -41,6 +41,8 @@
 #define T1M 1*60*1000L  // 1 minute
 #define T5M 5*60*1000L  // 5 minutes
 #define T1H 60*60*1000L  // 1 hour
+#define T10M 10*60*1000L  // 10 minutes weather display
+#define T2H 2*60*60*1000L  // 2 hours weather data expire time
 
 // AceTime refs
 using namespace ace_time;
@@ -101,14 +103,16 @@ bool clock_display_offset;      // Clock display offset for single digit hour
 uint16_t brightness_running_avg;// Running avg to smooth out brightness transitions
 bool wifi_connected;            // Wifi is connected or not
 bool displaying_alert;          // Alert is displaying or ready to display
+bool displaying_weather;        // Weather is displaying 
 bool colon;                     // colon on/off status
 uint8_t currhue;                // Current calculated hue based on time of day
 String currlat;
 String currlon;
 TimeZone currtz;
+uint8_t iconcycle;              // Current Weather animation cycle
 char fixedTz[32];
 
-uint32_t l1_time, l2_time, l3_time, alert_time, alert_check_time = 0L; // Delay timers
+uint32_t l1_time, l2_time, l3_time, alert_time, alert_check_time, wicon_time, weather_time = 0L; // Delay timers
 
 // IotWebConf User custom settings
 // Group 1 (Display)
@@ -142,6 +146,8 @@ iotwebconf::ParameterGroup group1 = iotwebconf::ParameterGroup("Display", "Displ
   iotwebconf::CheckboxTParameter flickerfast =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("flickerfast").label("Fast Colon Flicker").defaultValue(true).build();
 iotwebconf::ParameterGroup group2 = iotwebconf::ParameterGroup("Weather", "Weather Settings");
+  iotwebconf::CheckboxTParameter fahrenheit =
+    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("fahrenheit").label("Fahrenheit").defaultValue(true).build();
   iotwebconf::TextTParameter<33> weatherapi =
     iotwebconf::Builder<iotwebconf::TextTParameter<33>>("weatherapi").label("OpenWeather API Key").defaultValue("").build();
  iotwebconf::IntTParameter<int8_t> alert_check_interval =
@@ -159,6 +165,33 @@ iotwebconf::ParameterGroup group4 = iotwebconf::ParameterGroup("Location", "Loca
     iotwebconf::Builder<iotwebconf::TextTParameter<12>>("fixedLon").label("Fixed Longitude").defaultValue("").build();
   iotwebconf::TextTParameter<33> ipgeoapi =
     iotwebconf::Builder<iotwebconf::TextTParameter<33>>("ipgeoapi").label("IPGeolocation.io API Key").defaultValue("").build();
+
+String capString (String str) {
+  	for(uint16_t i=0; str[i]!='\0'; i++)
+	{
+		if(i==0)
+		{
+			if((str[i]>='a' && str[i]<='z'))
+				str[i]=str[i]-32;
+			continue; 
+		}
+		if(str[i]==' ')
+		{
+			++i;
+			if(str[i]>='a' && str[i]<='z')
+			{
+				str[i]=str[i]-32; 
+				continue; 
+			}
+		}
+		else
+		{
+			if(str[i]>='A' && str[i]<='Z')
+				str[i]=str[i]+32; 
+		}
+	}
+  return str;
+}
 
   void processTimezone()
   {
@@ -197,28 +230,38 @@ time_t gpsunixtime() {
   return t_of_day;
 }
 
-void gps_processLoc(String lat, String lon){
-  if ((gps.lon).length() == 0) {  // if no values were ever stored yet
-    gps.lat, currlat = lat;
-    gps.lon, currlon = lon;
-    preferences.putString("lat", lat);
-    preferences.putString("lon", lon);
-    Serial.println("First location ever received, saving values");
+void processLoc(){
+    if (use_fixed_loc.isChecked())
+  {
+    gps.lat = fixedLat.value();
+    gps.lon = fixedLon.value();
+    currlat = fixedLat.value();
+    currlon = fixedLon.value();
   }
-  else {  // handle major loc changes from gps
-    double nlat = lat.toDouble();
-    double nlon = lon.toDouble();
-    double olat = gps.lat.toDouble();
-    double olon = gps.lon.toDouble();
-    if (abs(nlat - olat) > 0.02 || abs(nlon - olon) > 0.02) {
-      Serial.println("Major location shift, saving values");
-      Serial.println((String) "Lat: ["+olat+"] -> ["+nlat+"] Lon: ["+olon+"] -> ["+nlon+"]");
-      preferences.putString("lat", lat);
-      preferences.putString("lon", lon);
-    }
-    gps.lat, currlat = lat;
-    gps.lon, currlon = lon;
+  String savedlat = preferences.getString("lat", "");
+  String savedlon = preferences.getString("lon", "");
+  if ((gps.lon).length() == 0 && ((String)ipgeo.lon).length() == 0) {
+    currlat = savedlat;
+    currlon = savedlon;
   }
+  else if ((gps.lon).length() == 0 && ((String)ipgeo.lon).length() != 0 && currlon.length() == 0) {
+    //strcpy(currlat, ipgeo.lat);
+    //strcpy(currlon, ipgeo.lon);
+  } else if ((gps.lon).length() != 0) {
+    currlat = gps.lat;
+    currlon = gps.lon;
+  }
+  double nlat = currlat.toDouble();
+  double nlon = currlon.toDouble();
+  double olat = savedlat.toDouble();
+  double olon = savedlon.toDouble();
+  if (abs(nlat - olat) > 0.02 || abs(nlon - olon) > 0.02) {
+    Serial.println("Major location shift, saving values");
+    Serial.println((String) "Lat: ["+olat+"] -> ["+nlat+"] Lon: ["+olon+"] -> ["+nlon+"]");
+    preferences.putString("lat", currlat);
+    preferences.putString("lon", currlon);
+  }
+  buildURLs();
 }
 
 void gps_checkData() {
@@ -247,12 +290,13 @@ void gps_checkData() {
       if (!use_fixed_loc.isChecked()) {
         double lat = GPS.location.lat();
         double lon = GPS.location.lng();
-        if (DEBUG_GPS) Serial.println((String)"GPS Location updated: " + lat + "," + lon);
-        gps_processLoc(String(lat, 6), String(lon, 6));
+        gps.timestamp = systemClock.getNow();
+        processLoc();
       }
       else {
         gps.lat = fixedLat.value();
         gps.lon = fixedLon.value();
+        processLoc();
       }
       if (DEBUG_GPS) Serial.println((String)"GPS Location updated: Lat: " + gps.lat + " Lon: " + gps.lon);
     }
@@ -286,20 +330,22 @@ void display_setBrightness() {
     uint16_t full;
     uint32_t bloop = millis();
     while (millis() - bloop < 16) {
-      runMaintenance();
+      esp_task_wdt_reset();
+      systemClock.loop();
+      iotWebConf.doLoop();
     }
     Tsl.fullLuminosity(full);
     uint8_t min, max;
     if (brightness_level.value() == 1)
     {
-      min = 2;
-      max = 52;
-    } else if (brightness_level.value() == 2){
       min = 5;
-      max = 55;     
-    } else if (brightness_level.value() == 3){
+      max = 75;
+    } else if (brightness_level.value() == 2){
       min = 10;
-      max = 60;     
+      max = 80;     
+    } else if (brightness_level.value() == 3){
+      min = 20;
+      max = 90;     
     } else {
       min = 5;
       max = 60;     
@@ -339,7 +385,6 @@ void display_setStatus() {
   }
   matrix->drawPixel(0, 7, clr);
   matrix->drawPixel(0, 0, wclr);
-  matrix->show();
 }
 
 void display_alertFlash(uint16_t clr, uint8_t laps) {
@@ -349,7 +394,6 @@ void display_alertFlash(uint16_t clr, uint8_t laps) {
   while (flashcycles < laps+1)
   {
     flashmilli = millis();
-    display_setBrightness();
     while (millis() - flashmilli < 250)
       runMaintenance();
     matrix->clear();
@@ -365,10 +409,34 @@ void display_alertFlash(uint16_t clr, uint8_t laps) {
   }
 }
 
+void display_scrollWeather(String message, uint8_t spd, uint16_t clr) {
+  Serial.print("Scrolling text: ");
+  Serial.println(message);
+  uint8_t speed = map(spd, 1, 10, 100, 10);
+  uint16_t size = message.length() * 6;
+  uint32_t scrollmilli;
+  for (int16_t x = mw-9; x >= size - size - size; x--)
+  {
+    scrollmilli = millis();
+    while (millis() - scrollmilli < speed)
+    {
+    runMaintenance();
+    matrix->clear();
+    matrix->setCursor(x, 1);
+    matrix->setTextColor(clr);
+    matrix->print(capString(message));
+    display_weatherIcon();
+    display_setStatus();
+    matrix->show();
+    }
+  }
+    Serial.println("Scrolling text complete.");
+}
+
 void display_scrollText(String message, uint8_t spd, uint16_t clr) {
   Serial.print("Scrolling text: ");
   Serial.println(message);
-  uint8_t speed = map(spd, 1, 10, 200, 20);
+  uint8_t speed = map(spd, 1, 10, 100, 10);
   uint16_t size = message.length() * 6;
   uint32_t scrollmilli;
   for (int16_t x = mw; x >= size - size - size; x--)
@@ -377,16 +445,81 @@ void display_scrollText(String message, uint8_t spd, uint16_t clr) {
     while (millis() - scrollmilli < speed)
     {
       runMaintenance();
-      display_setBrightness();
-    }
       matrix->clear();
       matrix->setCursor(x, 1);
       matrix->setTextColor(clr);
       matrix->print(message);
       matrix->show();
+    }
   }
     displaying_alert = false;
     Serial.println("Scrolling text complete.");
+}
+
+void display_weather() {
+    display_scrollWeather(weather.descriptionH1, text_scroll_speed.value(), YELLOW);
+    uint32_t lp = millis();
+    while (millis() - lp < 10000) {
+      matrix->clear();
+      display_weatherIcon();
+      display_temperature();
+      display_setStatus();
+      matrix->show();
+      runMaintenance();
+    }
+    displaying_weather = false;
+}
+
+void display_weatherIcon() {
+    if (millis() - wicon_time > 250) 
+    {
+    matrix->drawRGBBitmap(0, 0, partly_cloudy_day[iconcycle], 8, 8);
+    if (iconcycle == 4)
+      iconcycle = 0;
+    else
+      iconcycle++;
+    wicon_time = millis();
+    } else {
+      matrix->drawRGBBitmap(0, 0, partly_cloudy_day[iconcycle], 8, 8);
+    }
+}
+
+void display_temperature() {
+    int temp;
+    if (fahrenheit.isChecked())
+    {
+    temp = weather.feelsLikeH1 * 1.8 + 32;
+    }
+    else
+    temp = weather.feelsLikeH1;
+    int xpos;
+    int digits = (abs(temp == 0)) ? 1 : (log10(abs(temp)) + 1);
+    bool isneg = false;
+    if (temp + abs(temp) == 0) 
+    {
+      isneg = true;
+      digits++;
+    }
+    if (digits == 3)
+    xpos = 9;
+    else if (digits == 2)
+    xpos = 11;
+    else if (digits == 1)
+    xpos = 14;
+    xpos = xpos * (digits) - 5;
+    int score = abs(temp);
+    while (score)
+    {
+    matrix->drawBitmap(xpos, 0, num[score % 10], 8, 8, BLUE);
+    score /= 10;
+    xpos = xpos - 7;
+    }
+    if (isneg == true) 
+    {
+      matrix->drawBitmap(xpos, 0, sym[1], 8, 8, BLUE);
+      xpos = xpos - 7;
+    }
+    matrix->drawBitmap(xpos+(digits*7)+7, 0, sym[0], 8, 8, BLUE);
 }
 
 void display_setHue() { 
@@ -465,6 +598,7 @@ void runMaintenance() {
   esp_task_wdt_reset();
   systemClock.loop();
   iotWebConf.doLoop();
+  display_setBrightness();
 }
 
 void loop() {
@@ -490,7 +624,13 @@ void loop() {
       }
       display_alertFlash(acolor, laps);
       display_scrollText(alerts.description1, text_scroll_speed.value(), acolor);
-  } else { // Show the clock
+  } 
+  else if (displaying_weather)
+  {
+    display_alertFlash(BLUE, 1);
+    display_weather();
+  }
+  else { // Show the clock
     display_showClock();
     ace_time::ZonedDateTime ldt = getSystemTime();
     uint32_t mysecs = ldt.second();
@@ -517,7 +657,6 @@ void loop() {
         colon = false;
       }
         ldt = getSystemTime();
-        display_setBrightness();
         runMaintenance();
     }
     }
@@ -528,10 +667,11 @@ void loop() {
   }
   if (millis() - l2_time > 10000) { // Every minute
     l2_time = millis();
-    Serial.println((String) "GPSChars:" + GPS.charsProcessed() + "|With-Fix:" + GPS.sentencesWithFix() + "|Failed:" + GPS.failedChecksum() + "|Passed:" + GPS.passedChecksum() + "|Brightness:" + currbright + "|Fix:" + gps.sats + "|Hdop:" + gps.hdop + "|Elev:" + gps.elevation + "|Lat:" + currlat + "|Lon:" + currlon);
-    if (((String)alerts.event1).length() > 0) {
-      Serial.println((String) "AlertStatus:" + alerts.status1 + "|Severity:" + alerts.severity1 + "|Certainty:" + alerts.certainty1 + "|Urgency:" + alerts.urgency1 + "|Event:" + alerts.event1 + "|Desc:" + alerts.description1);
-    }
+    Serial.println((String) "GPSChars:" + GPS.charsProcessed() + "|With-Fix:" + GPS.sentencesWithFix() + "|Failed:" + GPS.failedChecksum() + "|Passed:" + GPS.passedChecksum() + "|Sats:" + gps.sats + "|Hdop:" + gps.hdop + "|Elev:" + gps.elevation + "|GPSLat:" + gps.lat + "|GPSLon:" + gps.lon);
+    Serial.println((String) "Brightness:" + currbright + "|ClockHue:" + currhue + "|SavedLat:" + preferences.getString("lat", "") + "|SavedLon:" + preferences.getString("lon", "") + "|CurrentLat:" + currlat + "|CurrentLon:" + currlon);
+    Serial.println((String) "IPGeoLat:" + ipgeo.lat + "|IPGeoLon:" + ipgeo.lon);
+    if (((String)alerts.event1).length() > 0)
+        Serial.println((String) "AlertStatus:" + alerts.status1 + "|Severity:" + alerts.severity1 + "|Certainty:" + alerts.certainty1 + "|Urgency:" + alerts.urgency1 + "|Event:" + alerts.event1 + "|Desc:" + alerts.description1);
   }
   if (millis() - l3_time > T1H) { // Every Hour
     net_getWeather();
@@ -548,6 +688,17 @@ void loop() {
       displaying_alert = true;
     }
   }
+  if (millis() - weather_time > T10M) {
+    weather_time = millis();
+    if (systemClock.getNow() - weather.timestamp < T2H)
+    {
+      display_weather();
+    }
+    else
+    {
+      Serial.println("Skipping weather display, expired data");
+    }
+  }
 }
 
 void setup () {
@@ -558,16 +709,13 @@ void setup () {
   Serial.println("COMPLETE.");
   Serial.print("Reading stored location and timezone...");
   preferences.begin("location", false);
-  gps.lat = preferences.getString("lat", "");
-  gps.lon = preferences.getString("lon", "");
-  gurl = (String)"https://api.ipgeolocation.io/ipgeo?apiKey=" + preferences.getString("ipgeoapi", "");
-  processTimezone();
   Serial.println("COMPLETE.");
   Serial.println("Initializing IotWebConf...");
   group1.addItem(&brightness_level);
   group1.addItem(&text_scroll_speed);
   group1.addItem(&colonflicker);
   group1.addItem(&flickerfast);
+  group2.addItem(&fahrenheit);
   group2.addItem(&weatherapi);
   group2.addItem(&alert_check_interval);
   group3.addItem(&use_fixed_tz);
@@ -587,6 +735,8 @@ void setup () {
   //iotWebConf.setStatusPin(STATUS_PIN);
   //iotWebConf.setConfigPin(CONFIG_PIN);
   iotWebConf.init();
+  gurl = (String)"https://api.ipgeolocation.io/ipgeo?apiKey=" + ipgeoapi.value();
+  processTimezone();
   server.on("/", handleRoot);
   server.on("/config", []{ iotWebConf.handleConfig(); });
   server.onNotFound([](){ iotWebConf.handleNotFound(); });
@@ -603,16 +753,11 @@ void setup () {
   Wire.begin(TSL2561_SDA, TSL2561_SCL);
   Serial.println("COMPLETE.");
   if (use_fixed_loc.isChecked())
-  {
     Serial.println((String)"Setting Fixed GPS Location Lat: " + fixedLat.value()+ " Lon: " + fixedLon.value());
-    gps.lat = fixedLat.value();
-    gps.lon = fixedLon.value();
-    currlat = fixedLat.value();
-    currlon = fixedLon.value();
-  }
+  processLoc();
   Serial.println("Initializing the display...");
   display_setHue();
-  display_setBrightness();
+  runMaintenance();
   FastLED.addLeds<NEOPIXEL, HSPI_MOSI>(leds, NUMMATRIX).setCorrection(TypicalLEDStrip);
   matrix->begin();
   matrix->setTextWrap(false);
@@ -621,7 +766,7 @@ void setup () {
   Serial.print("Initializing GPS Module...");
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
   Serial.println("COMPLETE.");
-  l1_time, l2_time, l3_time, alert_time, alert_check_time = millis(); // reset all delay timers
+  l1_time, l2_time, l3_time, alert_time, alert_check_time, wicon_time, weather_time = millis(); // reset all delay timers
 }
 
 void handleRoot()
@@ -698,7 +843,8 @@ boolean net_getAlertJSON() {
       success = true;
     }
   } else {
-    Serial.println("Skipping Json parse, failed http code.");
+    display_alertFlash(RED, 2);
+    display_scrollText((String)"Weather Alert Http Error " +httpCode, text_scroll_speed.value(), RED);
   }
     http.end(); 
   return success;
@@ -724,10 +870,12 @@ void fillAlertsFromJson(Alerts* alerts) {
     {
       alerts->inWarning = true;
       alerts->active = true;
+      displaying_alert = true;
     }
     else if ((String)alerts->certainty1 == "Possible") {
       alerts->inWatch= true;
       alerts->active = true;
+      displaying_alert = true;
     } 
     else {
       alerts->active = false;
@@ -743,11 +891,10 @@ void fillAlertsFromJson(Alerts* alerts) {
 }
 
 void net_getAlerts() {
-  if (wifi_connected && (gps.lat).length() > 1) {
+  if (wifi_connected && (currlat).length() > 1) {
     Serial.println("Checking weather alerts...");
     int64_t retries = 1;
     boolean jsonParsed = false;
-    buildURLs();
     while (!jsonParsed && (retries-- > 0))
     {
       //delay(1000);
@@ -791,40 +938,47 @@ boolean net_getWeatherJSON() {
       success = true;
     }
   }
+  else if (httpCode == 401) {
+    display_alertFlash(RED, 2);
+    display_scrollText("Invalid Openweathermap.org API Key", text_scroll_speed.value(), RED);
+  } else {
+    display_alertFlash(RED, 2);
+    display_scrollText((String)"Openweathermap.org Http Error " +httpCode, text_scroll_speed.value(), RED);
+  }
     http.end(); 
   return success;
 }
 
 void net_fillWeatherValues(Weather* weather) {
   sprintf(weather->iconH1, "%s", (const char*) weatherJson["hourly"][1]["weather"][0]["icon"]);
-  sprintf(weather->tempH1, "%2i", (int) round((double) weatherJson["hourly"][1]["temp"]));
-  sprintf(weather->feelsLikeH1, "%2i", (int) round((double) weatherJson["hourly"][1]["feels_like"]));
-  sprintf(weather->humidityH1, "%3i", (int) weatherJson["hourly"][1]["humidity"]);
-  sprintf(weather->windSpeedH1, "%3i", (int) weatherJson["hourly"][1]["wind_speed"]);
-  sprintf(weather->windGustH1, "%3i", (int) weatherJson["hourly"][1]["wind_gust"]);
+  weather->tempH1 = weatherJson["hourly"][1]["temp"];
+  weather->feelsLikeH1 = weatherJson["hourly"][1]["feels_like"];
+  weather->humidityH1 = weatherJson["hourly"][1]["humidity"];
+  weather->windSpeedH1 = weatherJson["hourly"][1]["wind_speed"];
+  weather->windGustH1 = weatherJson["hourly"][1]["wind_gust"];
   sprintf(weather->descriptionH1, "%s", (const char*) weatherJson["hourly"][1]["weather"][0]["description"]);
   sprintf(weather->iconD, "%s", (const char*) weatherJson["daily"][0]["weather"][0]["icon"]);
-  sprintf(weather->tempMinD, "%2i", (int) round((double) weatherJson["daily"][0]["temp"]["min"]));
-  sprintf(weather->tempMaxD, "%2i", (int) round((double) weatherJson["daily"][0]["temp"]["max"]));
-  sprintf(weather->humidityD, "%3i", (int) weatherJson["daily"][0]["humidity"]);
-  sprintf(weather->windSpeedD, "%3i", (int) weatherJson["daily"][0]["wind_speed"]);
-  sprintf(weather->windGustD, "%3i", (int)weatherJson["daily"][0]["wind_gust"]);
+  weather->tempMinD = weatherJson["daily"][0]["temp"]["min"];
+  weather->tempMaxD = weatherJson["daily"][0]["temp"]["max"];
+  weather->humidityD = weatherJson["daily"][0]["humidity"];
+  weather->windSpeedD = weatherJson["daily"][0]["wind_speed"];
+  weather->windGustD = weatherJson["daily"][0]["wind_gust"];
   sprintf(weather->descriptionD, "%s", (const char*) weatherJson["daily"][0]["weather"][0]["description"]);
   sprintf(weather->iconD1, "%s", (const char*) weatherJson["daily"][1]["weather"][0]["icon"]);
-  sprintf(weather->tempMinD1, "%2i", (int) round((double) weatherJson["daily"][1]["temp"]["min"]));
-  sprintf(weather->tempMaxD1, "%2i", (int) round((double) weatherJson["daily"][1]["temp"]["max"]));
-  sprintf(weather->humidityD1, "%3i", (int) weatherJson["daily"][1]["humidity"]);
-  sprintf(weather->windSpeedD1, "%3i", (int) weatherJson["daily"][1]["wind_speed"]);
-  sprintf(weather->windGustD1, "%3i", (int)weatherJson["daily"][1]["wind_gust"]);
-  sprintf(weather->descriptionD1, "%s", (const char*) weatherJson["daily"][1]["weather"][0]["description"]); 
+  weather->tempMinD1 = weatherJson["daily"][1]["temp"]["min"];
+  weather->tempMaxD1 = weatherJson["daily"][1]["temp"]["max"];
+  weather->humidityD1 = weatherJson["daily"][1]["humidity"];
+  weather->windSpeedD1 = weatherJson["daily"][1]["wind_speed"];
+  weather->windGustD1 = weatherJson["daily"][1]["wind_gust"];
+  sprintf(weather->descriptionD1, "%s", (const char*) weatherJson["daily"][1]["weather"][0]["description"]);
+  weather->timestamp = systemClock.getNow();
 }
 
 void net_getWeather() {
-  if (wifi_connected && (gps.lat).length() > 1) {
+  if (wifi_connected && (currlat).length() > 1 && isApiKeyValid(weatherapi.value())) {
     Serial.println("Checking weather forcast...");
     int64_t retries = 1;
     boolean jsonParsed = false;
-    buildURLs();
     while (!jsonParsed && (retries-- > 0))
     {
       //delay(1000);
@@ -836,9 +990,10 @@ void net_getWeather() {
       
       net_fillWeatherValues(&weather);
       Serial.println("Weather forcast check complete.");
+      displaying_weather = true;
     }
   } else {
-    Serial.println("Weather forcast check skipped, no wifi or loc");
+    Serial.println("Weather forcast check skipped, no wifi, loc, or apikey");
   }
 }
 
@@ -853,7 +1008,7 @@ boolean getIpgeoJSON() {
   Serial.print("HTTP code : ");
   Serial.println(httpCode);
   runMaintenance();
-  if (httpCode > 0)
+  if (httpCode == 200)
   {
     ipgeoJson = JSON.parse(http.getString());
     if (JSON.typeof(ipgeoJson) == "undefined") {
@@ -862,21 +1017,30 @@ boolean getIpgeoJSON() {
       success = true;
     }
   }
+  else if (httpCode == 401) {
+    display_alertFlash(RED, 2);
+    display_scrollText("Invalid IPGeolocation.io API Key", text_scroll_speed.value(), RED);
+  } else {
+    display_alertFlash(RED, 2);
+    display_scrollText((String)"IPGeolocation.io Http Error " +httpCode, text_scroll_speed.value(), RED);
+  }
     http.end(); 
   return success;
 }
 
 void fillIpgeoFromJson(Ipgeo* ipgeo) {
-  sprintf(ipgeo->timezone, "%s", (const char*) weatherJson["time_zone"]["name"]);
-  sprintf(ipgeo->lat, "%s", (const char*) weatherJson["latitude"]);
-  sprintf(ipgeo->lon, "%s", (const char*) weatherJson["longitude"]);
+  sprintf(ipgeo->timezone, "%s", (const char*) ipgeoJson["time_zone"]["name"]);
+  sprintf(ipgeo->lat, "%s", (const char*) ipgeoJson["latitude"]);
+  sprintf(ipgeo->lon, "%s", (const char*) ipgeoJson["longitude"]);
   Serial.println(ipgeo->timezone);
   Serial.println(ipgeo->lat);
   Serial.println(ipgeo->lon);
 }
 
 void net_getIpgeo() {
-  if (wifi_connected && (preferences.getString("ipgeoapi", "")).length() > 0) {
+  Serial.println(ipgeoapi.value());
+  if (wifi_connected && isApiKeyValid(ipgeoapi.value()))
+  {
     Serial.println("Checking IP geolocation..");
     int64_t retries = 1;
     bool jsonParsed = false;
@@ -889,28 +1053,25 @@ void net_getIpgeo() {
       Serial.println("Error: JSON");
     } else {
       fillIpgeoFromJson(&ipgeo);
-      processTimezone();
-      // TODO: Proceee lat,loc
       Serial.println("IP Geolocation check complete.");
+      processTimezone();
+      processLoc();
     }
-  } else {
-    Serial.println("IP Geolocation check skipped, no wifi");
+  }
+  else
+  {
+    Serial.println("IP Geolocation check skipped, no wifi or apikey");
   }
 }
 
+bool isApiKeyValid(char *apikey) {
+  if (apikey[0] == '\0')
+    return false;
+  else
+    return true;
+}
+
 void buildURLs() {
-  String ulat;
-  String ulon;
-  if (use_fixed_loc.isChecked())
-  {
-    ulat = fixedLat.value();
-    ulon = fixedLon.value();
-  }
-  else if ((gps.lat).length() > 1 && (gps.lon).length() > 1)
-  {
-    ulat = gps.lat;
-    ulon = gps.lon;
-  }
-  wurl = (String) "http://api.openweathermap.org/data/2.5/onecall?units=metric&exclude=minutely&appid=" + weatherapi.value() + "&lat=" + ulat + "&lon=" + ulon + "&lang=en";
-  aurl = (String) "https://api.weather.gov/alerts?active=true&status=actual&point=" + ulat + "%2C" + ulon + "&limit=500";
+  wurl = (String) "http://api.openweathermap.org/data/2.5/onecall?units=metric&exclude=minutely&appid=" + weatherapi.value() + "&lat=" + currlat + "&lon=" + currlon + "&lang=en";
+  aurl = (String) "https://api.weather.gov/alerts?active=true&status=actual&point=" + currlat + "%2C" + currlon + "&limit=500";
 }

@@ -77,6 +77,11 @@ void wifiConnected();
 void handleRoot();
 void configSaved();
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper);
+void buildURLs();
+String elapsedTime(acetime_t start_time, acetime_t stop_time);
+void net_getAlerts();
+void net_getWeather();
+void net_getIpgeo();
 
 // Global Variables & Objects
 const char thingName[] = "LedSmartClock";           // Default SSID used for new setup
@@ -111,13 +116,16 @@ bool colon;                     // colon on/off status
 uint8_t currhue;                // Current calculated hue based on time of day
 String currlat;
 String currlon;
+uint8_t temphue;                // Current calculated hue based on temp
 TimeZone currtz;
 uint8_t iconcycle;              // Current Weather animation cycle
+acetime_t bootTime;            // boot time
 char fixedTz[32];
 
-uint32_t l1_time, l2_time, l3_time, alert_time, alert_check_time, wicon_time, weather_time = 0L; // Delay timers
+uint32_t gpsloop_timer, debugTimer, l3_time, alert_time, alert_check_time, wicon_time, weather_time = 0L; // Delay timers
 
 // IotWebConf User custom settings
+// bool debugserial
 // Group 1 (Display)
 // uint8_t brightness_level;           // 1 low - 3 high
 // uint8_t text_scroll_speed;          // 1 slow - 10 fast
@@ -140,7 +148,7 @@ static char timezoneNames[][32] = { "US_Eastern", "US_Central", "US_Mountain", "
 
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
   iotwebconf::CheckboxTParameter serialdebug =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("serialdebug").label("Debug on Serial").defaultValue(false).build();
+    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("serialdebug").label("Debug to Serial").defaultValue(false).build();
 iotwebconf::ParameterGroup group1 = iotwebconf::ParameterGroup("Display", "Display Settings");
   iotwebconf::IntTParameter<int8_t> brightness_level =
     iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("brightness_level").label("Brightness Level (1-3)").defaultValue(2).min(1).max(3).step(1).placeholder("1(low)..3(high)").build();
@@ -404,6 +412,9 @@ void display_alertFlash(uint16_t clr, uint8_t laps) {
   debug_print("Displaying alert flash", true);
   uint32_t flashmilli;
   uint8_t flashcycles = 0;
+  flashmilli = millis();
+  while (millis() - flashmilli < 250)
+    runMaintenance();
   while (flashcycles < laps)
   {
     flashmilli = millis();
@@ -421,7 +432,7 @@ void display_alertFlash(uint16_t clr, uint8_t laps) {
     flashcycles++;
   }
   flashmilli = millis();
-  while (millis() - flashmilli < 1000)
+  while (millis() - flashmilli < 250)
     runMaintenance();
 }
 
@@ -437,11 +448,11 @@ void display_scrollWeather(String message, uint8_t spd, uint16_t clr) {
     {
     runMaintenance();
     matrix->clear();
+    display_setStatus();
     matrix->setCursor(x, 1);
     matrix->setTextColor(clr);
     matrix->print(capString(message));
     display_weatherIcon();
-    display_setStatus();
     matrix->show();
     }
   }
@@ -460,13 +471,13 @@ void display_scrollText(String message, uint8_t spd, uint16_t clr) {
     {
       runMaintenance();
       matrix->clear();
+      display_setStatus();
       matrix->setCursor(x, 1);
       matrix->setTextColor(clr);
       matrix->print(message);
       matrix->show();
     }
   }
-    displaying_alert = false;
     debug_print("Scrolling text complete.", true);
 }
 
@@ -481,7 +492,6 @@ void display_weather() {
       matrix->show();
       runMaintenance();
     }
-    displaying_weather = false;
 }
 
 void display_weatherIcon() {
@@ -550,19 +560,25 @@ void display_temperature() {
     xpos = 9;
     xpos = xpos * (digits);
     int score = abs(temp);
+    temphue = map(weather.feelsLikeH1, 0, 40, NIGHTHUE, 0);
+    if (temphue < 0)
+      temphue = 0;
+    else if (temphue > NIGHTHUE)
+      temphue = NIGHTHUE;
     while (score)
     {
-    matrix->drawBitmap(xpos, 0, num[score % 10], 8, 8, BLUE);
+    matrix->drawBitmap(xpos, 0, num[score % 10], 8, 8, hsv2rgb(temphue));
     score /= 10;
     xpos = xpos - 7;
     }
     if (isneg == true) 
     {
-      matrix->drawBitmap(xpos, 0, sym[1], 8, 8, BLUE);
+      matrix->drawBitmap(xpos, 0, sym[1], 8, 8, hsv2rgb(temphue));
       xpos = xpos - 7;
     }
-    matrix->drawBitmap(xpos+(digits*7)+7, 0, sym[0], 8, 8, BLUE);
+    matrix->drawBitmap(xpos+(digits*7)+7, 0, sym[0], 8, 8, hsv2rgb(temphue));
 }
+
 
 void display_setHue() { 
   ace_time::ZonedDateTime ldt = getSystemTime();
@@ -572,7 +588,15 @@ void display_setHue() {
       currhue = NIGHTHUE;
     else if (myHours * 60 < 360)
       currhue = NIGHTHUE;
-    else currhue = map(myHours * 60 + myMinutes, 360, 1319, DAYHUE, NIGHTHUE);
+    else {
+      uint8_t thue = map(myHours * 60 + myMinutes, 360, 1319, DAYHUE, NIGHTHUE);
+      if (thue > NIGHTHUE)
+        currhue = NIGHTHUE;
+      else if (thue < DAYHUE)
+        currhue = DAYHUE;
+      else
+        currhue = thue;
+    }
 }
 
 void display_showClock() {
@@ -645,29 +669,21 @@ void loop() {
   if (displaying_alert) // Scroll weather alert
     {
       uint16_t acolor;
-      uint8_t laps;
       if (alerts.inWarning)
-      {
         acolor = RED;
-        laps = 3;
-      }
       else if (alerts.inWatch)
-      {
         acolor = YELLOW;
-        laps = 3;
-      }
-      else 
-      {
-        acolor = BLUE;
-        laps = 1;
-      }
-      display_alertFlash(acolor, laps);
+      display_alertFlash(acolor, 3);
       display_scrollText(alerts.description1, text_scroll_speed.value(), acolor);
-  } 
+      alerts.lastshown = systemClock.getNow();
+      displaying_alert = false;
+    }
   else if (displaying_weather)  // show weather forcast
   {
     display_alertFlash(BLUE, 1);
     display_weather();
+    weather.lastshown = systemClock.getNow();
+    displaying_weather = false;
   }
   else { // Show the clock
     display_showClock();
@@ -699,42 +715,43 @@ void loop() {
         runMaintenance();
     }
     }
-  if (millis() - l1_time > 1000) { // 4 times per second
-    l1_time = millis();
+  // looping tasks
+  if (millis() - gpsloop_timer > 1000) { // 4 times per second
+    gpsloop_timer = millis();
     gps_checkData();
     display_setHue();
   }
-  if (millis() - l2_time > 10000 && serialdebug.isChecked()) { // debug info
-    l2_time = millis();
+  if (millis() - debugTimer > 10000 && serialdebug.isChecked()) { // debug info
+    debugTimer = millis();
     debug_print("----------------------------------------------------------------", true);
     String gage = elapsedTime(systemClock.getNow(), gps.timestamp);
-    debug_print((String) "GPS-Chars:" + GPS.charsProcessed() + "|With-Fix:" + GPS.sentencesWithFix() + "|Failed:" + GPS.failedChecksum() + "|Passed:" + GPS.passedChecksum() + "|Sats:" + gps.sats + "|Hdop:" + gps.hdop + "|Elev:" + gps.elevation + "|Lat:" + gps.lat + "|Lon:" + gps.lon + "|Age:" + gage, true);
-    debug_print((String) "System-Brightness:" + currbright + "|ClockHue:" + currhue + "|SavedLat:" + preferences.getString("lat", "") + "|SavedLon:" + preferences.getString("lon", "") + "|CurrentLat:" + currlat + "|CurrentLon:" + currlon, true);
-    debug_print((String) "IPGeo-Lat:" + ipgeo.lat + "|Lon:" + ipgeo.lon + "|Timezone:" + ipgeo.timezone, true);
+    String uptime = elapsedTime(systemClock.getNow(), bootTime);
+    String igt = elapsedTime(systemClock.getNow(), ipgeo.timestamp);
     String wage = elapsedTime(systemClock.getNow(), weather.timestamp);
-    debug_print((String) "Weather-Icon:" + weather.iconH1 + "|Temp:" + weather.feelsLikeH1 + "|Humidity:" + weather.humidityH1 + "|Desc:" + weather.descriptionH1 + "|Age:" + wage, true);
-    if (((String)alerts.event1).length() > 0)
-        debug_print((String) "Alerts-Status:" + alerts.status1 + "|Severity:" + alerts.severity1 + "|Certainty:" + alerts.certainty1 + "|Urgency:" + alerts.urgency1 + "|Event:" + alerts.event1 + "|Desc:" + alerts.description1, true);
+    String wlt = elapsedTime(systemClock.getNow(), weather.lastattempt);
+    debug_print((String) "System-Brightness:" + currbright + "|ClockHue:" + currhue + "|TempHue:" + temphue + "|Uptime:" + uptime, true);
+    debug_print((String) "Loc-SavedLat:" + preferences.getString("lat", "") + "|SavedLon:" + preferences.getString("lon", "") + "|CurrentLat:" + currlat + "|CurrentLon:" + currlon, true);
+    debug_print((String) "IPGeo-Lat:" + ipgeo.lat + "|Lon:" + ipgeo.lon + "|Timezone:" + ipgeo.timezone + "|Age:" + igt, true);
+    debug_print((String) "GPS-Chars:" + GPS.charsProcessed() + "|With-Fix:" + GPS.sentencesWithFix() + "|Failed:" + GPS.failedChecksum() + "|Passed:" + GPS.passedChecksum() + "|Sats:" + gps.sats + "|Hdop:" + gps.hdop + "|Elev:" + gps.elevation + "|Lat:" + gps.lat + "|Lon:" + gps.lon + "|Age:" + gage, true);
+    debug_print((String) "Weather-Icon:" + weather.iconH1 + "|Temp:" + weather.feelsLikeH1 + "|Humidity:" + weather.humidityH1 + "|Desc:" + weather.descriptionH1 + "|Age:" + wage + "|LastAttempt:" + wlt, true);
+    //if (((String)alerts.event1).length() > 0)
+    debug_print((String) "Alerts-Status:" + alerts.status1 + "|Severity:" + alerts.severity1 + "|Certainty:" + alerts.certainty1 + "|Urgency:" + alerts.urgency1 + "|Event:" + alerts.event1 + "|Desc:" + alerts.description1, true);
   }
-  if (millis() - l3_time > T1H) { // check weather forcast
-    net_getWeather();
-    l3_time = millis();
+  if (systemClock.getNow() - weather.timestamp > T1H) { // check weather forcast
+    if ((systemClock.getNow() - weather.lastattempt) > T1M)
+      net_getWeather();
   }
-  if (millis() - alert_check_time > alert_check_interval.value()*60*1000 && alert_check_interval.value() != 0) { // Check weather alerts
-    net_getAlerts();
-    alert_check_time = millis();
+  if (systemClock.getNow() - alerts.timestamp > alert_check_interval.value()*60*1000 && alert_check_interval.value() != 0) { // Check weather alerts
+    if ((systemClock.getNow() - alerts.lastattempt) > T1M)
+      net_getAlerts();
   }
-  if (millis() - alert_time > T5M) {  // show weather alerts
-    alert_time = millis();
+  if (systemClock.getNow() - alerts.lastshown > T5M) {  // show weather alerts
     if (alerts.active)
       displaying_alert = true;
   }
-  if (millis() - weather_time > T10M) {  // show weather forcast
-    weather_time = millis();
+  if (systemClock.getNow() - weather.lastshown > T10M) {  // show weather forcast
     if (systemClock.getNow() - weather.timestamp < T2H)
-      display_weather();
-    else
-      debug_print("Skipping weather display, expired data", true);
+      displaying_weather = true;
   }
 }
 
@@ -804,7 +821,8 @@ void setup () {
   debug_print("Initializing GPS Module...", false);
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
   debug_print("COMPLETE.", true);
-  l1_time, l2_time, l3_time, alert_time, alert_check_time, wicon_time, weather_time = millis(); // reset all delay timers
+  bootTime = systemClock.getNow();
+  gpsloop_timer, debugTimer, alert_time, alert_check_time, wicon_time, weather_time = millis(); // reset all delay timers
 }
 
 void handleRoot()
@@ -899,6 +917,8 @@ void fillAlertsFromJson(Alerts* alerts) {
     sprintf(alerts->urgency1, "%s", (const char *)alertsJson["features"][0]["properties"]["urgency"]);
     sprintf(alerts->event1, "%s", (const char *)alertsJson["features"][0]["properties"]["event"]);
     sprintf(alerts->description1, "%s", (const char *)alertsJson["features"][0]["properties"]["parameters"]["NWSheadline"][0]);
+    alerts->timestamp = systemClock.getNow();
+    
     //debug_print("Sizeof:  ");
     //debug_print(sizeof(alertsJson["features"]));
     //debug_print(alertsJson["features"]);
@@ -955,6 +975,7 @@ void net_getAlerts() {
   } else {
     debug_print("Weather alert check skipped, no wifi or loc.", true);
   }
+  alerts.lastattempt = systemClock.getNow();
   alert_time = millis();
 }
 
@@ -1012,6 +1033,7 @@ void net_fillWeatherValues(Weather* weather) {
   weather->windGustD1 = weatherJson["daily"][1]["wind_gust"];
   sprintf(weather->descriptionD1, "%s", (const char*) weatherJson["daily"][1]["weather"][0]["description"]);
   weather->timestamp = systemClock.getNow();
+  
 }
 
 void net_getWeather() {
@@ -1033,8 +1055,9 @@ void net_getWeather() {
       displaying_weather = true;
     }
   } else {
-    debug_print("Weather forcast check skipped, no wifi, loc, or apikey", true);
+    debug_print("Weather forcast check skipped, no wifi, loc, apikey", true);
   }
+  weather.lastattempt = systemClock.getNow();
 }
 
 boolean getIpgeoJSON() {
@@ -1072,6 +1095,7 @@ void fillIpgeoFromJson(Ipgeo* ipgeo) {
   sprintf(ipgeo->timezone, "%s", (const char*) ipgeoJson["time_zone"]["name"]);
   sprintf(ipgeo->lat, "%s", (const char*) ipgeoJson["latitude"]);
   sprintf(ipgeo->lon, "%s", (const char*) ipgeoJson["longitude"]);
+  ipgeo->timestamp = systemClock.getNow();
 }
 
 void net_getIpgeo() {

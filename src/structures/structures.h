@@ -49,6 +49,8 @@ struct Weather {
   int windGustD1;
 
   acetime_t timestamp;
+  acetime_t lastattempt;
+  acetime_t lastshown;
 };
 
 struct Alerts {
@@ -75,10 +77,15 @@ struct Alerts {
   char urgency3[15];
   char event3[50];
   char description3[256];
+
+  acetime_t timestamp;
+  acetime_t lastattempt;
+  acetime_t lastshown;
 };
 
 struct Ipgeo {
   char timezone[32];
   char lat[12];
   char lon[12];
+  acetime_t timestamp;
 };

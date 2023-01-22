@@ -330,7 +330,7 @@ void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) {
     else if (position == 2) position = 16;
     else if (position == 3) position = 23;
     if (clock_display_offset) 
-      matrix->drawBitmap(position-3, 0, num[bmp_num], 8, 8, color);    
+      matrix->drawBitmap(position-4, 0, num[bmp_num], 8, 8, color);    
     else
       matrix->drawBitmap(position, 0, num[bmp_num], 8, 8, color); 
 }
@@ -404,7 +404,7 @@ void display_alertFlash(uint16_t clr, uint8_t laps) {
   debug_print("Displaying alert flash", true);
   uint32_t flashmilli;
   uint8_t flashcycles = 0;
-  while (flashcycles < laps+1)
+  while (flashcycles < laps)
   {
     flashmilli = millis();
     while (millis() - flashmilli < 250)
@@ -420,6 +420,9 @@ void display_alertFlash(uint16_t clr, uint8_t laps) {
     matrix->show();
     flashcycles++;
   }
+  flashmilli = millis();
+  while (millis() - flashmilli < 1000)
+    runMaintenance();
 }
 
 void display_scrollWeather(String message, uint8_t spd, uint16_t clr) {
@@ -468,7 +471,7 @@ void display_scrollText(String message, uint8_t spd, uint16_t clr) {
 }
 
 void display_weather() {
-    display_scrollWeather(weather.descriptionH1, text_scroll_speed.value(), YELLOW);
+    display_scrollWeather(weather.descriptionH1, text_scroll_speed.value(), WHITE);
     uint32_t lp = millis();
     while (millis() - lp < 10000) {
       matrix->clear();
@@ -482,22 +485,44 @@ void display_weather() {
 }
 
 void display_weatherIcon() {
-    if (millis() - wicon_time > 250) 
-    {
-      if (weather.iconH1[1] == '4')
-        matrix->drawRGBBitmap(mw-8, 0, cloudy_day[iconcycle], 8, 8);
-      else if (weather.iconH1[1] == '5') 
+    bool night;
+    if (weather.iconH1[2] == 'n')
+      night = true;
+    char code1;
+    char code2;
+    code1 = weather.iconH1[0];
+    code2 = weather.iconH1[1];
+
+      if (code1 == '0' && code2 == '1') {  //clear
+        if (night == true)
+          matrix->drawRGBBitmap(mw-8, 0, clear_night[iconcycle], 8, 8);
+        else
+          matrix->drawRGBBitmap(mw-8, 0, clear_day[iconcycle], 8, 8);
+      }
+      else if ((code1 == '0' && code2 == '2') || (code1 == '0' && code2 == '3')) {  //partly cloudy
+        if (night == true)
+          matrix->drawRGBBitmap(mw-8, 0, partly_cloudy_night[iconcycle], 8, 8);
+        else
+          matrix->drawRGBBitmap(mw-8, 0, partly_cloudy_day[iconcycle], 8, 8);
+      }
+      else if ((code1 == '0') && (code2 == '4')) // cloudy
+        matrix->drawRGBBitmap(mw-8, 0, cloudy[iconcycle], 8, 8);
+      else if (code1 == '5' && code2 == '0')  //fog/mist 
+        matrix->drawRGBBitmap(mw-8, 0, fog[iconcycle], 8, 8);
+      else if (code1 == '1' && code2 == '3')  //snow
+        matrix->drawRGBBitmap(mw-8, 0, snow[iconcycle], 8, 8);
+      else if ((code1 == '0' && code2 == '9') || (code1 == '1' && code2 == '0') || (code1 == '1' && code2 == '1')  ) //rain
         matrix->drawRGBBitmap(mw-8, 0, rain[iconcycle], 8, 8);
+      else
+        debug_print("No Weather icon found to use", true);
+
+    if (millis() - wicon_time > 250)
+    {
     if (iconcycle == 4)
       iconcycle = 0;
     else
       iconcycle++;
     wicon_time = millis();
-    } else {
-      if (weather.iconH1[1] == '4')
-        matrix->drawRGBBitmap(mw-8, 0, cloudy_day[iconcycle], 8, 8);
-      else if (weather.iconH1[1] == '5') 
-        matrix->drawRGBBitmap(mw-8, 0, rain[iconcycle], 8, 8);
     }
 }
 
@@ -574,8 +599,8 @@ void display_showClock() {
   display_setclockDigit(myminute%10, 3, hsv2rgb(currhue));  // set second digit of minute
   if (!colonflicker.isChecked()) {
     if (clock_display_offset) {
-      matrix->drawPixel(13, 5, hsv2rgb(currhue)); // draw colon
-      matrix->drawPixel(13, 2, hsv2rgb(currhue)); // draw colon
+      matrix->drawPixel(12, 5, hsv2rgb(currhue)); // draw colon
+      matrix->drawPixel(12, 2, hsv2rgb(currhue)); // draw colon
     } else {
       matrix->drawPixel(16, 5, hsv2rgb(currhue)); // draw colon
       matrix->drawPixel(16, 2, hsv2rgb(currhue)); // draw colon     
@@ -584,7 +609,6 @@ void display_showClock() {
   display_setStatus();
   matrix->show();
 }
-
 
 void printSystemTime() {
   acetime_t now = systemClock.getNow();
@@ -596,8 +620,6 @@ void printSystemTime() {
 ace_time::ZonedDateTime getSystemTime() {
   acetime_t now = systemClock.getNow();
   ace_time::ZonedDateTime TimeWZ = ZonedDateTime::forEpochSeconds(now, currtz);
-  //ESTime.printTo(SERIAL_PORT_MONITOR);
-  //SERIAL_PORT_MONITOR.println();
   return TimeWZ;
 }
 
@@ -620,7 +642,7 @@ void runMaintenance() {
 
 void loop() {
   runMaintenance();
-  if (displaying_alert) // Scroll the alert
+  if (displaying_alert) // Scroll weather alert
     {
       uint16_t acolor;
       uint8_t laps;
@@ -642,7 +664,7 @@ void loop() {
       display_alertFlash(acolor, laps);
       display_scrollText(alerts.description1, text_scroll_speed.value(), acolor);
   } 
-  else if (displaying_weather)
+  else if (displaying_weather)  // show weather forcast
   {
     display_alertFlash(BLUE, 1);
     display_weather();
@@ -664,8 +686,8 @@ void loop() {
         {
           if (clock_display_offset)
           {
-            matrix->drawPixel(13, 5, hsv2rgb(currhue)); // draw colon
-            matrix->drawPixel(13, 2, hsv2rgb(currhue)); // draw colon
+            matrix->drawPixel(12, 5, hsv2rgb(currhue)); // draw colon
+            matrix->drawPixel(12, 2, hsv2rgb(currhue)); // draw colon
           } else {
           matrix->drawPixel(16, 5, hsv2rgb(currhue)); // draw colon
           matrix->drawPixel(16, 2, hsv2rgb(currhue)); // draw colon     
@@ -677,47 +699,42 @@ void loop() {
         runMaintenance();
     }
     }
-  if (millis() - l1_time > 250) { // 4 times per second
+  if (millis() - l1_time > 1000) { // 4 times per second
     l1_time = millis();
     gps_checkData();
     display_setHue();
   }
-  if (millis() - l2_time > 10000 && serialdebug.isChecked()) { // Every minute
+  if (millis() - l2_time > 10000 && serialdebug.isChecked()) { // debug info
     l2_time = millis();
     debug_print("----------------------------------------------------------------", true);
     String gage = elapsedTime(systemClock.getNow(), gps.timestamp);
-    debug_print((String) "GPS-Chars:" + GPS.charsProcessed() + "|With-Fix:" + GPS.sentencesWithFix() + "|Failed:" + GPS.failedChecksum() + "|Passed:" + GPS.passedChecksum() + "|Sats:" + gps.sats + "|Hdop:" + gps.hdop + "|Elev:" + gps.elevation + "|GPSLat:" + gps.lat + "|GPSLon:" + gps.lon + "|Age:" + gage, true);
-    debug_print((String) "System-Brightness:" + currbright + "|ClockHue:" + currhue + "|SavedLat:" + preferences.getString("lat", "") + "|SavedLon:" + preferences.getString("lon", "") + "|CurrentLat:" + currlat + "|CurrentLon:" + currlon + "|IPGeoLat:" + ipgeo.lat + "|IPGeoLon:" + ipgeo.lon + "|IPGeoTZ:" + ipgeo.timezone, true);
+    debug_print((String) "GPS-Chars:" + GPS.charsProcessed() + "|With-Fix:" + GPS.sentencesWithFix() + "|Failed:" + GPS.failedChecksum() + "|Passed:" + GPS.passedChecksum() + "|Sats:" + gps.sats + "|Hdop:" + gps.hdop + "|Elev:" + gps.elevation + "|Lat:" + gps.lat + "|Lon:" + gps.lon + "|Age:" + gage, true);
+    debug_print((String) "System-Brightness:" + currbright + "|ClockHue:" + currhue + "|SavedLat:" + preferences.getString("lat", "") + "|SavedLon:" + preferences.getString("lon", "") + "|CurrentLat:" + currlat + "|CurrentLon:" + currlon, true);
+    debug_print((String) "IPGeo-Lat:" + ipgeo.lat + "|Lon:" + ipgeo.lon + "|Timezone:" + ipgeo.timezone, true);
     String wage = elapsedTime(systemClock.getNow(), weather.timestamp);
     debug_print((String) "Weather-Icon:" + weather.iconH1 + "|Temp:" + weather.feelsLikeH1 + "|Humidity:" + weather.humidityH1 + "|Desc:" + weather.descriptionH1 + "|Age:" + wage, true);
     if (((String)alerts.event1).length() > 0)
         debug_print((String) "Alerts-Status:" + alerts.status1 + "|Severity:" + alerts.severity1 + "|Certainty:" + alerts.certainty1 + "|Urgency:" + alerts.urgency1 + "|Event:" + alerts.event1 + "|Desc:" + alerts.description1, true);
   }
-  if (millis() - l3_time > T1H) { // Every Hour
+  if (millis() - l3_time > T1H) { // check weather forcast
     net_getWeather();
     l3_time = millis();
   }
-  if (millis() - alert_check_time > alert_check_interval.value()*60*1000 && alert_check_interval.value() != 0) { // Every Hour
+  if (millis() - alert_check_time > alert_check_interval.value()*60*1000 && alert_check_interval.value() != 0) { // Check weather alerts
     net_getAlerts();
     alert_check_time = millis();
   }
-  if (millis() - alert_time > T5M) { 
+  if (millis() - alert_time > T5M) {  // show weather alerts
     alert_time = millis();
     if (alerts.active)
-    {
       displaying_alert = true;
-    }
   }
-  if (millis() - weather_time > T10M) {
+  if (millis() - weather_time > T10M) {  // show weather forcast
     weather_time = millis();
     if (systemClock.getNow() - weather.timestamp < T2H)
-    {
       display_weather();
-    }
     else
-    {
       debug_print("Skipping weather display, expired data", true);
-    }
   }
 }
 
@@ -826,7 +843,9 @@ void handleRoot()
 void configSaved()
 {
   buildURLs();
-  debug_print("Configuration was updated.", true);
+  Serial.println("Configuration was updated.");
+  if (!serialdebug.isChecked())
+    Serial.println("Serial debugging has been disabled.");
 }
 
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)

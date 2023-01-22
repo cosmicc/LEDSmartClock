@@ -66,7 +66,7 @@ static ExtendedZoneManager manager(
     zoneProcessorCache);
 
 static char intervals[][9] = {"31536000", "2592000", "604800", "86400", "3600", "60", "1"};
-static char interval_names[][9] = {"Yrs", "Mon", "Wks", "Days", "Hrs", "Min", "Sec"};
+static char interval_names[][9] = {"yrs", "mon", "wks", "days", "hrs", "min", "sec"};
 
 #include "src/structures/structures.h"
 #include "src/colors/colors.h"
@@ -122,7 +122,7 @@ uint8_t iconcycle;              // Current Weather animation cycle
 acetime_t bootTime;            // boot time
 char fixedTz[32];
 
-uint32_t gpsloop_timer, debugTimer, wicon_time = 0L; // Delay timers
+uint32_t tstimer, debugTimer, wicon_time = 0L; // Delay timers
 
 // IotWebConf User custom settings
 // bool debugserial
@@ -390,7 +390,10 @@ void display_setBrightness() {
     matrix->show();
   }
   else {
-    debug_print((String)"No Tsl2561 found. Check wiring: SCL=" + TSL2561_SCL + " SDA=" + TSL2561_SDA, true);
+    if (millis() - tstimer > 10000) {
+      debug_print((String)"No Tsl2561 found. Check wiring: SCL=" + TSL2561_SCL + " SDA=" + TSL2561_SDA, true);
+      tstimer = millis();
+    }
   }
 }
 
@@ -778,12 +781,14 @@ void loop() {
       String als = elapsedTime(now, alerts.lastshown);
       String alg = elapsedTime(now, alerts.lastsuccess);
       String wlg = elapsedTime(now, weather.lastsuccess);
-      debug_print((String) "System - Brightness:" + currbright + " ClockHue:" + currhue + " TempHue:" + temphue + " Uptime:" + uptime, true);
-      debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " SavedLon:" + preferences.getString("lon", "") + " CurrentLat:" + currlat + " CurrentLon:" + currlon, true);
-      debug_print((String) "IPGeo - Lat:" + ipgeo.lat + " Lon:" + ipgeo.lon + " Timezone:" + ipgeo.timezone + " Age:" + igt, true);
-      debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " With-Fix:" + GPS.sentencesWithFix() + " Failed:" + GPS.failedChecksum() + " Passed:" + GPS.passedChecksum() + " Sats:" + gps.sats + " Hdop:" + gps.hdop + " Elev:" + gps.elevation + " Lat:" + gps.lat + " Lon:" + gps.lon + " FixAge:" + gage + " LocAge:" + loca, true);
-      debug_print((String) "Weather - Icon:" + weather.iconH1 + " Temp:" + weather.feelsLikeH1 + " Humidity:" + weather.humidityH1 + " Desc:" + weather.descriptionH1 + " LastAttempt:" + wlt + " LastSuccess:" + wlg + " LastShown:" + wls + " Age:" + wage, true);
-      debug_print((String) "Alerts - Active:" + alerts.active + " Watch:" + alerts.inWatch + " Warn:" + alerts.inWarning + " Status:" + alerts.status1 + " Severity:" + alerts.severity1 + " Certainty:" + alerts.certainty1 + " Urgency:" + alerts.urgency1 + " Event:" + alerts.event1 + " Desc:" + alerts.description1 + " LastAttempt:" + alt + " LastSuccess:" + alg + " LastShown:" + als, true);
+      debug_print((String) "System | Brightness:" + currbright + " - ClockHue:" + currhue + " - TempHue:" + temphue + " - Uptime:" + uptime, true);
+      debug_print((String) "Loc | SavedLat:" + preferences.getString("lat", "") + ", SavedLon:" + preferences.getString("lon", "") + " - CurrentLat:" + currlat + " - CurrentLon:" + currlon, true);
+      debug_print((String) "IPGeo | Lat:" + ipgeo.lat + " - Lon:" + ipgeo.lon + " - Timezone:" + ipgeo.timezone + " - Age:" + igt, true);
+      debug_print((String) "GPS | Chars:" + GPS.charsProcessed() + " - With-Fix:" + GPS.sentencesWithFix() + " - Failed:" + GPS.failedChecksum() + " - Passed:" + GPS.passedChecksum() + " - Sats:" + gps.sats + " - Hdop:" + gps.hdop + " - Elev:" + gps.elevation + " - Lat:" + gps.lat + " - Lon:" + gps.lon + " - FixAge:" + gage + " - LocAge:" + loca, true);
+      debug_print((String) "Weather | Icon:" + weather.iconH1 + " - Temp:" + weather.feelsLikeH1 + " - Humidity:" + weather.humidityH1 + " - Desc:" + weather.descriptionH1 + " - LastAttempt:" + wlt + " - LastSuccess:" + wlg + " - LastShown:" + wls + " - Age:" + wage, true);
+      debug_print((String) "Alerts | Active:" + alerts.active + " - Watch:" + alerts.inWatch + " - Warn:" + alerts.inWarning + " - LastAttempt:" + alt + " - LastSuccess:" + alg + " - LastShown:" + als, true);
+      if (alerts.active)
+        debug_print((String) "*Alert1 Status:" + alerts.status1 + " - Severity:" + alerts.severity1 + " - Certainty:" + alerts.certainty1 + " - Urgency:" + alerts.urgency1 + " - Event:" + alerts.event1 + " - Desc:" + alerts.description1, true);
     }
   }
 }
@@ -858,7 +863,7 @@ void setup () {
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
   debug_print("COMPLETE.", true);
   bootTime = systemClock.getNow();
-  gpsloop_timer, debugTimer, wicon_time = millis(); // reset all delay timers
+  debugTimer, wicon_time, tstimer = millis(); // reset all delay timers
 }
 
 void handleRoot()
@@ -1183,7 +1188,7 @@ String elapsedTime(acetime_t start_time, acetime_t stop_time) {
     tseconds = stop_time - start_time;
   }
   if (seconds > 315000000)
-    return "Never";
+    return "never";
   if (seconds > 60 && seconds < 3600)
     granularity = 1;
   else
@@ -1197,15 +1202,15 @@ String elapsedTime(acetime_t start_time, acetime_t stop_time) {
     if (value != 0) {
       seconds = seconds - value * eatshitbug;
       if (granularity != 0) {
-        result = result + value + " " + interval_names[i];
+        result = result + value + "" + interval_names[i];
         if (granularity > 1)
-          result = result + ", ";
+          result = result + ",";
         granularity--;
       }
     }
   }
   if (granularity > 0) 
-    return (String) tseconds + " Sec";
+    return (String) tseconds + "Sec";
   else
     return result;
 }

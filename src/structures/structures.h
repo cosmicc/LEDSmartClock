@@ -7,6 +7,8 @@ typedef struct GPSData
   double elevation;
   double hdop;
   acetime_t timestamp;
+  acetime_t lastcheck;
+  acetime_t lockage;
 } GPSData;
 
 typedef struct RgbColor
@@ -51,6 +53,7 @@ struct Weather {
   acetime_t timestamp;
   acetime_t lastattempt;
   acetime_t lastshown;
+  acetime_t lastsuccess;
 };
 
 struct Alerts {
@@ -81,6 +84,7 @@ struct Alerts {
   acetime_t timestamp;
   acetime_t lastattempt;
   acetime_t lastshown;
+  acetime_t lastsuccess;
 };
 
 struct Ipgeo {

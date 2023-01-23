@@ -2,16 +2,16 @@
 #define FASTLED_ALL_PINS_HARDWARE_SPI
 #define FASTLED_ESP32_SPI_BUS HSPI
 
+#include <esp_task_wdt.h>
+#include <esp_log.h>
 #include <Preferences.h>
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h>
 #include <IotWebConfTParameter.h>
 #include <AceWire.h> 
-#include <Wire.h>
 #include <AceCommon.h>
 #include <AceTime.h>
 #include <AceTimeClock.h>
-#include <esp_task_wdt.h>
 #include <TinyGPSPlus.h>
 #include <SPI.h>
 #include <Tsl2561.h>
@@ -24,8 +24,8 @@
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock
 
 #define DEBUG_GPS false            // Show gps debug serial messages
-#undef DEBUG_LIGHT           // Show light debug serial messages
-#define WDT_TIMEOUT 20             // Watchdog Timeout
+#undef DEBUG_LIGHT                 // Show light debug serial messages
+#define WDT_TIMEOUT 30             // Watchdog Timeout
 #define GPS_BAUD 9600              // GPS UART gpsSpeed
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
@@ -55,13 +55,6 @@ using ace_time::clock::DS3231Clock;
 using ace_time::clock::SystemClockLoop;
 
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
-
-//static const int CACHE_SIZE = 2;
-//static ExtendedZoneProcessorCache<CACHE_SIZE> zoneProcessorCache;
-//static ExtendedZoneManager manager(
- //   zonedbx::kZoneAndLinkRegistrySize,
- //   zonedbx::kZoneAndLinkRegistry,
- //   zoneProcessorCache);
 
 static char intervals[][9] = {"31536000", "2592000", "604800", "86400", "3600", "60", "1"};
 static char interval_names[][9] = {"yrs", "mon", "wks", "days", "hrs", "min", "sec"};
@@ -137,7 +130,7 @@ class GPSClock: public Clock {
 
   private:
     static const uint8_t kNtpPacketSize = 48;
-    const char* const mServer = "1.us.pool.ntp.org";
+    const char* const mServer = "us.pool.ntp.org";
     uint16_t const mLocalPort = 2390;
     uint16_t const mRequestTimeout = 1000;
     mutable WiFiUDP mUdp;
@@ -175,7 +168,10 @@ class GPSClock: public Clock {
     }
 
   void sendRequest() const {
-    if (GPS.time.isUpdated()) return;
+    while (Serial1.available() > 0)
+        GPS.encode(Serial1.read());
+    if (GPS.time.isUpdated())
+        return;
     if (!ntpIsReady)
         return;
     if (!wifi_connected) {
@@ -193,22 +189,22 @@ class GPSClock: public Clock {
 
   bool isResponseReady() const {
     if (GPS.time.isUpdated()) return true;
-    if (!ntpIsReady || !wifi_connected || abs(Now() - lastntpcheck) > 3600)
+    if (!ntpIsReady || !wifi_connected)
       return false;
     return mUdp.parsePacket() >= kNtpPacketSize;
   }
 
   acetime_t readResponse() const {
-      while (Serial1.available() > 0)
-        GPS.encode(Serial1.read());
       if (GPS.time.isUpdated()) {
-        if (GPS.time.age() < 100) {
+        if (GPS.time.age() < 100 || gps.fix == false) {
           setTimeSource("gps");
           debug_print((String) "GPSClock: GPS Time updated. Age:" + GPS.time.age() + " ms", true);
           resetLastNtpCheck();
-          return gpsunixtime();
+          auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
+          acetime_t epoch_seconds = localDateTime.toEpochSeconds();
+          return epoch_seconds;
         } else {
-            debug_print((String) "GPS time update skipped, time too old: " + GPS.time.age() + " ms", true);
+            debug_print((String) "GPS time update skipped, no gpsfix or time too old: " + GPS.time.age() + " ms", true);
             return kInvalidSeconds;
           }
       }
@@ -228,8 +224,10 @@ class GPSClock: public Clock {
       resetLastNtpCheck();
       setTimeSource("ntp");
       return epochSeconds;
-    } else
-      return kInvalidSeconds;
+    } else {
+        debug_print("0 Ntp second recieved", true);
+        return kInvalidSeconds;
+    }
   }
 
   void sendNtpPacket(const IPAddress& address) const {
@@ -276,9 +274,6 @@ SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/, 60, 60
 // String fixedLon;                    // Fixed GPS Longitude
 // String ipgeoapi                     // IP Geolocation API
 
-static char timezoneValues[][32] = { "-5", "-6", "-7", "-8", "kZoneUS_Hawaii", "kZoneUS_Aleutian", "kZoneUS_Alaska", "0"};
-static char timezoneNames[][32] = { "US_Eastern", "US_Central", "US_Mountain", "US_Pacific", "US_Hawaii", "US_Atlantic", "US_Alaska", "GMT/UTC"};
-
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
   iotwebconf::CheckboxTParameter serialdebug =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("serialdebug").label("Debug to Serial").defaultValue(false).build();
@@ -307,7 +302,8 @@ iotwebconf::ParameterGroup group2 = iotwebconf::ParameterGroup("Weather", "Weath
 iotwebconf::ParameterGroup group3 = iotwebconf::ParameterGroup("Timezone", "Timezone Settings");
   iotwebconf::CheckboxTParameter use_fixed_tz =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("use_fixed_tz").label("Use Fixed Timezone").defaultValue(false).build();
-IotWebConfSelectParameter fixedTZ = IotWebConfSelectParameter("fixedTZ", "Fixed Timezone", fixedTz, 32, (char*)timezoneValues, (char*)timezoneNames, sizeof(timezoneValues) / 32, 32);
+  iotwebconf::IntTParameter<int8_t> fixed_offset =   
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("fixed_offset").label("Fixed GMT Hours Offset").defaultValue(-1).min(-12).max(12).step(1).placeholder("-12...+12").build();
 iotwebconf::ParameterGroup group4 = iotwebconf::ParameterGroup("Location", "Location Settings");
   iotwebconf::CheckboxTParameter use_fixed_loc =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("use_fixed_loc").label("Use Fixed Location").defaultValue(false).build();
@@ -317,8 +313,6 @@ iotwebconf::ParameterGroup group4 = iotwebconf::ParameterGroup("Location", "Loca
     iotwebconf::Builder<iotwebconf::TextTParameter<12>>("fixedLon").label("Fixed Longitude").defaultValue("").build();
   iotwebconf::TextTParameter<33> ipgeoapi =
     iotwebconf::Builder<iotwebconf::TextTParameter<33>>("ipgeoapi").label("IPGeolocation.io API Key").defaultValue("").build();
-
-
 
 void debug_print(String message, bool cr = false) {
   if (serialdebug.isChecked())
@@ -333,7 +327,12 @@ void processTimezone()
   uint32_t timer = millis();
   int16_t savedoffset;
   savedoffset = preferences.getShort("tzoffset", 0);
-  if (ipgeo.tzoffset != 127) {
+  if (use_fixed_tz.isChecked())
+  {
+    currtz = TimeZone::forHours(fixed_offset.value());
+    debug_print((String)"Using fixed timezone offset: " + fixed_offset.value(), true);
+  }
+  else if (ipgeo.tzoffset != 127) {
     currtz = TimeZone::forHours(ipgeo.tzoffset);
     debug_print((String) "Using ipgeolocation offset: " + ipgeo.tzoffset, true);
     if (ipgeo.tzoffset != savedoffset)
@@ -358,8 +357,8 @@ void processLoc(){
     currlat = fixedLat.value();
     currlon = fixedLon.value();
   }
-  String savedlat = preferences.getString("lat", "");
-  String savedlon = preferences.getString("lon", "");
+  String savedlat = preferences.getString("lat", "0");
+  String savedlon = preferences.getString("lon", "0");
   if ((gps.lon).length() == 0 && ((String)ipgeo.lon).length() == 0) {
     currlat = savedlat;
     currlon = savedlon;
@@ -381,6 +380,10 @@ void processLoc(){
     preferences.putString("lat", currlat);
     preferences.putString("lon", currlon);
   }
+  if (olat == 0 || nlat == 0) {
+    preferences.putString("lat", currlat);
+    preferences.putString("lon", currlon);
+  }
   buildURLs();
   if (DEBUG_GPS) debug_print((String)"Process location complete: " + (millis()-timer) + " ms", true);
 }
@@ -393,13 +396,13 @@ void gps_checkData() {
   if (GPS.satellites.isUpdated()) {
     gps.sats = GPS.satellites.value();
     if (DEBUG_GPS) debug_print((String)"GPS Satellites updated: " + gps.sats, true);
-    if (gps.sats > 0 && !gps.fix)
+    if (gps.sats > 0 && gps.fix == false)
     {
       gps.fix = true;
       gps.timestamp = systemClock.getNow();
       if (DEBUG_GPS) debug_print((String)"GPS fix aquired with "+gps.sats+" satellites", true);
     }
-    if (gps.sats == 0 && gps.fix) 
+    if (gps.sats == 0 && gps.fix == true) 
     {
       gps.fix = false;
       if (DEBUG_GPS) debug_print("GPS fix lost, no satellites", true);
@@ -491,11 +494,13 @@ void display_setBrightness() {
 void display_setStatus() {
   uint16_t clr;
   uint16_t wclr;
-  if (timesource == "gps")
+  if (timesource == "gps" && gps.fix == true)
       clr = BLACK;
-  else if (gps.fix)
+  else if (timesource == "gps" && gps.fix == false && (Now() - timeage) > 3600)
       clr = DARKBLUE;
-  else if (timesource = "ntp")
+  else if (gps.fix == true && timesource == "ntp")
+      clr = DARKPURPLE;
+  else if (timesource == "ntp")
     clr = DARKGREEN;
   else if (wifi_connected)
     clr = DARKYELLOW;
@@ -766,6 +771,7 @@ void wifiConnected() {
   matrix->show();
   gpsClock.setup();
   net_getIpgeo();
+  processTimezone();
   net_getWeather();
   if (alert_check_interval.value() != 0)
     net_getAlerts();
@@ -836,12 +842,14 @@ void loop() {
           matrix->drawPixel(16, 5, hsv2rgb(currhue)); // draw colon
           matrix->drawPixel(16, 2, hsv2rgb(currhue)); // draw colon     
         }
+        display_setStatus();
         matrix->show();
         colon = false;
       }
         ldt = getSystemTime();
         runMaintenance();
     }
+    runMaintenance();
     }
   // looping tasks start here
 // check weather forcast
@@ -873,6 +881,7 @@ void loop() {
 // debug info
   if (serialdebug.isChecked()) {
     if (millis() - debugTimer > 30000) { 
+      runMaintenance();
       debugTimer = millis();
       uint32_t timer = millis();
       debug_print("----------------------------------------------------------------", true);
@@ -901,6 +910,7 @@ void loop() {
       if (alerts.active)
         debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
       debug_print((String) "Debug info time: " + (millis() - timer) + " ms", true);
+      runMaintenance();
     }
   }
 }
@@ -927,7 +937,7 @@ void setup () {
   group2.addItem(&alert_show_interval);
   group2.addItem(&weather_show_interval);
   group3.addItem(&use_fixed_tz);
-  group3.addItem(&fixedTZ);
+  group3.addItem(&fixed_offset);
   group4.addItem(&use_fixed_loc);
   group4.addItem(&fixedLat);
   group4.addItem(&fixedLon);
@@ -1018,6 +1028,8 @@ void handleRoot()
 
 void configSaved()
 {
+  processLoc();
+  processTimezone();
   buildURLs();
   Serial.println("Configuration was updated.");
   if (!serialdebug.isChecked())
@@ -1360,12 +1372,6 @@ acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds) {
     uint32_t secondsToCurrentEpochFromNtpEpoch = (uint32_t) 86400 * (uint32_t) daysToCurrentEpochFromNtpEpoch;
     uint32_t epochSeconds = ntpSeconds - secondsToCurrentEpochFromNtpEpoch;
     return (int32_t) epochSeconds;
- }
-
- acetime_t gpsunixtime() {
-  auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
-  acetime_t epoch_seconds = localDateTime.toEpochSeconds();
-  return epoch_seconds;
  }
 
   void setTimeSource(String source) {

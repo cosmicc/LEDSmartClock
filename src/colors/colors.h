@@ -5,7 +5,7 @@ uint16_t RGB16(uint8_t r, uint8_t g, uint8_t b) {
 
 // Display Colors
 uint16_t BLACK	=	RGB16(0, 0, 0);
-uint16_t RED	  =	RGB16(255, 0, 0);
+uint16_t RED	=	RGB16(255, 0, 0);
 uint16_t GREEN	=	RGB16(0, 255, 0);
 uint16_t BLUE 	=	RGB16(0, 0, 255);
 uint16_t YELLOW	=	RGB16(255, 255, 0);
@@ -18,6 +18,7 @@ uint16_t DAYBLUE=	RGB16(0, 128, 255);
 uint16_t LIME 	=	RGB16(128, 255, 0);
 uint16_t DARKGREEN	=	RGB16(0, 150, 0);
 uint16_t DARKRED    =	RGB16(150, 0, 0);
+uint16_t DARKBLUE   =	RGB16(0, 0, 150);
 
 uint16_t hsv2rgb(uint8_t hsvr)
 {

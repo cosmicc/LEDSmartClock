@@ -87,6 +87,7 @@ struct Alerts {
 };
 
 struct Ipgeo {
+  int tzoffset;
   char timezone[32];
   char lat[12];
   char lon[12];

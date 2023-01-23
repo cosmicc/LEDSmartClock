@@ -24,7 +24,7 @@
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock
 
 #define DEBUG_GPS false            // Show gps debug serial messages
-#define DEBUG_LIGHT false          // Show light debug serial messages
+#define DEBUG_LIGHT true         // Show light debug serial messages
 #define WDT_TIMEOUT 20             // Watchdog Timeout
 #define GPS_BAUD 9600              // GPS UART gpsSpeed
 #define GPS_RX_PIN 16              // GPS UART RX PIN
@@ -32,6 +32,8 @@
 #define DAYHUE 40                  // 6am daytime hue start
 #define NIGHTHUE 175               // 10pm nighttime hue end
 #define CONFIG_PIN 2               // Pin for the IotWebConf config pushbutton
+#define LUXMIN 5                   // Lowest brightness min
+#define LUXMAX 100                 // Lowest brightness max
 #define mw 32                      // Width of led matrix
 #define mh 8                       // Hight of led matrix
 #define NUMMATRIX (mw*mh)
@@ -49,15 +51,11 @@
 // AceTime refs
 using namespace ace_time;
 using ace_time::acetime_t;
-//using ace_time::BasicZoneProcessor;
-//using ace_time::TimeZone;
-//using ace_time::ZonedDateTime;
 using ace_time::clock::DS3231Clock;
 using ace_time::clock::NtpClock;
 using ace_time::clock::SystemClockLoop;
 
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
-//static BasicZoneProcessor zoneProcessor;
 static NtpClock ntpClock;
 
 static const int CACHE_SIZE = 2;
@@ -108,20 +106,19 @@ GPSData gps;                    // gps data class
 String wurl;                    // Built Openweather API URL
 String aurl;                    // Built AWS API URL
 String gurl;                    // Built IPGeolocation.io API URL
-uint16_t currbright;            // Current calculated brightness level
+uint8_t currbright;            // Current calculated brightness level
 bool clock_display_offset;      // Clock display offset for single digit hour
-uint16_t brightness_running_avg;// Running avg to smooth out brightness transitions
 bool wifi_connected;            // Wifi is connected or not
 bool displaying_alert;          // Alert is displaying or ready to display
 bool displaying_weather;        // Weather is displaying 
 bool colon;                     // colon on/off status
 uint8_t currhue;                // Current calculated hue based on time of day
-String currlat;
-String currlon;
+String currlat;                 // Current calculated latitude
+String currlon;                 // Current calculated longitude
 uint8_t temphue;                // Current calculated hue based on temp
-TimeZone currtz;
+TimeZone currtz;                // Current calculated timezone
 uint8_t iconcycle;              // Current Weather animation cycle
-acetime_t bootTime;            // boot time
+acetime_t bootTime;             // boot time
 char fixedTz[32];
 
 uint32_t tstimer, debugTimer, wicon_time = 0L; // Delay timers
@@ -369,23 +366,19 @@ void display_setBrightness() {
       iotWebConf.doLoop();
     }
     Tsl.fullLuminosity(full);
-    uint8_t min, max;
-    min = 5;
-    max = 100;
-    uint16_t cb = map(full, 0, 500, min, max);
-    if (cb < min)
-      cb = min;
-    else if (cb > max)
-      cb = max;
-    if (brightness_level.value() == 2)
-      cb =+ 5;
-    else if (brightness_level.value() == 3)
-      cb =+ 15;
-    currbright = cb;
-    brightness_running_avg = (brightness_running_avg + currbright) / 2;
-    if (DEBUG_LIGHT) debug_print((String)"Lux: " + full + " brightness: " + currbright + " avg: " + brightness_running_avg, true);
     Tsl.off();
-    matrix->setBrightness(brightness_running_avg);
+    uint16_t cb = map(full, 0, 500, LUXMIN, LUXMAX);
+    if (cb < LUXMIN)
+      cb = LUXMIN;
+    else if (cb > LUXMAX)
+      cb = LUXMAX;
+    if (brightness_level.value() == 2)
+      cb = cb + 5;
+    else if (brightness_level.value() == 3)
+      cb = cb + 15;
+    currbright = (currbright + cb) / 2;
+    if (DEBUG_LIGHT) debug_print((String)"Lux: " + full + " brightness: " + cb + " avg: " + currbright, true);
+    matrix->setBrightness(currbright);
     matrix->show();
   }
   else {
@@ -462,7 +455,7 @@ void display_scrollWeather(String message, uint8_t spd, uint16_t clr) {
     runMaintenance();
     matrix->clear();
     display_setStatus();
-    matrix->setCursor(x, 1);
+    matrix->setCursor(x, 0);
     matrix->setTextColor(clr);
     matrix->print(capString(message));
     display_weatherIcon();
@@ -485,7 +478,7 @@ void display_scrollText(String message, uint8_t spd, uint16_t clr) {
       runMaintenance();
       matrix->clear();
       display_setStatus();
-      matrix->setCursor(x, 1);
+      matrix->setCursor(x, 0);
       matrix->setTextColor(clr);
       matrix->print(message);
       matrix->show();
@@ -789,16 +782,15 @@ void loop() {
       String alg = elapsedTime(now - alerts.lastsuccess);
       String wlg = elapsedTime(now - weather.lastsuccess);
       String lst = elapsedTime(now - systemClock.getLastSyncTime());
-      Serial.println(now);
       debug_print((String) "System - Brightness:" + currbright + " | ClockHue:" + currhue + " | TempHue:" + temphue + " | Uptime:" + uptime, true);
-      debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | LastSync:" + lst + " | LastAttempt:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) +" sec | NextAttempt:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) +" sec | Skew:" + systemClock.getClockSkew() + " sec", true);
+      debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | LastSync:" + lst + " | LastAttempt:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) +" | NextAttempt:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) +" | Skew:" + systemClock.getClockSkew() + " sec", true);
       debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + ", SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + currlat + " | CurrentLon:" + currlon, true);
       debug_print((String) "IPGeo - Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | Timezone:" + ipgeo.timezone + " | Age:" + igt, true);
       debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
       debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentFeelsLike + " | Humidity:" + weather.currentHumidity + " | Desc:" + weather.currentDescription + " | LastAttempt:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
       debug_print((String) "Alerts - Active:" + alerts.active + " | Watch:" + alerts.inWatch + " | Warn:" + alerts.inWarning + " | LastAttempt:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
       if (alerts.active)
-        debug_print((String) "*Alert1 Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
+        debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
     }
   }
 }

@@ -23,7 +23,7 @@
 
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock
 
-#define DEBUG_GPS false             // Show gps debug serial messages
+#define DEBUG_GPS false            // Show gps debug serial messages
 #undef DEBUG_LIGHT           // Show light debug serial messages
 #define WDT_TIMEOUT 20             // Watchdog Timeout
 #define GPS_BAUD 9600              // GPS UART gpsSpeed
@@ -78,10 +78,12 @@ void net_getWeather();
 void net_getIpgeo();
 void debug_print(String message, bool cr);
 acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds);
-time_t gpsunixtime();
+acetime_t gpsunixtime();
 void runMaintenance();
 void setTimeSource(String);
 void checkGpsSerial();
+void resetLastNtpCheck();
+acetime_t Now();
 
 #include "src/structures/structures.h"
 #include "src/colors/colors.h"
@@ -123,6 +125,8 @@ TimeZone currtz;                // Current calculated timezone
 uint8_t iconcycle;              // Current Weather animation cycle
 acetime_t bootTime;             // boot time
 String timesource = "none";     // Primary timeclock source gps/ntp
+acetime_t lastntpcheck;         // Last time ntp was checked in clock class
+acetime_t timeage;              // Last time the time was updated
 char fixedTz[32];
 
 uint32_t tstimer, debugTimer, wicon_time = 0L; // Delay timers
@@ -133,7 +137,7 @@ class GPSClock: public Clock {
 
   private:
     static const uint8_t kNtpPacketSize = 48;
-    const char* const mServer = "us.pool.ntp.org";
+    const char* const mServer = "1.us.pool.ntp.org";
     uint16_t const mLocalPort = 2390;
     uint16_t const mRequestTimeout = 1000;
     mutable WiFiUDP mUdp;
@@ -154,53 +158,60 @@ class GPSClock: public Clock {
         debug_print(F("GPSClock: NTP ready"), true);
         ntpIsReady = true;
       }
-    }   
+    }
 
   acetime_t getNow() const {
-    checkGpsSerial();
-    if (GPS.time.isUpdated()) {
-      int32_t gpstime = 0;
-      gpstime = gpsunixtime();
-      acetime_t epochtime = convertUnixEpochToAceTime(gpstime);
-      setTimeSource("gps");
-      if (gpstime > 0)
-      {
-          if (DEBUG_GPS)
-            debug_print((String) "GPSClock: GPS Time updated: " + epochtime + " Age:" + GPS.time.age() + " ms", true);
-          return epochtime;
-      } else {
-           debug_print((String) "GPSClock: GPS Time invalid", true);
-           return kInvalidSeconds;
-      }
-    } 
-      if (!ntpIsReady || !wifi_connected) return kInvalidSeconds;
-      sendRequest();
-      uint16_t startTime = millis();
-      while ((uint16_t) (millis() - startTime) < mRequestTimeout)
-        if (isResponseReady()) return readResponse();
+    Serial.println("running getnow");
+    if (GPS.time.isUpdated())
+        readResponse();
+    if (!ntpIsReady || !wifi_connected || abs(Now() - lastntpcheck) > 3600)
       return kInvalidSeconds;
+    sendRequest();
+    uint16_t startTime = millis();
+    while ((uint16_t)(millis() - startTime) < mRequestTimeout)
+      if (isResponseReady())
+           return readResponse();
+    return kInvalidSeconds;
     }
 
   void sendRequest() const {
+    if (GPS.time.isUpdated()) return;
     if (!ntpIsReady)
         return;
     if (!wifi_connected) {
     debug_print(F("GPSClock: NtpsendRequest(): not connected"), true);
     return;
     }
-    while (mUdp.parsePacket() > 0) {}
-    debug_print(F("GPSClock: NtpsendRequest(): sending request"), true);
-    IPAddress ntpServerIP;
-    WiFi.hostByName(mServer, ntpServerIP);
-    sendNtpPacket(ntpServerIP);
+    if (abs(Now() - lastntpcheck) > 3600) {
+      while (mUdp.parsePacket() > 0) {}
+      debug_print(F("GPSClock: NtpsendRequest(): sending request"), true);
+      IPAddress ntpServerIP;
+      WiFi.hostByName(mServer, ntpServerIP);
+      sendNtpPacket(ntpServerIP);  
+    }
   }
 
   bool isResponseReady() const {
-    if (!ntpIsReady || !wifi_connected) return false;
+    if (GPS.time.isUpdated()) return true;
+    if (!ntpIsReady || !wifi_connected || abs(Now() - lastntpcheck) > 3600)
+      return false;
     return mUdp.parsePacket() >= kNtpPacketSize;
   }
 
   acetime_t readResponse() const {
+      while (Serial1.available() > 0)
+        GPS.encode(Serial1.read());
+      if (GPS.time.isUpdated()) {
+        if (GPS.time.age() < 100) {
+          setTimeSource("gps");
+          debug_print((String) "GPSClock: GPS Time updated. Age:" + GPS.time.age() + " ms", true);
+          resetLastNtpCheck();
+          return gpsunixtime();
+        } else {
+            debug_print((String) "GPS time update skipped, time too old: " + GPS.time.age() + " ms", true);
+            return kInvalidSeconds;
+          }
+      }
     if (!ntpIsReady) return kInvalidSeconds;
     if (!wifi_connected) {
       debug_print("GPSClock: NtpreadResponse: not connected", true);
@@ -211,10 +222,14 @@ class GPSClock: public Clock {
     ntpSeconds |= (uint32_t) mPacketBuffer[41] << 16;
     ntpSeconds |= (uint32_t) mPacketBuffer[42] << 8;
     ntpSeconds |= (uint32_t) mPacketBuffer[43];
-    acetime_t epochSeconds = convertUnixEpochToAceTime(ntpSeconds);
-    debug_print((String) "GPSClock: NtpreadResponse: ntpSeconds=" + ntpSeconds + "; epochSeconds=" + epochSeconds, true);
-    setTimeSource("ntp");
-    return epochSeconds;
+    if (ntpSeconds != 0) {
+      acetime_t epochSeconds = convertUnixEpochToAceTime(ntpSeconds);
+      debug_print((String) "GPSClock: NtpreadResponse: ntpSeconds=" + ntpSeconds + "; epochSeconds=" + epochSeconds, true);
+      resetLastNtpCheck();
+      setTimeSource("ntp");
+      return epochSeconds;
+    } else
+      return kInvalidSeconds;
   }
 
   void sendNtpPacket(const IPAddress& address) const {
@@ -237,7 +252,7 @@ class GPSClock: public Clock {
 
 using ace_time::clock::GPSClock;
 static GPSClock gpsClock;
-SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/);  // reference & backup clock
+SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/, 60, 60);  // reference & backup clock
 
 // IotWebConf User custom settings
 // bool debugserial
@@ -336,7 +351,7 @@ void processTimezone()
 
 void processLoc(){
   uint32_t timer = millis();
-    if (use_fixed_loc.isChecked())
+  if (use_fixed_loc.isChecked())
   {
     gps.lat = fixedLat.value();
     gps.lon = fixedLon.value();
@@ -350,7 +365,7 @@ void processLoc(){
     currlon = savedlon;
   }
   else if ((gps.lon).length() == 0 && ((String)ipgeo.lon).length() != 0 && currlon.length() == 0) {
-    //strcpy(currlat, ipgeo.lat);
+    //strcpy(currlat, ipgeo.lat); // FIXME: finish this
     //strcpy(currlon, ipgeo.lon);
   } else if ((gps.lon).length() != 0) {
     currlat = gps.lat;
@@ -367,7 +382,7 @@ void processLoc(){
     preferences.putString("lon", currlon);
   }
   buildURLs();
-  debug_print((String)"Process location complete: " + (millis()-timer) + " ms", true);
+  if (DEBUG_GPS) debug_print((String)"Process location complete: " + (millis()-timer) + " ms", true);
 }
 
 void gps_checkData() {
@@ -375,43 +390,44 @@ void gps_checkData() {
   if (DEBUG_GPS)
     debug_print("Checking GPS data...", true);
   checkGpsSerial();
-    if (GPS.satellites.isUpdated()) {
-      gps.sats = GPS.satellites.value();
-        if (DEBUG_GPS) debug_print((String)"GPS Satellites updated: " + gps.sats, true);
-      if (gps.sats > 0 && !gps.fix)
-      {
-        gps.fix = true;
-        gps.timestamp = systemClock.getNow();
-        if (DEBUG_GPS) debug_print((String)"GPS fix aquired with "+gps.sats+" satellites", true);
-      }
-      if (gps.sats == 0 && gps.fix) {
-        gps.fix = false;
-        if (DEBUG_GPS) debug_print("GPS fix lost, no satellites", true);
-      }
+  if (GPS.satellites.isUpdated()) {
+    gps.sats = GPS.satellites.value();
+    if (DEBUG_GPS) debug_print((String)"GPS Satellites updated: " + gps.sats, true);
+    if (gps.sats > 0 && !gps.fix)
+    {
+      gps.fix = true;
+      gps.timestamp = systemClock.getNow();
+      if (DEBUG_GPS) debug_print((String)"GPS fix aquired with "+gps.sats+" satellites", true);
     }
-    if (GPS.location.isUpdated()) {
-      if (!use_fixed_loc.isChecked()) {
-        double lat = GPS.location.lat();
-        double lon = GPS.location.lng();
-        gps.lockage = systemClock.getNow();
-        processLoc();
-      }
-      else {
-        gps.lat = fixedLat.value();
-        gps.lon = fixedLon.value();
-        processLoc();
-      }
-      if (DEBUG_GPS) debug_print((String)"GPS Location updated: Lat: " + gps.lat + " Lon: " + gps.lon, true);
+    if (gps.sats == 0 && gps.fix) 
+    {
+      gps.fix = false;
+      if (DEBUG_GPS) debug_print("GPS fix lost, no satellites", true);
     }
-    if (GPS.altitude.isUpdated()) {
-      gps.elevation = GPS.altitude.feet();
-      if (DEBUG_GPS) debug_print((String)"GPS Elevation updated: " + gps.elevation, true);
+  }
+  if (GPS.location.isUpdated()) {
+    if (!use_fixed_loc.isChecked()) {
+      gps.lat = String(GPS.location.lat(), 5);
+      gps.lon = String(GPS.location.lng(), 5);
+      gps.lockage = systemClock.getNow();
+      processLoc();
     }
-    if (GPS.hdop.isUpdated()) {
-      gps.hdop = GPS.hdop.hdop();
-      if (DEBUG_GPS) debug_print((String)"GPS HDOP updated: " + gps.hdop, true);
+    else {
+      gps.lat = fixedLat.value();
+      gps.lon = fixedLon.value();
+      processLoc();
     }
-    if (GPS.charsProcessed() < 10) debug_print("WARNING: No GPS data.  Check wiring.", true);
+    if (DEBUG_GPS) debug_print((String)"GPS Location updated: Lat: " + gps.lat + " Lon: " + gps.lon, true);
+  }
+  if (GPS.altitude.isUpdated()) {
+    gps.elevation = GPS.altitude.feet();
+    if (DEBUG_GPS) debug_print((String)"GPS Elevation updated: " + gps.elevation, true);
+  }
+  if (GPS.hdop.isUpdated()) {
+    gps.hdop = GPS.hdop.hdop();
+    if (DEBUG_GPS) debug_print((String)"GPS HDOP updated: " + gps.hdop, true);
+  }
+  if (GPS.charsProcessed() < 10) debug_print("WARNING: No GPS data.  Check wiring.", true);
   if (DEBUG_GPS)
     debug_print((String) "GPS data check complete: " + (millis()-mgps) +" ms", true);
 }
@@ -479,10 +495,11 @@ void display_setStatus() {
       clr = BLACK;
   else if (gps.fix)
       clr = DARKBLUE;
-  else if (wifi_connected)
+  else if (timesource = "ntp")
     clr = DARKGREEN;
-  else
-    clr = DARKRED;
+  else if (wifi_connected)
+    clr = DARKYELLOW;
+  else clr = DARKRED;
   if (alerts.inWarning)
     wclr = RED;
   else if (alerts.inWatch)
@@ -495,7 +512,7 @@ void display_setStatus() {
 
 void display_alertFlash(uint16_t clr, uint8_t laps) {
   uint32_t timer = millis();
-  debug_print("Displaying alert flash...", true);
+  debug_print((String)"Displaying alert flash [" + clr + "] " + laps + " times", true);
   uint32_t flashmilli;
   uint8_t flashcycles = 0;
   flashmilli = millis();
@@ -745,6 +762,8 @@ ace_time::ZonedDateTime getSystemTime() {
 void wifiConnected() {
   debug_print("WiFi was connected.", true);
   wifi_connected = true;
+  display_setStatus();
+  matrix->show();
   gpsClock.setup();
   net_getIpgeo();
   net_getWeather();
@@ -770,7 +789,7 @@ void loop() {
   acetime_t now = systemClock.getNow();
   if (abs(now - bootTime) > (T1Y - 60)) {
     debug_print("1 year system reset!", true);
-    ESP.restart();
+    //ESP.restart();
   }
   if (displaying_alert) // Scroll weather alert
     {
@@ -792,7 +811,9 @@ void loop() {
     displaying_weather = false;
   }
   else { // Show the clock
+    runMaintenance();
     display_showClock();
+    runMaintenance();
     ace_time::ZonedDateTime ldt = getSystemTime();
     uint32_t mysecs = ldt.second();
     colon = true;
@@ -804,6 +825,7 @@ void loop() {
         fstop = 250;
     while (mysecs == ldt.second())
     { // now wait until seconds change
+        runMaintenance();
         if (colon && colonflicker.isChecked() && millis() - flickertime > fstop)
         {
           if (clock_display_offset)
@@ -852,7 +874,9 @@ void loop() {
   if (serialdebug.isChecked()) {
     if (millis() - debugTimer > 30000) { 
       debugTimer = millis();
+      uint32_t timer = millis();
       debug_print("----------------------------------------------------------------", true);
+      printSystemTime();
       String gage = elapsedTime(now - gps.timestamp);
       String loca = elapsedTime(now - gps.lockage);
       String uptime = elapsedTime(now - bootTime);
@@ -865,15 +889,18 @@ void loop() {
       String alg = elapsedTime(now - alerts.lastsuccess);
       String wlg = elapsedTime(now - weather.lastsuccess);
       String lst = elapsedTime(now - systemClock.getLastSyncTime());
+      String npt = elapsedTime(3600 - (now - lastntpcheck));
+      String ooo = elapsedTime(now - timeage);
       debug_print((String) "System - Brightness:" + currbright + " | ClockHue:" + currhue + " | TempHue:" + temphue + " | Uptime:" + uptime, true);
-      debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | LastSync:" + lst + " | LastAttempt:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) +" | NextAttempt:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) +" | Skew:" + systemClock.getClockSkew() + " sec", true);
+      debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | LastSync:" + lst + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) +" | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) +" | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | TimeAge:" + ooo, true);
       debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + ", SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + currlat + " | CurrentLon:" + currlon, true);
       debug_print((String) "IPGeo - Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | Age:" + igt, true);
       debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
-      debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentFeelsLike + " | Humidity:" + weather.currentHumidity + " | Desc:" + weather.currentDescription + " | LastAttempt:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
-      debug_print((String) "Alerts - Active:" + alerts.active + " | Watch:" + alerts.inWatch + " | Warn:" + alerts.inWarning + " | LastAttempt:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
+      debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentFeelsLike + " | Humidity:" + weather.currentHumidity + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
+      debug_print((String) "Alerts - Active:" + alerts.active + " | Watch:" + alerts.inWatch + " | Warn:" + alerts.inWarning + " | LastTry:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
       if (alerts.active)
         debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
+      debug_print((String) "Debug info time: " + (millis() - timer) + " ms", true);
     }
   }
 }
@@ -950,6 +977,7 @@ void setup () {
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
   debug_print("COMPLETE.", true);
   bootTime = systemClock.getNow();
+  lastntpcheck = systemClock.getNow() - 3601;
   debugTimer, wicon_time, tstimer = millis(); // reset all delay timers
   ipgeo.timestamp, gps.timestamp, gps.lastcheck, gps.lockage, alerts.timestamp, alerts.lastattempt, alerts.lastshown, alerts.lastsuccess, weather.timestamp, weather.lastattempt, weather.lastshown, weather.lastsuccess = bootTime - T1Y + 60;
   debug_print((String)"Setup initialization complete: " + (millis()-timer) + " ms", true);
@@ -1334,20 +1362,22 @@ acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds) {
     return (int32_t) epochSeconds;
  }
 
- time_t gpsunixtime() {
-  struct tm t;
-  t.tm_year = GPS.date.year();
-  t.tm_mon = GPS.date.month();
-  t.tm_mday = GPS.date.day();
-  t.tm_hour = GPS.time.hour();
-  t.tm_min = GPS.time.minute();
-  t.tm_sec = GPS.time.second();
-  t.tm_isdst = -1;
-  time_t t_of_day;
-  t_of_day = mktime(&t);
-  return t_of_day;
-}
+ acetime_t gpsunixtime() {
+  auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
+  acetime_t epoch_seconds = localDateTime.toEpochSeconds();
+  return epoch_seconds;
+ }
 
-void setTimeSource(String source) {
-  timesource = source;
-}
+  void setTimeSource(String source) {
+    timesource = source;
+  }
+
+  void resetLastNtpCheck() {
+    acetime_t now = Now();
+    lastntpcheck = now;
+    timeage = now;
+  }
+
+  acetime_t Now() {
+    return systemClock.getNow();
+  }

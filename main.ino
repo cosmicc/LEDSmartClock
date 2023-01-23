@@ -43,6 +43,8 @@
 #define T10M 10*60L  // 10 minutes
 #define T1H 1*60*60L  // 1 hour
 #define T2H 2*60*60L  // 2 hours 
+#define T1D 24*60*60L  // 1 day
+#define T1Y 365*24*60*60L  // 1 year
 
 // AceTime refs
 using namespace ace_time;
@@ -78,7 +80,7 @@ void handleRoot();
 void configSaved();
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper);
 void buildURLs();
-String elapsedTime(acetime_t start_time, acetime_t stop_time);
+String elapsedTime(int32_t seconds);
 void net_getAlerts();
 void net_getWeather();
 void net_getIpgeo();
@@ -368,21 +370,18 @@ void display_setBrightness() {
     }
     Tsl.fullLuminosity(full);
     uint8_t min, max;
-    if (brightness_level.value() == 1)
-    {
-      min = 5;
-      max = 75;
-    } else if (brightness_level.value() == 2){
-      min = 10;
-      max = 80;     
-    } else if (brightness_level.value() == 3){
-      min = 20;
-      max = 90;     
-    } else {
-      min = 5;
-      max = 60;     
-    }
-    currbright = map(full, 0, 500, min, max);
+    min = 5;
+    max = 100;
+    uint16_t cb = map(full, 0, 500, min, max);
+    if (cb < min)
+      cb = min;
+    else if (cb > max)
+      cb = max;
+    if (brightness_level.value() == 2)
+      cb =+ 5;
+    else if (brightness_level.value() == 3)
+      cb =+ 15;
+    currbright = cb;
     brightness_running_avg = (brightness_running_avg + currbright) / 2;
     if (DEBUG_LIGHT) debug_print((String)"Lux: " + full + " brightness: " + currbright + " avg: " + brightness_running_avg, true);
     Tsl.off();
@@ -496,7 +495,7 @@ void display_scrollText(String message, uint8_t spd, uint16_t clr) {
 }
 
 void display_weather() {
-    display_scrollWeather(weather.descriptionH1, text_scroll_speed.value(), WHITE);
+    display_scrollWeather(weather.currentDescription, text_scroll_speed.value(), WHITE);
     uint32_t lp = millis();
     while (millis() - lp < 10000) {
       matrix->clear();
@@ -510,12 +509,12 @@ void display_weather() {
 
 void display_weatherIcon() {
     bool night;
-    if (weather.iconH1[2] == 'n')
+    if (weather.currentIcon[2] == 'n')
       night = true;
     char code1;
     char code2;
-    code1 = weather.iconH1[0];
-    code2 = weather.iconH1[1];
+    code1 = weather.currentIcon[0];
+    code2 = weather.currentIcon[1];
 
       if (code1 == '0' && code2 == '1') {  //clear
         if (night == true)
@@ -558,10 +557,10 @@ void display_temperature() {
     int temp;
     if (fahrenheit.isChecked())
     {
-    temp = weather.feelsLikeH1 * 1.8 + 32;
+    temp = weather.currentFeelsLike * 1.8 + 32;
     }
     else
-    temp = weather.feelsLikeH1;
+    temp = weather.currentFeelsLike;
     int xpos;
     int digits = (abs(temp == 0)) ? 1 : (log10(abs(temp)) + 1);
     bool isneg = false;
@@ -578,7 +577,7 @@ void display_temperature() {
     xpos = 9;
     xpos = xpos * (digits);
     int score = abs(temp);
-    temphue = map(weather.feelsLikeH1, 0, 40, NIGHTHUE, 0);
+    temphue = map(weather.currentFeelsLike, 0, 40, NIGHTHUE, 0);
     if (temphue < 0)
       temphue = 0;
     else if (temphue > NIGHTHUE)
@@ -596,7 +595,6 @@ void display_temperature() {
     }
     matrix->drawBitmap(xpos+(digits*7)+7, 0, sym[0], 8, 8, hsv2rgb(temphue));
 }
-
 
 void display_setHue() { 
   ace_time::ZonedDateTime ldt = getSystemTime();
@@ -686,6 +684,10 @@ void runMaintenance() {
 void loop() {
   runMaintenance();
   acetime_t now = systemClock.getNow();
+  if (abs(now - bootTime) > (T1Y - 60)) {
+    debug_print("1 year system reset!", true);
+    ESP.restart();
+  }
   if (displaying_alert) // Scroll weather alert
     {
       uint16_t acolor;
@@ -736,33 +738,38 @@ void loop() {
     }
     }
   // looping tasks start here
-  if (now - gps.lastcheck > 1) { // Check for GPS data
+  if (abs(now - gps.lastcheck > 1)) { // Check for GPS data
     if (DEBUG_GPS)
         debug_print("checking for new GPS data", true);
     gps_checkData();
   }
 // check weather forcast
-  if (((now - weather.lastsuccess) > (weather_check_interval.value()*T1M)) && weather_check_interval.value() != 0)
+  if ((abs(now - weather.lastsuccess) > (weather_check_interval.value()*T1M)) && weather_check_interval.value() != 0)
   { 
-    if ((now - weather.lastattempt) > T1M)
+    if (abs(now - weather.lastattempt) > T1M)
       net_getWeather();
   }
 // Check weather alerts
-  if (((now - alerts.lastsuccess) > (alert_check_interval.value()*T1M)) && alert_check_interval.value() != 0) 
+//Serial.println((String)"Alerts: "+(now - alerts.lastshown));
+  if ((abs(now - alerts.lastsuccess) > (alert_check_interval.value()*T1M)) && alert_check_interval.value() != 0) 
   { 
-    if ((now - alerts.lastattempt) > T1M)
+    if (abs(now - alerts.lastattempt) > T1M)
       net_getAlerts();
   }
 // show weather alerts
-  if (((now - alerts.lastshown) > (alert_show_interval.value()*T1M)) && alert_show_interval.value() != 0) 
+  if ((abs(now - alerts.lastshown) > (alert_show_interval.value()*T1M)) && alert_show_interval.value() != 0) 
   {  
     if (alerts.active)
       displaying_alert = true;
   }
 // show weather forcast
-  if (((now - weather.lastshown) > (weather_show_interval.value()*T1M)) && weather_show_interval.value() != 0)
-  {
-    if (now - weather.timestamp < T2H)
+    //Serial.println((String) "Weather: "+(now - weather.lastshown));
+    //Serial.println((String) "WLS: "+(weather.lastshown));
+    //Serial.println((String) "Now: " + now);
+    if ((abs(now - weather.lastshown) > (weather_show_interval.value() * T1M)) && weather_show_interval.value() != 0)
+    {
+
+    if (abs(now - weather.timestamp) < T2H)
       displaying_weather = true;
   }
 // debug info
@@ -770,25 +777,28 @@ void loop() {
     if (millis() - debugTimer > 10000) { 
       debugTimer = millis();
       debug_print("----------------------------------------------------------------", true);
-      String gage = elapsedTime(now, gps.timestamp);
-      String loca = elapsedTime(now, gps.lockage);
-      String uptime = elapsedTime(now, bootTime);
-      String igt = elapsedTime(now, ipgeo.timestamp);
-      String wage = elapsedTime(now, weather.timestamp);
-      String wlt = elapsedTime(now, weather.lastattempt);
-      String alt = elapsedTime(now, alerts.lastattempt);
-      String wls = elapsedTime(now, weather.lastshown);
-      String als = elapsedTime(now, alerts.lastshown);
-      String alg = elapsedTime(now, alerts.lastsuccess);
-      String wlg = elapsedTime(now, weather.lastsuccess);
-      debug_print((String) "System | Brightness:" + currbright + " - ClockHue:" + currhue + " - TempHue:" + temphue + " - Uptime:" + uptime, true);
-      debug_print((String) "Loc | SavedLat:" + preferences.getString("lat", "") + ", SavedLon:" + preferences.getString("lon", "") + " - CurrentLat:" + currlat + " - CurrentLon:" + currlon, true);
-      debug_print((String) "IPGeo | Lat:" + ipgeo.lat + " - Lon:" + ipgeo.lon + " - Timezone:" + ipgeo.timezone + " - Age:" + igt, true);
-      debug_print((String) "GPS | Chars:" + GPS.charsProcessed() + " - With-Fix:" + GPS.sentencesWithFix() + " - Failed:" + GPS.failedChecksum() + " - Passed:" + GPS.passedChecksum() + " - Sats:" + gps.sats + " - Hdop:" + gps.hdop + " - Elev:" + gps.elevation + " - Lat:" + gps.lat + " - Lon:" + gps.lon + " - FixAge:" + gage + " - LocAge:" + loca, true);
-      debug_print((String) "Weather | Icon:" + weather.iconH1 + " - Temp:" + weather.feelsLikeH1 + " - Humidity:" + weather.humidityH1 + " - Desc:" + weather.descriptionH1 + " - LastAttempt:" + wlt + " - LastSuccess:" + wlg + " - LastShown:" + wls + " - Age:" + wage, true);
-      debug_print((String) "Alerts | Active:" + alerts.active + " - Watch:" + alerts.inWatch + " - Warn:" + alerts.inWarning + " - LastAttempt:" + alt + " - LastSuccess:" + alg + " - LastShown:" + als, true);
+      String gage = elapsedTime(now - gps.timestamp);
+      String loca = elapsedTime(now - gps.lockage);
+      String uptime = elapsedTime(now - bootTime);
+      String igt = elapsedTime(now - ipgeo.timestamp);
+      String wage = elapsedTime(now - weather.timestamp);
+      String wlt = elapsedTime(now - weather.lastattempt);
+      String alt = elapsedTime(now - alerts.lastattempt);
+      String wls = elapsedTime(now - weather.lastshown);
+      String als = elapsedTime(now - alerts.lastshown);
+      String alg = elapsedTime(now - alerts.lastsuccess);
+      String wlg = elapsedTime(now - weather.lastsuccess);
+      String lst = elapsedTime(now - systemClock.getLastSyncTime());
+      Serial.println(now);
+      debug_print((String) "System - Brightness:" + currbright + " | ClockHue:" + currhue + " | TempHue:" + temphue + " | Uptime:" + uptime, true);
+      debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | LastSync:" + lst + " | LastAttempt:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) +" sec | NextAttempt:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) +" sec | Skew:" + systemClock.getClockSkew() + " sec", true);
+      debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + ", SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + currlat + " | CurrentLon:" + currlon, true);
+      debug_print((String) "IPGeo - Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | Timezone:" + ipgeo.timezone + " | Age:" + igt, true);
+      debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
+      debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentFeelsLike + " | Humidity:" + weather.currentHumidity + " | Desc:" + weather.currentDescription + " | LastAttempt:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
+      debug_print((String) "Alerts - Active:" + alerts.active + " | Watch:" + alerts.inWatch + " | Warn:" + alerts.inWarning + " | LastAttempt:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
       if (alerts.active)
-        debug_print((String) "*Alert1 Status:" + alerts.status1 + " - Severity:" + alerts.severity1 + " - Certainty:" + alerts.certainty1 + " - Urgency:" + alerts.urgency1 + " - Event:" + alerts.event1 + " - Desc:" + alerts.description1, true);
+        debug_print((String) "*Alert1 Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
     }
   }
 }
@@ -864,6 +874,7 @@ void setup () {
   debug_print("COMPLETE.", true);
   bootTime = systemClock.getNow();
   debugTimer, wicon_time, tstimer = millis(); // reset all delay timers
+  ipgeo.timestamp, gps.timestamp, gps.lastcheck, gps.lockage, alerts.timestamp, alerts.lastattempt, alerts.lastshown, alerts.lastsuccess, weather.timestamp, weather.lastattempt, weather.lastshown, weather.lastsuccess = bootTime - T1Y + 60;
 }
 
 void handleRoot()
@@ -1049,27 +1060,26 @@ boolean net_getWeatherJSON() {
 }
 
 void net_fillWeatherValues(Weather* weather) {
-  sprintf(weather->iconH1, "%s", (const char*) weatherJson["hourly"][1]["weather"][0]["icon"]);
-  weather->tempH1 = weatherJson["hourly"][1]["temp"];
-  weather->feelsLikeH1 = weatherJson["hourly"][1]["feels_like"];
-  weather->humidityH1 = weatherJson["hourly"][1]["humidity"];
-  weather->windSpeedH1 = weatherJson["hourly"][1]["wind_speed"];
-  weather->windGustH1 = weatherJson["hourly"][1]["wind_gust"];
-  sprintf(weather->descriptionH1, "%s", (const char*) weatherJson["hourly"][1]["weather"][0]["description"]);
-  sprintf(weather->iconD, "%s", (const char*) weatherJson["daily"][0]["weather"][0]["icon"]);
-  weather->tempMinD = weatherJson["daily"][0]["temp"]["min"];
-  weather->tempMaxD = weatherJson["daily"][0]["temp"]["max"];
-  weather->humidityD = weatherJson["daily"][0]["humidity"];
-  weather->windSpeedD = weatherJson["daily"][0]["wind_speed"];
-  weather->windGustD = weatherJson["daily"][0]["wind_gust"];
-  sprintf(weather->descriptionD, "%s", (const char*) weatherJson["daily"][0]["weather"][0]["description"]);
-  sprintf(weather->iconD1, "%s", (const char*) weatherJson["daily"][1]["weather"][0]["icon"]);
-  weather->tempMinD1 = weatherJson["daily"][1]["temp"]["min"];
-  weather->tempMaxD1 = weatherJson["daily"][1]["temp"]["max"];
-  weather->humidityD1 = weatherJson["daily"][1]["humidity"];
-  weather->windSpeedD1 = weatherJson["daily"][1]["wind_speed"];
-  weather->windGustD1 = weatherJson["daily"][1]["wind_gust"];
-  sprintf(weather->descriptionD1, "%s", (const char*) weatherJson["daily"][1]["weather"][0]["description"]);
+  sprintf(weather->currentIcon, "%s", (const char*) weatherJson["current"]["weather"][0]["icon"]);
+  weather->currentTemp = weatherJson["current"]["temp"];
+  weather->currentFeelsLike = weatherJson["current"]["feels_like"];
+  weather->currentHumidity = weatherJson["current"]["humidity"];
+  weather->currentWindSpeed = weatherJson["current"]["wind_speed"];
+  sprintf(weather->currentDescription, "%s", (const char*) weatherJson["current"]["weather"][0]["description"]);
+  //sprintf(weather->iconD, "%s", (const char*) weatherJson["daily"][0]["weather"][0]["icon"]);
+  //weather->tempMinD = weatherJson["daily"][0]["temp"]["min"];
+  //weather->tempMaxD = weatherJson["daily"][0]["temp"]["max"];
+  //weather->humidityD = weatherJson["daily"][0]["humidity"];
+  //weather->windSpeedD = weatherJson["daily"][0]["wind_speed"];
+  //weather->windGustD = weatherJson["daily"][0]["wind_gust"];
+  //sprintf(weather->descriptionD, "%s", (const char*) weatherJson["daily"][0]["weather"][0]["description"]);
+  //sprintf(weather->iconD1, "%s", (const char*) weatherJson["daily"][1]["weather"][0]["icon"]);
+  //weather->tempMinD1 = weatherJson["daily"][1]["temp"]["min"];
+  //weather->tempMaxD1 = weatherJson["daily"][1]["temp"]["max"];
+  //weather->humidityD1 = weatherJson["daily"][1]["humidity"];
+  //weather->windSpeedD1 = weatherJson["daily"][1]["wind_speed"];
+  //weather->windGustD1 = weatherJson["daily"][1]["wind_gust"];
+  //sprintf(weather->descriptionD1, "%s", (const char*) weatherJson["daily"][1]["weather"][0]["description"]);
   weather->timestamp = systemClock.getNow();
   
 }
@@ -1174,20 +1184,12 @@ void buildURLs() {
   aurl = (String) "https://api.weather.gov/alerts?active=true&status=actual&point=" + currlat + "%2C" + currlon + "&limit=500";
 }
 
-String elapsedTime(acetime_t start_time, acetime_t stop_time) {
+String elapsedTime(int32_t seconds) {
   String result;
-  uint32_t seconds;
-  uint32_t tseconds;
   uint8_t granularity;
-  if (start_time > stop_time) {
-    seconds = start_time - stop_time;
-    tseconds = start_time - stop_time;
-  }
-  else {
-    seconds = stop_time - start_time;
-    tseconds = stop_time - start_time;
-  }
-  if (seconds > 315000000)
+  seconds = abs(seconds);
+  uint32_t tseconds = seconds;
+  if (seconds > T1Y)
     return "never";
   if (seconds > 60 && seconds < 3600)
     granularity = 1;
@@ -1196,21 +1198,21 @@ String elapsedTime(acetime_t start_time, acetime_t stop_time) {
   uint32_t value;
   for (uint8_t i = 0; i < 6; i++)
   {
-    uint32_t eatshitbug = atoi(intervals[i]);
-    value = seconds / eatshitbug;
+    uint32_t vint = atoi(intervals[i]);
+    value = seconds / vint;
     value = floor(value);
     if (value != 0) {
-      seconds = seconds - value * eatshitbug;
+      seconds = seconds - value * vint;
       if (granularity != 0) {
-        result = result + value + "" + interval_names[i];
+        result = result + value + " " + interval_names[i];
         if (granularity > 1)
-          result = result + ",";
+          result = result + ", ";
         granularity--;
       }
     }
   }
   if (granularity > 0) 
-    return (String) tseconds + "Sec";
+    return (String) tseconds + " sec";
   else
     return result;
 }

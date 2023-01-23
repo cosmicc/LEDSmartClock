@@ -26,15 +26,14 @@ typedef struct HsvColor
 } HsvColor;
 
 struct Weather {
-  char iconH1[10];
-  int tempH1;
-  int feelsLikeH1;
-  int humidityH1;
-  char descriptionH1[20];
-  int windSpeedH1;
-  int windGustH1;
+  char currentIcon[5];
+  int currentTemp;
+  int currentFeelsLike;
+  int currentHumidity;
+  char currentDescription[20];
+  int currentWindSpeed;
 
-  char iconD[10];
+  char iconD[5];
   int tempMinD;
   int tempMaxD;
   int humidityD;
@@ -42,7 +41,7 @@ struct Weather {
   int windSpeedD;
   int windGustD;
 
-  char iconD1[10];
+  char iconD1[5];
   int tempMinD1;
   int tempMaxD1;
   int humidityD1;

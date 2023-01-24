@@ -24,7 +24,7 @@
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock
 
 #undef DEBUG_LIGHT                 // Show light debug serial messages
-#define WDT_TIMEOUT 30             // Watchdog Timeout
+#define WDT_TIMEOUT 35             // Watchdog Timeout
 #define GPS_BAUD 9600              // GPS UART gpsSpeed
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
@@ -773,6 +773,17 @@ ace_time::ZonedDateTime getSystemTime() {
   return TimeWZ;
 }
 
+String getSystemTimeString() {
+  Serial.println("A");
+  ace_time::ZonedDateTime now = getSystemTime();
+  Serial.println("B");
+  char *string;
+  Serial.println("1");
+  sprintf(string, "%d/%d/%d %d:%d:%d [%d]", now.month(), now.day(), now.year(), now.hour(), now.minute(), now.second(), now.timeOffset());
+  Serial.println("2");
+  return (String)string;
+}
+
 void wifiConnected() {
   ESP_LOGI(TAG, "WiFi was connected.");
   wifi_connected = true;
@@ -868,7 +879,6 @@ void loop() {
       net_getWeather();
   }
 // Check weather alerts
-//Serial.println((String)"Alerts: "+(now - alerts.lastshown));
   if ((abs(now - alerts.lastsuccess) > (alert_check_interval.value()*T1M)) && alert_check_interval.value() != 0) 
   { 
     if (abs(now - alerts.lastattempt) > T1M)
@@ -914,7 +924,7 @@ void loop() {
       debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + currlat + " | CurrentLon:" + currlon, true);
       debug_print((String) "IPGeo - Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | Age:" + igt, true);
       debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
-      debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentFeelsLike + " | Humidity:" + weather.currentHumidity + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
+      debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + " | FeelsLike:" + weather.currentFeelsLike + " | Humidity:" + weather.currentHumidity + " | Wind:" + weather.currentWindSpeed + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
       debug_print((String) "Alerts - Active:" + alerts.active + " | Watch:" + alerts.inWatch + " | Warn:" + alerts.inWarning + " | LastTry:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
       if (alerts.active)
         debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
@@ -927,14 +937,14 @@ void loop() {
 void setup () {
   Serial.begin(115200);
   uint32_t timer = millis();
-  debug_print("Initializing Hardware Watchdog...", false);
+  ESP_LOGD(TAG, "Initializing Hardware Watchdog...");
   esp_task_wdt_init(WDT_TIMEOUT, true);                //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);                              //add current thread to WDT watch
-  debug_print("COMPLETE.", true);
-  debug_print("Reading stored location and timezone...", false);
+  ESP_LOGD(TAG, "Hardware Watchdog initilization complete.");
+  ESP_LOGD(TAG, "Reading stored preferences...");
   preferences.begin("location", false);
-  debug_print("COMPLETE.", true);
-  debug_print("Initializing IotWebConf...", true);
+  ESP_LOGD(TAG, "Stored preferences read complete.");
+  ESP_LOGD(TAG,"Initializing IotWebConf...");
   group1.addItem(&brightness_level);
   group1.addItem(&text_scroll_speed);
   group1.addItem(&colonflicker);
@@ -969,34 +979,32 @@ void setup () {
   server.on("/", handleRoot);
   server.on("/config", []{ iotWebConf.handleConfig(); });
   server.onNotFound([](){ iotWebConf.handleNotFound(); });
-  debug_print("IotWebConf is READY.", true);
-  debug_print("Initializing the RTC module...", false);
+  ESP_LOGD(TAG, "IotWebConf initilization is complete. Web server is ready.");
+  ESP_LOGD(TAG, "Initializing the system clock...");
   Wire.begin();
   wireInterface.begin();
   systemClock.setup();
   dsClock.setup();
-  debug_print("COMPLETE.", true);
-  debug_print("System Clock: ", false);
-  printSystemTime();
-  debug_print("Initializing Light Sensor...", false);
+  ESP_LOGD(TAG, "System clock initilization complete.");
+  //String ts = getSystemTimeString(); // FIXME:
+  //ESP_LOGI(TAG, "System time: %s", ts);
+  ESP_LOGD(TAG, "Initializing Light Sensor...");
   Wire.begin(TSL2561_SDA, TSL2561_SCL);
-  debug_print("COMPLETE.", true);
+  ESP_LOGD(TAG, "Light Sensor initilization complete.");
   gps.lat = "0";
   gps.lon = "0";
   if (use_fixed_loc.isChecked())
-    debug_print((String)"Setting Fixed GPS Location Lat: " + fixedLat.value()+ " Lon: " + fixedLon.value(), true);
+    ESP_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
   processLoc();
-  debug_print("Initializing the display...", true);
+  ESP_LOGD(TAG, "Initializing the display...");
   display_setHue();
   FastLED.addLeds<NEOPIXEL, HSPI_MOSI>(leds, NUMMATRIX).setCorrection(TypicalLEDStrip);
   matrix->begin();
   matrix->setTextWrap(false);
-  //display_setBrightness();
-  //matrix->setBrightness(currbright);
-  debug_print("Display initalization complete.", true);
-  debug_print("Initializing GPS Module...", false);
+  ESP_LOGD(TAG, "Display initalization complete.");
+  ESP_LOGD(TAG, "Initializing GPS Module...");
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
-  debug_print("COMPLETE.", true);
+  ESP_LOGD(TAG, "GPS Module initilization complete.");
   bootTime = systemClock.getNow();
   lastntpcheck = systemClock.getNow() - 3601;
   debugTimer, wicon_time, tstimer = millis(); // reset all delay timers
@@ -1012,7 +1020,7 @@ void setup () {
   weather.lastattempt = bootTime - T1Y + 60;
   weather.lastshown = bootTime - T1Y + 60;
   weather.lastsuccess = bootTime - T1Y + 60;
-  debug_print((String)"Setup initialization complete: " + (millis()-timer) + " ms", true);
+  ESP_LOGD(TAG, "Setup initialization complete: %d ms", (millis()-timer));
 }
 
 void handleRoot()
@@ -1053,9 +1061,9 @@ void configSaved()
   processLoc();
   processTimezone();
   buildURLs();
-  Serial.println("Configuration was updated.");
+  ESP_LOGI(TAG, "Configuration was updated.");
   if (!serialdebug.isChecked())
-    Serial.println("Serial debugging has been disabled.");
+    Serial.println("Serial debug info has been disabled.");
 }
 
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
@@ -1108,12 +1116,6 @@ void fillAlertsFromJson(Alerts* alerts) {
     sprintf(alerts->event1, "%s", (const char *)alertsJson["features"][0]["properties"]["event"]);
     sprintf(alerts->description1, "%s", (const char *)alertsJson["features"][0]["properties"]["parameters"]["NWSheadline"][0]);
     alerts->timestamp = systemClock.getNow();
-    //debug_print("Sizeof:  ");
-    //debug_print(sizeof(alertsJson["features"]));
-    //debug_print(alertsJson["features"]);
-    //debug_print("Sizeof:  ");
-    //debug_print(sizeof(alertsJson["features"][0]));
-    //debug_print(alertsJson["features"][0]);
     
     if ((String)alerts->certainty1 == "Observed" || (String)alerts->certainty1 == "Likely")
     {

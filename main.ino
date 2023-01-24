@@ -23,7 +23,6 @@
 
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock
 
-#define DEBUG_GPS false            // Show gps debug serial messages
 #undef DEBUG_LIGHT                 // Show light debug serial messages
 #define WDT_TIMEOUT 30             // Watchdog Timeout
 #define GPS_BAUD 9600              // GPS UART gpsSpeed
@@ -48,6 +47,12 @@
 #define T1D 24*60*60L  // 1 day
 #define T1Y 365*24*60*60L  // 1 year
 
+const static String error = "error";
+const static String warn = "warning";
+const static String info = "info";
+const static String debug = "debug";
+const static String verb = "verbose";
+
 // AceTime refs
 using namespace ace_time;
 using ace_time::acetime_t;
@@ -70,6 +75,7 @@ void net_getAlerts();
 void net_getWeather();
 void net_getIpgeo();
 void debug_print(String message, bool cr);
+void logger(String type, String message);
 acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds);
 acetime_t gpsunixtime();
 void runMaintenance();
@@ -85,6 +91,7 @@ acetime_t Now();
 // Global Variables & Objects
 const char thingName[] = "LedSmartClock";           // Default SSID used for new setup
 const char wifiInitialApPassword[] = "setmeup";     // Default AP password for new setup
+static const char* TAG = "LedClock";                // Logging tag
 WireInterface wireInterface(Wire);                  // I2C hardware object
 DS3231Clock<WireInterface> dsClock(wireInterface);  // Hardware DS3231 RTC object
 CRGB leds[NUMMATRIX];           // Led matrix array object
@@ -111,8 +118,8 @@ bool displaying_alert;          // Alert is displaying or ready to display
 bool displaying_weather;        // Weather is displaying 
 bool colon;                     // colon on/off status
 uint8_t currhue;                // Current calculated hue based on time of day
-String currlat;                 // Current calculated latitude
-String currlon;                 // Current calculated longitude
+String currlat = "0";                 // Current calculated latitude
+String currlon = "0";                 // Current calculated longitude
 uint8_t temphue;                // Current calculated hue based on temp
 TimeZone currtz;                // Current calculated timezone
 uint8_t iconcycle;              // Current Weather animation cycle
@@ -148,13 +155,12 @@ class GPSClock: public Clock {
     void setup() {
       if (wifi_connected) {
         mUdp.begin(mLocalPort);
-        debug_print(F("GPSClock: NTP ready"), true);
+        ESP_LOGD(TAG, "GPSClock: NTP ready");
         ntpIsReady = true;
       }
     }
 
   acetime_t getNow() const {
-    Serial.println("running getnow");
     if (GPS.time.isUpdated())
         readResponse();
     if (!ntpIsReady || !wifi_connected || abs(Now() - lastntpcheck) > 3600)
@@ -175,12 +181,12 @@ class GPSClock: public Clock {
     if (!ntpIsReady)
         return;
     if (!wifi_connected) {
-    debug_print(F("GPSClock: NtpsendRequest(): not connected"), true);
+    ESP_LOGW(TAG, "GPSClock: NtpsendRequest(): not connected");
     return;
     }
     if (abs(Now() - lastntpcheck) > 3600) {
       while (mUdp.parsePacket() > 0) {}
-      debug_print(F("GPSClock: NtpsendRequest(): sending request"), true);
+      ESP_LOGD(TAG, "GPSClock: NtpsendRequest(): sending request");
       IPAddress ntpServerIP;
       WiFi.hostByName(mServer, ntpServerIP);
       sendNtpPacket(ntpServerIP);  
@@ -198,19 +204,19 @@ class GPSClock: public Clock {
       if (GPS.time.isUpdated()) {
         if (GPS.time.age() < 100 || gps.fix == false) {
           setTimeSource("gps");
-          debug_print((String) "GPSClock: GPS Time updated. Age:" + GPS.time.age() + " ms", true);
+          ESP_LOGI(TAG, "GPSClock: GPS Time updated. Age: %d ms", GPS.time.age());
           resetLastNtpCheck();
           auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
           acetime_t epoch_seconds = localDateTime.toEpochSeconds();
           return epoch_seconds;
         } else {
-            debug_print((String) "GPS time update skipped, no gpsfix or time too old: " + GPS.time.age() + " ms", true);
+            ESP_LOGW(TAG, "GPS time update skipped, no gpsfix or time too old: %d ms", GPS.time.age());
             return kInvalidSeconds;
           }
       }
     if (!ntpIsReady) return kInvalidSeconds;
     if (!wifi_connected) {
-      debug_print("GPSClock: NtpreadResponse: not connected", true);
+      ESP_LOGW(TAG, "GPSClock: NtpreadResponse: not connected");
       return kInvalidSeconds;
     }
     mUdp.read(mPacketBuffer, kNtpPacketSize);
@@ -220,12 +226,12 @@ class GPSClock: public Clock {
     ntpSeconds |= (uint32_t) mPacketBuffer[43];
     if (ntpSeconds != 0) {
       acetime_t epochSeconds = convertUnixEpochToAceTime(ntpSeconds);
-      debug_print((String) "GPSClock: NtpreadResponse: ntpSeconds=" + ntpSeconds + "; epochSeconds=" + epochSeconds, true);
+      ESP_LOGI(TAG, "GPSClock: NtpreadResponse: ntpSeconds= %d; epochSeconds=%d", ntpSeconds, epochSeconds);
       resetLastNtpCheck();
       setTimeSource("ntp");
       return epochSeconds;
     } else {
-        debug_print("0 Ntp second recieved", true);
+        ESP_LOGE("0 Ntp second recieved");
         return kInvalidSeconds;
     }
   }
@@ -330,22 +336,22 @@ void processTimezone()
   if (use_fixed_tz.isChecked())
   {
     currtz = TimeZone::forHours(fixed_offset.value());
-    debug_print((String)"Using fixed timezone offset: " + fixed_offset.value(), true);
+    ESP_LOGD(TAG, "Using fixed timezone offset: %d", fixed_offset.value());
   }
   else if (ipgeo.tzoffset != 127) {
     currtz = TimeZone::forHours(ipgeo.tzoffset);
-    debug_print((String) "Using ipgeolocation offset: " + ipgeo.tzoffset, true);
+    ESP_LOGD(TAG, "Using ipgeolocation offset: %d", ipgeo.tzoffset);
     if (ipgeo.tzoffset != savedoffset)
     {
-      debug_print((String) "IP Geo timezone [" + ipgeo.tzoffset + "] (" + ipgeo.timezone + ") is different then saved timezone [" + savedoffset + "], saving new timezone", true);
+      ESP_LOGW(TAG, "IP Geo timezone [%d] (%s) is different then saved timezone [%d], saving new timezone", ipgeo.tzoffset, ipgeo.timezone, savedoffset);
       preferences.putShort("tzoffset", ipgeo.tzoffset);
     }
   }
   else {
     currtz = TimeZone::forHours(savedoffset);
-    debug_print("Using saved timezone offset: " + savedoffset, true);
+    ESP_LOGD(TAG, "Using saved timezone offset: %d", savedoffset);
   }
-  debug_print((String)"Process timezone complete: " + (millis()-timer) + " ms", true);
+  ESP_LOGV(TAG, "Process timezone complete: %d ms", (millis()-timer));
 }
 
 void processLoc(){
@@ -359,14 +365,19 @@ void processLoc(){
   }
   String savedlat = preferences.getString("lat", "0");
   String savedlon = preferences.getString("lon", "0");
-  if ((gps.lon).length() == 0 && ((String)ipgeo.lon).length() == 0) {
+  if (gps.lon == "0" && ipgeo.lon[0] == '\0' && currlon == "0")
+  {
     currlat = savedlat;
     currlon = savedlon;
   }
-  else if ((gps.lon).length() == 0 && ((String)ipgeo.lon).length() != 0 && currlon.length() == 0) {
-    //strcpy(currlat, ipgeo.lat); // FIXME: finish this
-    //strcpy(currlon, ipgeo.lon);
-  } else if ((gps.lon).length() != 0) {
+  else if (gps.lon == "0" && ipgeo.lon[0] != '\0' && currlon == "0")
+  {
+    currlat = (String)ipgeo.lat; 
+    currlon = (String)ipgeo.lon;
+    ESP_LOGI(TAG, "Using IPGeo location information: Lat: %s Lon: %s", (ipgeo.lat), (ipgeo.lon));
+  }
+  else if (gps.lon != "0")
+  {
     currlat = gps.lat;
     currlon = gps.lon;
   }
@@ -375,8 +386,8 @@ void processLoc(){
   double olat = savedlat.toDouble();
   double olon = savedlon.toDouble();
   if (abs(nlat - olat) > 0.02 || abs(nlon - olon) > 0.02) {
-    debug_print("Major location shift, saving values", true);
-    debug_print((String) "Lat: ["+olat+"] -> ["+nlat+"] Lon: ["+olon+"] -> ["+nlon+"]", true);
+    ESP_LOGW(TAG, "Major location shift, saving values");
+    ESP_LOGW(TAG, "Lat:[%0.6lf]->[%0.6lf] Lon:[%0.6lf]->[%0.6lf]", olat, nlat, olon, nlon);
     preferences.putString("lat", currlat);
     preferences.putString("lon", currlon);
   }
@@ -385,27 +396,26 @@ void processLoc(){
     preferences.putString("lon", currlon);
   }
   buildURLs();
-  if (DEBUG_GPS) debug_print((String)"Process location complete: " + (millis()-timer) + " ms", true);
+  ESP_LOGD(TAG, "Process location complete: %d ms", (millis()-timer));
 }
 
 void gps_checkData() {
   uint32_t mgps = millis();
-  if (DEBUG_GPS)
-    debug_print("Checking GPS data...", true);
+  ESP_LOGV(TAG, "Checking GPS data...");
   checkGpsSerial();
   if (GPS.satellites.isUpdated()) {
     gps.sats = GPS.satellites.value();
-    if (DEBUG_GPS) debug_print((String)"GPS Satellites updated: " + gps.sats, true);
+    ESP_LOGD(TAG, "GPS Satellites updated: %d", gps.sats);
     if (gps.sats > 0 && gps.fix == false)
     {
       gps.fix = true;
       gps.timestamp = systemClock.getNow();
-      if (DEBUG_GPS) debug_print((String)"GPS fix aquired with "+gps.sats+" satellites", true);
+      ESP_LOGI(TAG, "GPS fix aquired with %d satellites", gps.sats);
     }
     if (gps.sats == 0 && gps.fix == true) 
     {
       gps.fix = false;
-      if (DEBUG_GPS) debug_print("GPS fix lost, no satellites", true);
+      ESP_LOGI(TAG, "GPS fix lost, no satellites");
     }
   }
   if (GPS.location.isUpdated()) {
@@ -420,19 +430,18 @@ void gps_checkData() {
       gps.lon = fixedLon.value();
       processLoc();
     }
-    if (DEBUG_GPS) debug_print((String)"GPS Location updated: Lat: " + gps.lat + " Lon: " + gps.lon, true);
+    ESP_LOGV(TAG, "GPS Location updated: Lat: %s Lon: %s", gps.lat, gps.lon);
   }
   if (GPS.altitude.isUpdated()) {
     gps.elevation = GPS.altitude.feet();
-    if (DEBUG_GPS) debug_print((String)"GPS Elevation updated: " + gps.elevation, true);
+    ESP_LOGV(TAG, "GPS Elevation updated: %f feet", gps.elevation);
   }
   if (GPS.hdop.isUpdated()) {
     gps.hdop = GPS.hdop.hdop();
-    if (DEBUG_GPS) debug_print((String)"GPS HDOP updated: " + gps.hdop, true);
+    ESP_LOGV(TAG, "GPS HDOP updated: %f m",gps.hdop);
   }
-  if (GPS.charsProcessed() < 10) debug_print("WARNING: No GPS data.  Check wiring.", true);
-  if (DEBUG_GPS)
-    debug_print((String) "GPS data check complete: " + (millis()-mgps) +" ms", true);
+  if (GPS.charsProcessed() < 10) ESP_LOGE(TAG, "No GPS data. Check wiring.");
+  ESP_LOGV(TAG, "GPS data check complete: %d ms", (millis()-mgps));
 }
 
 void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) { 
@@ -476,7 +485,7 @@ void display_setBrightness() {
         cb = cb + 15;
       currbright = (currbright + cb) / 2;
   #ifdef DEBUG_LIGHT
-        debug_print((String) "Lux: " + full + " brightness: " + cb + " avg: " + currbright + " Exe: " + (millis()-bms), true);
+        logger((String) "Lux: " + full + " brightness: " + cb + " avg: " + currbright + " Exe: " + (millis()-bms), true);
   #endif
       matrix->setBrightness(currbright);
       matrix->show();
@@ -485,7 +494,7 @@ void display_setBrightness() {
     {
       if (millis() - tstimer > 10000)
       {
-        debug_print((String) "No Tsl2561 found. Check wiring: SCL=" + TSL2561_SCL + " SDA=" + TSL2561_SDA, true);
+        ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
         tstimer = millis();
       }
     }
@@ -517,7 +526,7 @@ void display_setStatus() {
 
 void display_alertFlash(uint16_t clr, uint8_t laps) {
   uint32_t timer = millis();
-  debug_print((String)"Displaying alert flash [" + clr + "] " + laps + " times", true);
+  ESP_LOGD(TAG, "Displaying alert flash [%d] %d times", clr, laps);
   uint32_t flashmilli;
   uint8_t flashcycles = 0;
   flashmilli = millis();
@@ -542,12 +551,12 @@ void display_alertFlash(uint16_t clr, uint8_t laps) {
   flashmilli = millis();
   while (millis() - flashmilli < 250)
     runMaintenance();
-  debug_print((String)"Alert flash complete: " + (millis()-timer) + " ms", true);
+  ESP_LOGV(TAG, "Alert flash complete: %d ms", (millis()-timer));
 }
 
 void display_scrollWeather(String message, uint8_t spd, uint16_t clr) {
   uint32_t timer = millis();
-  debug_print((String) "Scrolling weather text: " + message, true);
+  ESP_LOGD(TAG, "Scrolling weather text: %s", message);
   uint8_t speed = map(spd, 1, 10, 100, 10);
   uint16_t size = message.length() * 6;
   uint32_t scrollmilli;
@@ -566,12 +575,12 @@ void display_scrollWeather(String message, uint8_t spd, uint16_t clr) {
     matrix->show();
     }
   }
-    debug_print((String)"Scrolling text complete: " + (millis()-timer) + " ms", true);
+    ESP_LOGV(TAG, "Scrolling text complete: %d ms", (millis()-timer));
 }
 
 void display_scrollText(String message, uint8_t spd, uint16_t clr) {
   uint32_t timer = millis();
-  debug_print((String) "Scrolling fullscreen text: " + message, true);
+  ESP_LOGD(TAG, "Scrolling fullscreen text: %s", message);
   uint8_t speed = map(spd, 1, 10, 100, 10);
   uint16_t size = message.length() * 6;
   uint32_t scrollmilli;
@@ -589,7 +598,7 @@ void display_scrollText(String message, uint8_t spd, uint16_t clr) {
       matrix->show();
     }
   }
-    debug_print((String)"Scrolling text complete: "  + (millis()-timer) + " ms", true);
+    ESP_LOGV(TAG, "Scrolling text complete: %d ms", (millis()-timer));
 }
 
 void display_weather() {
@@ -604,7 +613,7 @@ void display_weather() {
       matrix->show();
       runMaintenance();
     }
-    debug_print((String)"Display temperature complete: "  + (millis()-timer) + " ms", true);
+    ESP_LOGV(TAG, "Display temperature complete: %d ms", (millis()-timer));
 }
 
 void display_weatherIcon() {
@@ -641,7 +650,7 @@ void display_weatherIcon() {
       else if (code1 == '1' && code2 == '1') //thunderstorm
         matrix->drawRGBBitmap(mw-8, 0, thunderstorm[iconcycle], 8, 8);
       else
-        debug_print("No Weather icon found to use", true);
+        ESP_LOGE(TAG, "No Weather icon found to use");
 
     if (millis() - wicon_time > 250)
     {
@@ -765,7 +774,7 @@ ace_time::ZonedDateTime getSystemTime() {
 }
 
 void wifiConnected() {
-  debug_print("WiFi was connected.", true);
+  ESP_LOGI(TAG, "WiFi was connected.");
   wifi_connected = true;
   display_setStatus();
   matrix->show();
@@ -794,7 +803,7 @@ void loop() {
   gps_checkData();
   acetime_t now = systemClock.getNow();
   if (abs(now - bootTime) > (T1Y - 60)) {
-    debug_print("1 year system reset!", true);
+    ESP_LOGE(TAG, "1 year system reset!");
     //ESP.restart();
   }
   if (displaying_alert) // Scroll weather alert
@@ -902,7 +911,7 @@ void loop() {
       String ooo = elapsedTime(now - timeage);
       debug_print((String) "System - Brightness:" + currbright + " | ClockHue:" + currhue + " | TempHue:" + temphue + " | Uptime:" + uptime, true);
       debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | LastSync:" + lst + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) +" | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) +" | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | TimeAge:" + ooo, true);
-      debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + ", SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + currlat + " | CurrentLon:" + currlon, true);
+      debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + currlat + " | CurrentLon:" + currlon, true);
       debug_print((String) "IPGeo - Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | Age:" + igt, true);
       debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
       debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentFeelsLike + " | Humidity:" + weather.currentHumidity + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
@@ -972,6 +981,8 @@ void setup () {
   debug_print("Initializing Light Sensor...", false);
   Wire.begin(TSL2561_SDA, TSL2561_SCL);
   debug_print("COMPLETE.", true);
+  gps.lat = "0";
+  gps.lon = "0";
   if (use_fixed_loc.isChecked())
     debug_print((String)"Setting Fixed GPS Location Lat: " + fixedLat.value()+ " Lon: " + fixedLon.value(), true);
   processLoc();
@@ -989,7 +1000,18 @@ void setup () {
   bootTime = systemClock.getNow();
   lastntpcheck = systemClock.getNow() - 3601;
   debugTimer, wicon_time, tstimer = millis(); // reset all delay timers
-  ipgeo.timestamp, gps.timestamp, gps.lastcheck, gps.lockage, alerts.timestamp, alerts.lastattempt, alerts.lastshown, alerts.lastsuccess, weather.timestamp, weather.lastattempt, weather.lastshown, weather.lastsuccess = bootTime - T1Y + 60;
+  ipgeo.timestamp = bootTime - T1Y + 60;
+  gps.timestamp = bootTime - T1Y + 60;
+  gps.lastcheck = bootTime - T1Y + 60;
+  gps.lockage = bootTime - T1Y + 60;
+  alerts.timestamp = bootTime - T1Y + 60;
+  alerts.lastattempt = bootTime - T1Y + 60;
+  alerts.lastshown = bootTime - T1Y + 60;
+  alerts.lastsuccess = bootTime - T1Y + 60;
+  weather.timestamp = bootTime - T1Y + 60;
+  weather.lastattempt = bootTime - T1Y + 60;
+  weather.lastshown = bootTime - T1Y + 60;
+  weather.lastsuccess = bootTime - T1Y + 60;
   debug_print((String)"Setup initialization complete: " + (millis()-timer) + " ms", true);
 }
 
@@ -1038,7 +1060,7 @@ void configSaved()
 
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
 {
-  debug_print("Validating web form...", true);
+  ESP_LOGD(TAG, "Validating web form...");
   bool valid = true;
 
 /*
@@ -1054,19 +1076,17 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
 
 boolean net_getAlertJSON() {
   boolean success = false;
-  debug_print("Connecting to ", false);
-  debug_print(aurl, true);
+  ESP_LOGD(TAG, "Connecting to %s", aurl);
   HTTPClient http;
   runMaintenance();
   http.begin(aurl);
   int httpCode = http.GET();
-  debug_print("HTTP code : ", false);
-  debug_print((String)httpCode, true);
+  ESP_LOGD(TAG, "HTTP code : %d", httpCode);
   if (httpCode == 200)
   {
     alertsJson = JSON.parse(http.getString());
     if (JSON.typeof(alertsJson) == "undefined") {
-      debug_print("Parsing alertJson input failed!", true);
+      ESP_LOGE(TAG, "Parsing alertJson input failed!");
     } else {
       success = true;
     }
@@ -1111,18 +1131,18 @@ void fillAlertsFromJson(Alerts* alerts) {
       alerts->inWarning = false;
       alerts->inWatch= false;     
     }
-    debug_print("Alert found", true);
+    ESP_LOGI(TAG, "Weather Alert found");
   }
   else {
     alerts->active = false;
-    debug_print("No Alerts found", true);
+    ESP_LOGD(TAG, "No Alerts found");
   }
 }
 
 void net_getAlerts() {
   if (wifi_connected && (currlat).length() > 1) {
     uint32_t timer = millis();
-    debug_print("Checking weather alerts...", true);
+    ESP_LOGD(TAG, "Checking weather alerts...");
     int64_t retries = 1;
     boolean jsonParsed = false;
     while (!jsonParsed && (retries-- > 0))
@@ -1133,36 +1153,34 @@ void net_getAlerts() {
     runMaintenance();
     if (!jsonParsed)
     {
-      debug_print("Error: JSON", true);
+      ESP_LOGE(TAG, "Error: JSON");
     }
     else
     {
       fillAlertsFromJson(&alerts);
-      debug_print((String)"Weather alert check complete: " + (millis()-timer) + " ms", true);
+      ESP_LOGD(TAG, "Weather alert check complete: %d", (millis()-timer));
       alerts.lastsuccess = systemClock.getNow();
     }
   } else {
-    debug_print("Weather alert check skipped, no wifi or loc.", true);
+    ESP_LOGW(TAG, "Weather alert check skipped, no wifi or loc.");
   }
   alerts.lastattempt = systemClock.getNow();
 }
 
 boolean net_getWeatherJSON() {
   boolean success = false;
-  debug_print("Connecting to ", false);
-  debug_print(wurl, true);
+  ESP_LOGD(TAG, "Connecting to: %s", wurl);
   HTTPClient http;
   runMaintenance();
   http.begin(wurl);
   int httpCode = http.GET();
-  debug_print("HTTP code : ", false);
-  debug_print((String)httpCode, true);
+  ESP_LOGD(TAG, "HTTP code : %d", httpCode);
   runMaintenance();
   if (httpCode == 200)
   {
     weatherJson = JSON.parse(http.getString());
     if (JSON.typeof(weatherJson) == "undefined") {
-      debug_print("Parsing weatherJson input failed!", true);
+      ESP_LOGE(TAG, "Parsing weatherJson input failed!");
     } else {
       success = true;
     }
@@ -1206,7 +1224,7 @@ void net_fillWeatherValues(Weather* weather) {
 void net_getWeather() {
   if (wifi_connected && (currlat).length() > 1 && isApiKeyValid(weatherapi.value())) {
     uint32_t timer = millis();
-    debug_print("Checking weather forcast...", true);
+    ESP_LOGD(TAG, "Checking weather forcast...");
     int64_t retries = 1;
     boolean jsonParsed = false;
     while (!jsonParsed && (retries-- > 0))
@@ -1215,35 +1233,33 @@ void net_getWeather() {
       jsonParsed = net_getWeatherJSON();
     }
     if (!jsonParsed) {
-      debug_print("Error: JSON", true);
+      ESP_LOGE(TAG, "Error: JSON");
     } else {
       
       net_fillWeatherValues(&weather);
-      debug_print((String)"Weather forcast check complete: " + (millis()-timer) + " ms", true);
+      ESP_LOGD(TAG, "Weather forcast check complete: %d ms", (millis()-timer));
       weather.lastsuccess = systemClock.getNow();
     }
   } else {
-    debug_print("Weather forcast check skipped, no wifi, loc, apikey", true);
+    ESP_LOGW(TAG, "Weather forcast check skipped, no wifi, loc, apikey");
   }
   weather.lastattempt = systemClock.getNow();
 }
 
 boolean getIpgeoJSON() {
   boolean success = false;
-  debug_print("Connecting to ", false);
-  debug_print(gurl, true);
+  ESP_LOGD(TAG, "Connecting to: %s", gurl);
   HTTPClient http;
   runMaintenance();
   http.begin(gurl);
   int httpCode = http.GET();
-  debug_print("HTTP code : ", false);
-  debug_print((String)httpCode, true);
+  ESP_LOGD(TAG, "HTTP code : %d", httpCode);
   runMaintenance();
   if (httpCode == 200)
   {
     ipgeoJson = JSON.parse(http.getString());
     if (JSON.typeof(ipgeoJson) == "undefined") {
-      debug_print("Parsing IPGeoJson input failed!", true);
+      ESP_LOGE(TAG, "Parsing IPGeoJson input failed!");
     } else {
       success = true;
     }
@@ -1271,7 +1287,7 @@ void net_getIpgeo() {
   if (wifi_connected && isApiKeyValid(ipgeoapi.value()))
   {
     uint32_t timer = millis();
-    debug_print("Checking IP geolocation..", true);
+    ESP_LOGD(TAG, "Checking IP geolocation..");
     int64_t retries = 1;
     bool jsonParsed = false;
     while (!jsonParsed && (retries-- > 0))
@@ -1280,17 +1296,17 @@ void net_getIpgeo() {
       jsonParsed = getIpgeoJSON();
     }
     if (!jsonParsed) {
-      debug_print("Error: JSON", true);
+      ESP_LOGE(TAG, "IPGeo Error: JSON");
     } else {
       fillIpgeoFromJson(&ipgeo);
-      debug_print((String)"IP Geolocation check complete: " + (millis()-timer) + " ms", true);
+      ESP_LOGD(TAG, "IP Geolocation check complete: %d ms", (millis()-timer));
       processTimezone();
       processLoc();
     }
   }
   else
   {
-    debug_print("IP Geolocation check skipped, no wifi or apikey", true);
+    ESP_LOGW(TAG, "IP Geolocation check skipped, no wifi or apikey");
   }
 }
 

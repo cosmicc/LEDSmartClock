@@ -143,7 +143,7 @@
                 "ARDUINO_BOARD=\"ESP32_DEV\"",
                 "ARDUINO_VARIANT=\"esp32\"",
                 "ESP32",
-                "CORE_DEBUG_LEVEL=3",
+                "CORE_DEBUG_LEVEL=4",
                 "__DBL_MIN_EXP__=(-1021)",
                 "__UINT_LEAST16_MAX__=0xffff",
                 "__ATOMIC_ACQUIRE=2",

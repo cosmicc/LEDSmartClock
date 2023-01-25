@@ -81,9 +81,8 @@ struct Alerts {
   char description3[256];
 
   acetime_t timestamp;
-  acetime_t lastattempt;
   acetime_t lastshown;
-  acetime_t lastsuccess;
+  
 };
 
 struct Ipgeo {
@@ -91,5 +90,34 @@ struct Ipgeo {
   char timezone[32];
   char lat[12];
   char lon[12];
-  acetime_t timestamp;
+};
+
+struct Checkalerts {
+  int retries;
+  boolean jsonParsed;
+  acetime_t lastattempt;
+  acetime_t lastsuccess;
+};
+
+struct Checkweather {
+  int retries;
+  boolean jsonParsed;
+  acetime_t lastattempt;
+  acetime_t lastsuccess;
+};
+
+struct Checkipgeo {
+  int retries;
+  boolean jsonParsed;
+  acetime_t lastattempt;
+  acetime_t lastsuccess;
+  bool complete;
+};
+
+struct ShowClock {
+  uint8_t fstop;
+  uint32_t millis;
+  uint8_t seconds;
+  bool colonflicker;
+  bool colonoff;
 };

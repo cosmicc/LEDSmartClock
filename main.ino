@@ -11,6 +11,7 @@
 #include <AceWire.h> 
 #include <AceCommon.h>
 #include <AceTime.h>
+//#include <AceRoutine.h>
 #include <AceTimeClock.h>
 #include <TinyGPSPlus.h>
 #include <SPI.h>
@@ -23,8 +24,8 @@
 
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock
 
-#undef DEBUG_LIGHT                 // Show light debug serial messages
-#define WDT_TIMEOUT 35             // Watchdog Timeout
+#undef DEBUG_LIGHT                // Show light debug serial messages
+#define WDT_TIMEOUT 20             // Watchdog Timeout
 #define GPS_BAUD 9600              // GPS UART gpsSpeed
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
@@ -134,7 +135,6 @@ uint32_t tstimer, debugTimer, wicon_time = 0L; // Delay timers
 namespace ace_time {
 namespace clock {
 class GPSClock: public Clock {
-
   private:
     static const uint8_t kNtpPacketSize = 48;
     const char* const mServer = "us.pool.ntp.org";
@@ -256,7 +256,7 @@ class GPSClock: public Clock {
 
 using ace_time::clock::GPSClock;
 static GPSClock gpsClock;
-SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/, 60, 60);  // reference & backup clock
+static SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/, 60, 60);  // reference & backup clock
 
 // IotWebConf User custom settings
 // bool debugserial
@@ -319,6 +319,51 @@ iotwebconf::ParameterGroup group4 = iotwebconf::ParameterGroup("Location", "Loca
     iotwebconf::Builder<iotwebconf::TextTParameter<12>>("fixedLon").label("Fixed Longitude").defaultValue("").build();
   iotwebconf::TextTParameter<33> ipgeoapi =
     iotwebconf::Builder<iotwebconf::TextTParameter<33>>("ipgeoapi").label("IPGeolocation.io API Key").defaultValue("").build();
+
+void display_setBrightness() {
+#ifdef DEBUG_LIGHT
+    uint32_t bms = millis();
+#endif
+    Tsl.begin();
+    if (Tsl.available())
+    {
+      Tsl.on();
+      Tsl.setSensitivity(true, Tsl2561::EXP_14);
+      uint16_t full;
+      uint32_t bloop = millis();
+      while (millis() - bloop < 16)
+      {
+        esp_task_wdt_reset();
+        systemClock.loop();
+        iotWebConf.doLoop();
+      }
+      Tsl.fullLuminosity(full);
+      Tsl.off();
+      uint16_t cb = map(full, 0, 500, LUXMIN, LUXMAX);
+      if (cb < LUXMIN)
+        cb = LUXMIN;
+      else if (cb > LUXMAX)
+        cb = LUXMAX;
+      if (brightness_level.value() == 2)
+        cb = cb + 5;
+      else if (brightness_level.value() == 3)
+        cb = cb + 15;
+      currbright = (currbright + cb) / 2;
+  #ifdef DEBUG_LIGHT
+        debug_print((String) "Lux: " + full + " brightness: " + cb + " avg: " + currbright + " Exe: " + (millis()-bms), true);
+  #endif
+      matrix->setBrightness(currbright);
+      matrix->show();
+    }
+    else
+    {
+      if (millis() - tstimer > 10000)
+      {
+        ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
+        tstimer = millis();
+      }
+    }
+}
 
 void debug_print(String message, bool cr = false) {
   if (serialdebug.isChecked())
@@ -453,51 +498,6 @@ void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) {
       matrix->drawBitmap(position-4, 0, num[bmp_num], 8, 8, color);    
     else
       matrix->drawBitmap(position, 0, num[bmp_num], 8, 8, color); 
-}
-
-void display_setBrightness() {
-#ifdef DEBUG_LIGHT
-    uint32_t bms = millis();
-#endif
-    Tsl.begin();
-    if (Tsl.available())
-    {
-      Tsl.on();
-      Tsl.setSensitivity(true, Tsl2561::EXP_14);
-      uint16_t full;
-      uint32_t bloop = millis();
-      while (millis() - bloop < 16)
-      {
-        esp_task_wdt_reset();
-        systemClock.loop();
-        iotWebConf.doLoop();
-      }
-      Tsl.fullLuminosity(full);
-      Tsl.off();
-      uint16_t cb = map(full, 0, 500, LUXMIN, LUXMAX);
-      if (cb < LUXMIN)
-        cb = LUXMIN;
-      else if (cb > LUXMAX)
-        cb = LUXMAX;
-      if (brightness_level.value() == 2)
-        cb = cb + 5;
-      else if (brightness_level.value() == 3)
-        cb = cb + 15;
-      currbright = (currbright + cb) / 2;
-  #ifdef DEBUG_LIGHT
-        logger((String) "Lux: " + full + " brightness: " + cb + " avg: " + currbright + " Exe: " + (millis()-bms), true);
-  #endif
-      matrix->setBrightness(currbright);
-      matrix->show();
-    }
-    else
-    {
-      if (millis() - tstimer > 10000)
-      {
-        ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
-        tstimer = millis();
-      }
-    }
 }
 
 void display_setStatus() {
@@ -774,13 +774,9 @@ ace_time::ZonedDateTime getSystemTime() {
 }
 
 String getSystemTimeString() {
-  Serial.println("A");
   ace_time::ZonedDateTime now = getSystemTime();
-  Serial.println("B");
   char *string;
-  Serial.println("1");
   sprintf(string, "%d/%d/%d %d:%d:%d [%d]", now.month(), now.day(), now.year(), now.hour(), now.minute(), now.second(), now.timeOffset());
-  Serial.println("2");
   return (String)string;
 }
 
@@ -790,17 +786,18 @@ void wifiConnected() {
   display_setStatus();
   matrix->show();
   gpsClock.setup();
-  net_getIpgeo();
+  //net_getIpgeo();
   processTimezone();
-  net_getWeather();
-  if (alert_check_interval.value() != 0)
-    net_getAlerts();
+  //net_getWeather();
+  //if (alert_check_interval.value() != 0)
+  //  net_getAlerts();
 }
+
+
 
 void runMaintenance() {
   esp_task_wdt_reset();
   systemClock.loop();
-  iotWebConf.doLoop();
   display_setBrightness();
 }
 
@@ -937,14 +934,14 @@ void loop() {
 void setup () {
   Serial.begin(115200);
   uint32_t timer = millis();
-  ESP_LOGD(TAG, "Initializing Hardware Watchdog...");
+  ESP_EARLY_LOGD(TAG, "Initializing Hardware Watchdog...");
   esp_task_wdt_init(WDT_TIMEOUT, true);                //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);                              //add current thread to WDT watch
-  ESP_LOGD(TAG, "Hardware Watchdog initilization complete.");
-  ESP_LOGD(TAG, "Reading stored preferences...");
+  ESP_EARLY_LOGD(TAG, "Hardware Watchdog initilization complete.");
+  ESP_EARLY_LOGD(TAG, "Reading stored preferences...");
   preferences.begin("location", false);
-  ESP_LOGD(TAG, "Stored preferences read complete.");
-  ESP_LOGD(TAG,"Initializing IotWebConf...");
+  ESP_EARLY_LOGD(TAG, "Stored preferences read complete.");
+  ESP_EARLY_LOGD(TAG,"Initializing IotWebConf...");
   group1.addItem(&brightness_level);
   group1.addItem(&text_scroll_speed);
   group1.addItem(&colonflicker);
@@ -979,32 +976,32 @@ void setup () {
   server.on("/", handleRoot);
   server.on("/config", []{ iotWebConf.handleConfig(); });
   server.onNotFound([](){ iotWebConf.handleNotFound(); });
-  ESP_LOGD(TAG, "IotWebConf initilization is complete. Web server is ready.");
-  ESP_LOGD(TAG, "Initializing the system clock...");
+  ESP_EARLY_LOGD(TAG, "IotWebConf initilization is complete. Web server is ready.");
+  ESP_EARLY_LOGD(TAG, "Initializing the system clock...");
   Wire.begin();
   wireInterface.begin();
   systemClock.setup();
   dsClock.setup();
-  ESP_LOGD(TAG, "System clock initilization complete.");
+  ESP_EARLY_LOGD(TAG, "System clock initilization complete.");
   //String ts = getSystemTimeString(); // FIXME:
   //ESP_LOGI(TAG, "System time: %s", ts);
-  ESP_LOGD(TAG, "Initializing Light Sensor...");
+  ESP_EARLY_LOGD(TAG, "Initializing Light Sensor...");
   Wire.begin(TSL2561_SDA, TSL2561_SCL);
-  ESP_LOGD(TAG, "Light Sensor initilization complete.");
+  ESP_EARLY_LOGD(TAG, "Light Sensor initilization complete.");
   gps.lat = "0";
   gps.lon = "0";
   if (use_fixed_loc.isChecked())
-    ESP_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
+    ESP_EARLY_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
   processLoc();
-  ESP_LOGD(TAG, "Initializing the display...");
+  ESP_EARLY_LOGD(TAG, "Initializing the display...");
   display_setHue();
   FastLED.addLeds<NEOPIXEL, HSPI_MOSI>(leds, NUMMATRIX).setCorrection(TypicalLEDStrip);
   matrix->begin();
   matrix->setTextWrap(false);
-  ESP_LOGD(TAG, "Display initalization complete.");
-  ESP_LOGD(TAG, "Initializing GPS Module...");
+  ESP_EARLY_LOGD(TAG, "Display initalization complete.");
+  ESP_EARLY_LOGD(TAG, "Initializing GPS Module...");
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
-  ESP_LOGD(TAG, "GPS Module initilization complete.");
+  ESP_EARLY_LOGD(TAG, "GPS Module initilization complete.");
   bootTime = systemClock.getNow();
   lastntpcheck = systemClock.getNow() - 3601;
   debugTimer, wicon_time, tstimer = millis(); // reset all delay timers
@@ -1020,7 +1017,7 @@ void setup () {
   weather.lastattempt = bootTime - T1Y + 60;
   weather.lastshown = bootTime - T1Y + 60;
   weather.lastsuccess = bootTime - T1Y + 60;
-  ESP_LOGD(TAG, "Setup initialization complete: %d ms", (millis()-timer));
+  ESP_EARLY_LOGD(TAG, "Setup initialization complete: %d ms", (millis()-timer));
 }
 
 void handleRoot()

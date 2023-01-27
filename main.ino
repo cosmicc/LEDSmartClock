@@ -135,12 +135,12 @@ void debug_print(String message, bool cr);
 acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds);
 void setTimeSource(String);
 void resetLastNtpCheck();
-void printSystemTime();
+void printSystemZonedTime();
 void display_temperature();
 void display_weatherIcon();
 acetime_t Now();
 String capString(String str);
-ace_time::ZonedDateTime getSystemTime();
+ace_time::ZonedDateTime getSystemZonedTime();
 
 // AceTimeClock GPSClock custom class
 namespace ace_time {
@@ -361,7 +361,7 @@ COROUTINE(sysClock) {
 COROUTINE(showClock) {
   COROUTINE_LOOP()
   {
-    ace_time::ZonedDateTime ldt = getSystemTime();
+    ace_time::ZonedDateTime ldt = getSystemZonedTime();
     uint8_t myhours = ldt.hour();
     uint8_t myminute = ldt.minute();
     uint8_t mysecs = ldt.second();
@@ -428,7 +428,7 @@ COROUTINE(showClock) {
   display_showStatus();
   matrix->show();
     }
-    COROUTINE_AWAIT(showclock.seconds != getSystemTime().second());
+    COROUTINE_AWAIT(showclock.seconds != getSystemZonedTime().second());
   }
 }
 
@@ -596,7 +596,7 @@ COROUTINE(print_debugData) {
     COROUTINE_DELAY_SECONDS(15);
     COROUTINE_AWAIT(serialdebug.isChecked() && showAlerts.isYielding() && showWeather.isYielding());
     debug_print("----------------------------------------------------------------", true);
-    printSystemTime();
+    printSystemZonedTime();
     acetime_t now = systemClock.getNow();
     String gage = elapsedTime(now - gps.timestamp);
     String loca = elapsedTime(now - gps.lockage);
@@ -615,75 +615,12 @@ COROUTINE(print_debugData) {
     debug_print((String) "System - Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiConnected:" + wifi_connected + " | IP:  | Uptime:" + uptime, true);
     debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
     debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
-    debug_print((String) "IPGeo - Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
+    debug_print((String) "IPGeo - Complete:" + checkipgeo.complete + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
     debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
     debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + " | FeelsLike:" + weather.currentFeelsLike + " | Humidity:" + weather.currentHumidity + " | Wind:" + weather.currentWindSpeed + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
     debug_print((String) "Alerts - Active:" + alerts.active + " | Watch:" + alerts.inWatch + " | Warn:" + alerts.inWarning + " | LastTry:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
     if (alerts.active)
       debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
-  }
-}
-
-COROUTINE(scheduleManager) {
-  COROUTINE_LOOP() 
-  { // start the clock
-  acetime_t now = systemClock.getNow();
-  if (!cotimer.show_alert_ready && !cotimer.show_weather_ready && showClock.isSuspended() && !scrolltext.active && !alertflash.active)
-  {
-    showClock.reset();
-    showClock.resume();
-  } // start the Alert display
-  if ((abs(now - alerts.lastshown) > (alert_show_interval.value()*T1M)) && alert_show_interval.value() != 0 && alerts.active && !cotimer.show_weather_ready && !cotimer.show_alert_ready)
-    cotimer.show_alert_ready = true;
-   // start weathre display
-  else if ((abs(now - weather.lastshown) > (weather_show_interval.value() * T1M)) && (abs(now - weather.timestamp)) < T2H && weather_show_interval.value() != 0 && !cotimer.show_weather_ready && !cotimer.show_alert_ready)
-    cotimer.show_weather_ready = true;
-  if (scrolltext.active || alertflash.active || cotimer.show_weather_ready || cotimer.show_alert_ready) 
-  {
-    #ifndef DISABLE_WEATHERCHECK
-    if (!checkWeather.isSuspended()) {
-      checkWeather.suspend();
-    }
-    #endif
-    #ifndef DISABLE_ALERTCHECK
-    if (!checkAlerts.isSuspended()) {
-      checkAlerts.suspend();
-    }
-    #endif
-    if (!print_debugData.isSuspended())
-      print_debugData.suspend();
-    if (!showClock.isSuspended()) {
-      showClock.suspend();
-    }
-  }
-  if (!scrolltext.active && !alertflash.active && !cotimer.show_weather_ready && !cotimer.show_alert_ready) 
-  {
-    #ifndef DISABLE_WEATHERCHECK
-    if (checkWeather.isSuspended()) {
-      checkWeather.resume();
-    }
-    #endif
-    #ifndef DISABLE_ALERTCHECK
-    if (checkAlerts.isSuspended()) {
-      checkAlerts.resume();
-    }
-    #endif
-    if (print_debugData.isSuspended())
-      print_debugData.resume();
-  }
-    if (serialdebug.isChecked() && print_debugData.isSuspended()) {
-      print_debugData.reset();
-      print_debugData.resume();
-    }
-    if (!serialdebug.isChecked() && !print_debugData.isSuspended()) {
-      print_debugData.suspend();
-    }
-    if (abs(now - bootTime) > (T1Y - 60))
-    {
-      ESP_LOGE(TAG, "1 year system reset!");
-      ESP.restart();
-    }
-    COROUTINE_YIELD();
   }
 }
 
@@ -753,6 +690,71 @@ COROUTINE(checkIpgeo) {
   COROUTINE_END();
 }
 #endif
+
+COROUTINE(scheduleManager) {
+  COROUTINE_LOOP() 
+  { // start the clock
+  acetime_t now = systemClock.getNow();
+  if (!cotimer.show_alert_ready && !cotimer.show_weather_ready && showClock.isSuspended() && !scrolltext.active && !alertflash.active)
+  {
+    showClock.reset();
+    showClock.resume();
+  } // start the Alert display
+  if ((abs(now - alerts.lastshown) > (alert_show_interval.value()*T1M)) && alert_show_interval.value() != 0 && alerts.active && !cotimer.show_weather_ready && !cotimer.show_alert_ready)
+    cotimer.show_alert_ready = true;
+   // start weathre display
+  else if ((abs(now - weather.lastshown) > (weather_show_interval.value() * T1M)) && (abs(now - weather.timestamp)) < T2H && weather_show_interval.value() != 0 && !cotimer.show_weather_ready && !cotimer.show_alert_ready)
+    cotimer.show_weather_ready = true;
+  if (scrolltext.active || alertflash.active || cotimer.show_weather_ready || cotimer.show_alert_ready) 
+  {
+    #ifndef DISABLE_WEATHERCHECK
+    if (!checkWeather.isSuspended()) {
+      checkWeather.suspend();
+    }
+    #endif
+    #ifndef DISABLE_ALERTCHECK
+    if (!checkAlerts.isSuspended()) {
+      checkAlerts.suspend();
+    }
+    #endif
+    if (!print_debugData.isSuspended())
+      print_debugData.suspend();
+    if (!showClock.isSuspended()) {
+      showClock.suspend();
+    }
+  }
+  if (!scrolltext.active && !alertflash.active && !cotimer.show_weather_ready && !cotimer.show_alert_ready) 
+  {
+    #ifndef DISABLE_WEATHERCHECK
+    if (checkWeather.isSuspended()) {
+      checkWeather.resume();
+    }
+    #endif
+    #ifndef DISABLE_ALERTCHECK
+    if (checkAlerts.isSuspended()) {
+      checkAlerts.resume();
+    }
+    #endif
+    if (print_debugData.isSuspended())
+      print_debugData.resume();
+  }
+    if (serialdebug.isChecked() && print_debugData.isSuspended()) {
+      print_debugData.reset();
+      print_debugData.resume();
+    }
+    if (!serialdebug.isChecked() && !print_debugData.isSuspended()) {
+      print_debugData.suspend();
+    }
+    if (abs(now - bootTime) > (T1Y - 60))
+    {
+      ESP_LOGE(TAG, "1 year system reset!");
+      ESP.restart();
+    }
+    if (checkipgeo.complete && !checkIpgeo.isSuspended())
+      checkIpgeo.suspend();
+    COROUTINE_YIELD();
+  }
+}
 
 COROUTINE(IotWebConf) {
   COROUTINE_LOOP() 
@@ -864,33 +866,20 @@ COROUTINE(gps_checkData) {
 
 COROUTINE(setBrightness) {
   COROUTINE_LOOP() {
-    Tsl.begin();
-    if (Tsl.available())
+    COROUTINE_AWAIT(Tsl.available());
+    uint16_t full;
+    Tsl.fullLuminosity(full);
+    uint16_t cb = constrain(map(full, 0, 500, LUXMIN, LUXMAX), LUXMIN, LUXMAX);
+    uint16_t avg = (current.brightness + (cb + userbrightness)) / 2;
+    if (avg != current.brightness) 
     {
-      Tsl.on();
-      Tsl.setSensitivity(true, Tsl2561::EXP_14);
-      COROUTINE_DELAY(16);
-      uint16_t full;
-      Tsl.fullLuminosity(full);
-      Tsl.off();
-      uint16_t cb = constrain(map(full, 0, 500, LUXMIN, LUXMAX), LUXMIN, LUXMAX);
-      switch (userbrightness) {
-        case 2:
-          cb = cb + 5;
-        case 3:
-          cb = cb + 15;
-      }
-      uint16_t avg = (current.brightness + cb) / 2;
-      if (avg != current.brightness) {
-        current.brightness = (current.brightness + cb) / 2;
-        matrix->setBrightness(current.brightness);
-        //matrix->show();
-      }
-      #ifdef DEBUG_LIGHT
-      Serial.println((String) "Lux: " + full + " brightness: " + cb + " avg: " + current.brightness);
-      #endif
-    } else
-        ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
+      current.brightness = avg;
+      matrix->setBrightness(current.brightness);
+      matrix->show();
+    }
+    #ifdef DEBUG_LIGHT
+    Serial.println((String) "Lux: " + full + " brightness: " + cb + " avg: " + current.brightness);
+    #endif
     COROUTINE_DELAY(20);
   }
 }
@@ -1098,21 +1087,21 @@ void display_temperature() {
     matrix->drawBitmap(xpos+(digits*7)+7, 0, sym[0], 8, 8, hsv2rgb(current.temphue));
 }
 
-void printSystemTime() {
+void printSystemZonedTime() {
   acetime_t now = systemClock.getNow();
   auto TimeWZ = ZonedDateTime::forEpochSeconds(now, current.timezone);
   TimeWZ.printTo(SERIAL_PORT_MONITOR);
   SERIAL_PORT_MONITOR.println();
 }
 
-ace_time::ZonedDateTime getSystemTime() {
+ace_time::ZonedDateTime getSystemZonedTime() {
   acetime_t now = systemClock.getNow();
   ace_time::ZonedDateTime TimeWZ = ZonedDateTime::forEpochSeconds(now, current.timezone);
   return TimeWZ;
 }
 
-String getSystemTimeString() {
-  ace_time::ZonedDateTime now = getSystemTime();
+String getSystemZonedTimeString() {
+  ace_time::ZonedDateTime now = getSystemZonedTime();
   char *string;
   sprintf(string, "%d/%d/%d %d:%d:%d [%d]", now.month(), now.day(), now.year(), now.hour(), now.minute(), now.second(), now.timeOffset());
   return (String)string;
@@ -1177,7 +1166,7 @@ void setup () {
   systemClock.setup();
   dsClock.setup();
   gpsClock.setup();
-  printSystemTime();
+  printSystemZonedTime();
   ESP_EARLY_LOGD(TAG,"Initializing IotWebConf...");
   group1.addItem(&brightness_level);
   group1.addItem(&text_scroll_speed);
@@ -1216,7 +1205,12 @@ void setup () {
   ESP_EARLY_LOGD(TAG, "Initializing Light Sensor...");
   userbrightness = brightness_level.value();
   Wire.begin(TSL2561_SDA, TSL2561_SCL);
-  setBrightness.runCoroutine();
+  Tsl.begin();
+  if (!Tsl.available()) {
+    ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
+    Tsl.on();
+    Tsl.setSensitivity(true, Tsl2561::EXP_14);
+  }
   ESP_EARLY_LOGD(TAG, "Initializing GPS Module...");
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
   ESP_EARLY_LOGD(TAG, "Setting class timestamps...");
@@ -1296,6 +1290,17 @@ void configSaved()
   if (flickerfast.isChecked())
     showclock.fstop = 20;
   cotimer.scrollspeed = map(text_scroll_speed.value(), 1, 10, 100, 10);
+  switch (brightness_level.value()) 
+    {
+      case 2:
+       userbrightness = 5;
+      case 3:
+       userbrightness = 10;
+      case 4:
+      userbrightness = 15;
+      case 5:
+      userbrightness = 20;
+    }
   ESP_LOGI(TAG, "Configuration was updated.");
   if (!serialdebug.isChecked())
     Serial.println("Serial debug info has been disabled.");

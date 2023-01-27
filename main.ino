@@ -36,6 +36,7 @@
 #define LUXMAX 100                 // Lowest brightness max
 #define mw 32                      // Width of led matrix
 #define mh 8                       // Hight of led matrix
+#define ntpchecktime 3600
 #define NUMMATRIX (mw*mh)
 
 // second time aliases
@@ -163,7 +164,7 @@ class GPSClock: public Clock {
   acetime_t getNow() const {
     if (GPS.time.isUpdated())
         readResponse();
-    if (!ntpIsReady || !wifi_connected || abs(Now() - lastntpcheck) > 3600)
+    if (!ntpIsReady || !wifi_connected || abs(Now() - lastntpcheck) > ntpchecktime)
       return kInvalidSeconds;
     sendRequest();
     uint16_t startTime = millis();
@@ -184,7 +185,7 @@ class GPSClock: public Clock {
     ESP_LOGW(TAG, "GPSClock: NtpsendRequest(): not connected");
     return;
     }
-    if (abs(Now() - lastntpcheck) > 3600) {
+    if (abs(Now() - lastntpcheck) > ntpchecktime) {
       while (mUdp.parsePacket() > 0) {}
       ESP_LOGD(TAG, "GPSClock: NtpsendRequest(): sending request");
       IPAddress ntpServerIP;
@@ -786,7 +787,7 @@ void wifiConnected() {
   display_setStatus();
   matrix->show();
   gpsClock.setup();
-  //net_getIpgeo();
+  net_getIpgeo();
   processTimezone();
   //net_getWeather();
   //if (alert_check_interval.value() != 0)
@@ -914,7 +915,7 @@ void loop() {
       String alg = elapsedTime(now - alerts.lastsuccess);
       String wlg = elapsedTime(now - weather.lastsuccess);
       String lst = elapsedTime(now - systemClock.getLastSyncTime());
-      String npt = elapsedTime(3600 - (now - lastntpcheck));
+      String npt = elapsedTime(ntpchecktime - (now - lastntpcheck));
       String ooo = elapsedTime(now - timeage);
       debug_print((String) "System - Brightness:" + currbright + " | ClockHue:" + currhue + " | TempHue:" + temphue + " | Uptime:" + uptime, true);
       debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | LastSync:" + lst + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) +" | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) +" | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | TimeAge:" + ooo, true);

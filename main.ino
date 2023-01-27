@@ -1,3 +1,9 @@
+// LedSmartClock for a 8x32 LED neopixel display
+//
+// Created by: Ian Perry (ianperry99@gmail.com)
+// https://github.com/cosmicc/led_clock
+
+// Emable SPI for FastLED
 #define HSPI_MOSI   23
 #define FASTLED_ALL_PINS_HARDWARE_SPI
 #define FASTLED_ESP32_SPI_BUS HSPI
@@ -22,14 +28,15 @@
 #include <HTTPClient.h>
 #include <Arduino_JSON.h>
 
-// DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock
+// DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock (Everything is coroutines now)
 
 #define COROUTINE_PROFILER         // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages
-#undef DISABLE_WEATHERCHECK
-#undef DISABLE_ALERTCHECK
-#undef DISABLE_IPGEOCHECK
+#undef DISABLE_WEATHERCHECK        // Disable Weather forcast checks
+#undef DISABLE_ALERTCHECK          // Disable Weather Alert checks
+#undef DISABLE_IPGEOCHECK          // Disable IPGEO checks
 
+#define PROFILER_DELAY 10          // Coroutine profiler delay in seconds
 #define WDT_TIMEOUT 30             // Watchdog Timeout seconds
 #define GPS_BAUD 9600              // GPS UART gpsSpeed
 #define GPS_RX_PIN 16              // GPS UART RX PIN
@@ -41,7 +48,9 @@
 #define LUXMAX 100                 // Lowest brightness max
 #define mw 32                      // Width of led matrix
 #define mh 8                       // Hight of led matrix
-#define NTPCHECKTIME 3600
+#define ANI_BITMAP_CYCLES 4        // Number of animation frames in each weather icon bitmap
+#define ANI_SPEED 250              // Bitmap animation speed in ms (slower is faster)
+#define NTPCHECKTIME 3600          // NTP server check time
 #define NUMMATRIX (mw*mh)
 
 // second time aliases
@@ -60,7 +69,7 @@ using namespace ace_time;
 using ace_time::acetime_t;
 using ace_time::clock::DS3231Clock;
 using ace_time::clock::SystemClockLoop;
-
+using ace_routine::CoroutineScheduler;
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 
 static char intervals[][9] = {"31536000", "2592000", "604800", "86400", "3600", "60", "1"};
@@ -70,7 +79,7 @@ static char interval_names[][9] = {"yrs", "mon", "wks", "days", "hrs", "min", "s
 #include "src/colors/colors.h"
 #include "src/bitmaps/bitmaps.h"
 
-// Global Variables & Objects
+// Global Variables & Class Objects
 const char thingName[] = "LedSmartClock";           // Default SSID used for new setup
 const char wifiInitialApPassword[] = "setmeup";     // Default AP password for new setup
 static const char* TAG = "LedClock";                // Logging tag
@@ -89,6 +98,7 @@ JSONVar ipgeoJson;              // JSON object for ip geolocation
 Weather weather;                // weather info data class
 Alerts alerts;                  // wweather alerts data class
 Ipgeo ipgeo;                    // ip geolocation data class
+GPSData gps;                    // gps data class
 Checkalerts checkalerts;
 Checkweather checkweather;
 Checkipgeo checkipgeo;
@@ -96,27 +106,17 @@ ShowClock showclock;
 CoTimers cotimer;
 ScrollText scrolltext;
 Alertflash alertflash;
+Current current;
 acetime_t lastntpcheck;
-WiFiUDP mUdp;
-GPSData gps;                    // gps data class
 String wurl;                    // Built Openweather API URL
 String aurl;                    // Built AWS API URL
 String gurl;                    // Built IPGeolocation.io API URL
-uint8_t currbright;             // Current calculated brightness level
 bool clock_display_offset;      // Clock display offset for single digit hour
 bool wifi_connected;            // Wifi is connected or not
-bool colon;                     // colon on/off status
-uint8_t currhue;                // Current calculated hue based on time of day
-String currlat = "0";                 // Current calculated latitude
-String currlon = "0";                 // Current calculated longitude
-uint8_t temphue;                // Current calculated hue based on temp
-TimeZone currtz;                // Current calculated timezone
-uint8_t iconcycle;              // Current Weather animation cycle
 acetime_t bootTime;             // boot time
 String timesource = "none";     // Primary timeclock source gps/ntp
 uint8_t userbrightness;         // Current saved brightness setting (from iotwebconf)
 char fixedTz[32];
-uint32_t tstimer, debugTimer, wicon_time, clock_timer = 0L; // Delay timers
 
 // Function Declarations
 void processLoc();
@@ -142,6 +142,7 @@ acetime_t Now();
 String capString(String str);
 ace_time::ZonedDateTime getSystemTime();
 
+// AceTimeClock GPSClock custom class
 namespace ace_time {
 namespace clock {
 class GPSClock: public Clock {
@@ -277,7 +278,7 @@ using ace_time::clock::GPSClock;
 static GPSClock gpsClock;
 static SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/, 60, 5, 1000);  // reference & backup clock
 
-// IotWebConf User custom settings
+// IotWebConf User custom settings reference
 // bool debugserial
 // Group 1 (Display)
 // uint8_t brightness_level;           // 1 low - 3 high
@@ -339,14 +340,23 @@ iotwebconf::ParameterGroup group4 = iotwebconf::ParameterGroup("Location", "Loca
   iotwebconf::TextTParameter<33> ipgeoapi =
     iotwebconf::Builder<iotwebconf::TextTParameter<33>>("ipgeoapi").label("IPGeolocation.io API Key").defaultValue("").build();
 
+// Coroutines
 #ifdef COROUTINE_PROFILER
 COROUTINE(printProfiling) {
   COROUTINE_LOOP() {
     LogBinTableRenderer::printTo(Serial, 2 /*startBin*/, 13 /*endBin*/, false /*clear*/);
-    COROUTINE_DELAY(5000);
+    COROUTINE_DELAY(PROFILER_DELAY*1000);
   }
 }
 #endif
+
+COROUTINE(sysClock) {
+  COROUTINE_LOOP()
+  {
+    systemClock.loop();
+    COROUTINE_YIELD();
+  }
+}
 
 COROUTINE(showClock) {
   COROUTINE_LOOP()
@@ -358,17 +368,17 @@ COROUTINE(showClock) {
     showclock.seconds = mysecs;
     uint8_t myhour = myhours % 12;
     if (myhours * 60 >= 1320)
-  currhue = NIGHTHUE;
+  current.clockhue = NIGHTHUE;
     else if (myhours * 60 < 360)
-  currhue = NIGHTHUE;
+  current.clockhue = NIGHTHUE;
     else
-  currhue = constrain(map(myhours * 60 + myminute, 360, 1319, DAYHUE, NIGHTHUE), DAYHUE, NIGHTHUE);
+  current.clockhue = constrain(map(myhours * 60 + myminute, 360, 1319, DAYHUE, NIGHTHUE), DAYHUE, NIGHTHUE);
     showclock.millis = millis();
     matrix->clear();
     if (myhour / 10 == 0 && myhour % 10 == 0)
     {
-  display_setclockDigit(1, 0, hsv2rgb(currhue));
-  display_setclockDigit(2, 1, hsv2rgb(currhue));
+  display_setclockDigit(1, 0, hsv2rgb(current.clockhue));
+  display_setclockDigit(2, 1, hsv2rgb(current.clockhue));
   clock_display_offset = false;
     }
     else
@@ -376,25 +386,25 @@ COROUTINE(showClock) {
   if (myhour / 10 != 0)
   {
     clock_display_offset = false;
-    display_setclockDigit(myhour / 10, 0, hsv2rgb(currhue)); // set first digit of hour
+    display_setclockDigit(myhour / 10, 0, hsv2rgb(current.clockhue)); // set first digit of hour
   }
   else
     clock_display_offset = true;
-  display_setclockDigit(myhour % 10, 1, hsv2rgb(currhue)); // set second digit of hour
+  display_setclockDigit(myhour % 10, 1, hsv2rgb(current.clockhue)); // set second digit of hour
     }
-    display_setclockDigit(myminute / 10, 2, hsv2rgb(currhue)); // set first digig of minute
-    display_setclockDigit(myminute % 10, 3, hsv2rgb(currhue)); // set second digit of minute
+    display_setclockDigit(myminute / 10, 2, hsv2rgb(current.clockhue)); // set first digig of minute
+    display_setclockDigit(myminute % 10, 3, hsv2rgb(current.clockhue)); // set second digit of minute
     if (showclock.colonflicker)
     {
   if (clock_display_offset)
   {
-    matrix->drawPixel(12, 5, hsv2rgb(currhue)); // draw colon
-    matrix->drawPixel(12, 2, hsv2rgb(currhue)); // draw colon
+    matrix->drawPixel(12, 5, hsv2rgb(current.clockhue)); // draw colon
+    matrix->drawPixel(12, 2, hsv2rgb(current.clockhue)); // draw colon
   }
   else
   {
-    matrix->drawPixel(16, 5, hsv2rgb(currhue)); // draw colon
-    matrix->drawPixel(16, 2, hsv2rgb(currhue)); // draw colon
+    matrix->drawPixel(16, 5, hsv2rgb(current.clockhue)); // draw colon
+    matrix->drawPixel(16, 2, hsv2rgb(current.clockhue)); // draw colon
   }
   display_showStatus();
   matrix->show();
@@ -407,13 +417,13 @@ COROUTINE(showClock) {
   COROUTINE_AWAIT(millis() - showclock.millis > showclock.fstop);
   if (clock_display_offset)
   {
-    matrix->drawPixel(12, 5, hsv2rgb(currhue)); // draw colon
-    matrix->drawPixel(12, 2, hsv2rgb(currhue)); // draw colon
+    matrix->drawPixel(12, 5, hsv2rgb(current.clockhue)); // draw colon
+    matrix->drawPixel(12, 2, hsv2rgb(current.clockhue)); // draw colon
   }
   else
   {
-    matrix->drawPixel(16, 5, hsv2rgb(currhue)); // draw colon
-    matrix->drawPixel(16, 2, hsv2rgb(currhue)); // draw colon
+    matrix->drawPixel(16, 5, hsv2rgb(current.clockhue)); // draw colon
+    matrix->drawPixel(16, 2, hsv2rgb(current.clockhue)); // draw colon
   }
   display_showStatus();
   matrix->show();
@@ -426,7 +436,7 @@ COROUTINE(showClock) {
 COROUTINE(checkWeather) {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkweather.lastsuccess) > (weather_check_interval.value() * T1M) && weather_check_interval.value() != 0 && abs(systemClock.getNow() - checkweather.lastattempt) > T1M && wifi_connected && (currlat).length() > 1 && (weatherapi.value())[0] != '\0' && !cotimer.show_alert_ready && !cotimer.show_weather_ready);
+    COROUTINE_AWAIT(abs(systemClock.getNow() - checkweather.lastsuccess) > (weather_check_interval.value() * T1M) && weather_check_interval.value() != 0 && abs(systemClock.getNow() - checkweather.lastattempt) > T1M && wifi_connected && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && !cotimer.show_alert_ready && !cotimer.show_weather_ready);
     ESP_LOGD(TAG, "Checking weather forecast...");
     checkweather.retries = 1;
     checkweather.jsonParsed = false;
@@ -486,7 +496,7 @@ COROUTINE(checkWeather) {
 COROUTINE(checkAlerts) {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkalerts.lastsuccess) > (alert_check_interval.value() * T1M) && alert_check_interval.value() != 0 && (systemClock.getNow() - checkalerts.lastattempt) > T1M && wifi_connected && (currlat).length() > 1 && !cotimer.show_alert_ready && !cotimer.show_weather_ready);
+    COROUTINE_AWAIT(abs(systemClock.getNow() - checkalerts.lastsuccess) > (alert_check_interval.value() * T1M) && alert_check_interval.value() != 0 && (systemClock.getNow() - checkalerts.lastattempt) > T1M && wifi_connected && (current.lat).length() > 1 && !cotimer.show_alert_ready && !cotimer.show_weather_ready);
     ESP_LOGD(TAG, "Checking weather alerts...");
     checkalerts.retries = 1;
     checkalerts.jsonParsed = false;
@@ -602,9 +612,9 @@ COROUTINE(print_debugData) {
     String wlg = elapsedTime(now - checkweather.lastsuccess);
     String lst = elapsedTime(now - systemClock.getLastSyncTime());
     String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME);
-    debug_print((String) "System - Brightness:" + currbright + " | ClockHue:" + currhue + " | TempHue:" + temphue + " | WifiConnected:" + wifi_connected + " | IP:  | Uptime:" + uptime, true);
+    debug_print((String) "System - Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiConnected:" + wifi_connected + " | IP:  | Uptime:" + uptime, true);
     debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
-    debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + currlat + " | CurrentLon:" + currlon, true);
+    debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
     debug_print((String) "IPGeo - Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
     debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
     debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + " | FeelsLike:" + weather.currentFeelsLike + " | Humidity:" + weather.currentHumidity + " | Wind:" + weather.currentWindSpeed + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
@@ -822,7 +832,8 @@ COROUTINE(gps_checkData) {
         ESP_LOGI(TAG, "GPS fix lost, no satellites");
       }
     }
-    if (GPS.location.isUpdated()) {
+    if (GPS.location.isUpdated()) 
+    {
       if (!use_fixed_loc.isChecked()) {
         gps.lat = String(GPS.location.lat(), 5);
         gps.lon = String(GPS.location.lng(), 5);
@@ -836,11 +847,13 @@ COROUTINE(gps_checkData) {
       }
       ESP_LOGV(TAG, "GPS Location updated: Lat: %s Lon: %s", gps.lat, gps.lon);
     }
-    if (GPS.altitude.isUpdated()) {
+    if (GPS.altitude.isUpdated()) 
+    {
       gps.elevation = GPS.altitude.feet();
       ESP_LOGV(TAG, "GPS Elevation updated: %f feet", gps.elevation);
     }
-    if (GPS.hdop.isUpdated()) {
+    if (GPS.hdop.isUpdated()) 
+    {
       gps.hdop = GPS.hdop.hdop();
       ESP_LOGV(TAG, "GPS HDOP updated: %f m",gps.hdop);
     }
@@ -867,14 +880,14 @@ COROUTINE(setBrightness) {
         case 3:
           cb = cb + 15;
       }
-      uint16_t avg = (currbright + cb) / 2;
-      if (avg != currbright) {
-        currbright = (currbright + cb) / 2;
-        matrix->setBrightness(currbright);
+      uint16_t avg = (current.brightness + cb) / 2;
+      if (avg != current.brightness) {
+        current.brightness = (current.brightness + cb) / 2;
+        matrix->setBrightness(current.brightness);
         //matrix->show();
       }
       #ifdef DEBUG_LIGHT
-      Serial.println((String) "Lux: " + full + " brightness: " + cb + " avg: " + currbright);
+      Serial.println((String) "Lux: " + full + " brightness: " + cb + " avg: " + current.brightness);
       #endif
     } else
         ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
@@ -882,6 +895,7 @@ COROUTINE(setBrightness) {
   }
 }
 
+// Regular Functions
 void debug_print(String message, bool cr = false) {
   if (serialdebug.isChecked())
     if (cr)
@@ -897,11 +911,11 @@ void processTimezone()
   savedoffset = preferences.getShort("tzoffset", 0);
   if (use_fixed_tz.isChecked())
   {
-    currtz = TimeZone::forHours(fixed_offset.value());
+    current.timezone = TimeZone::forHours(fixed_offset.value());
     ESP_LOGD(TAG, "Using fixed timezone offset: %d", fixed_offset.value());
   }
   else if (ipgeo.tzoffset != 127) {
-    currtz = TimeZone::forHours(ipgeo.tzoffset);
+    current.timezone = TimeZone::forHours(ipgeo.tzoffset);
     ESP_LOGD(TAG, "Using ipgeolocation offset: %d", ipgeo.tzoffset);
     if (ipgeo.tzoffset != savedoffset)
     {
@@ -910,7 +924,7 @@ void processTimezone()
     }
   }
   else {
-    currtz = TimeZone::forHours(savedoffset);
+    current.timezone = TimeZone::forHours(savedoffset);
     ESP_LOGD(TAG, "Using saved timezone offset: %d", savedoffset);
   }
   ESP_LOGV(TAG, "Process timezone complete: %d ms", (millis()-timer));
@@ -921,40 +935,40 @@ void processLoc(){
   {
     gps.lat = fixedLat.value();
     gps.lon = fixedLon.value();
-    currlat = fixedLat.value();
-    currlon = fixedLon.value();
+    current.lat = fixedLat.value();
+    current.lon = fixedLon.value();
   }
   String savedlat = preferences.getString("lat", "0");
   String savedlon = preferences.getString("lon", "0");
-  if (gps.lon == "0" && ipgeo.lon[0] == '\0' && currlon == "0")
+  if (gps.lon == "0" && ipgeo.lon[0] == '\0' && current.lon == "0")
   {
-    currlat = savedlat;
-    currlon = savedlon;
+    current.lat = savedlat;
+    current.lon = savedlon;
   }
-  else if (gps.lon == "0" && ipgeo.lon[0] != '\0' && currlon == "0")
+  else if (gps.lon == "0" && ipgeo.lon[0] != '\0' && current.lon == "0")
   {
-    currlat = (String)ipgeo.lat; 
-    currlon = (String)ipgeo.lon;
+    current.lat = (String)ipgeo.lat; 
+    current.lon = (String)ipgeo.lon;
     ESP_LOGI(TAG, "Using IPGeo location information: Lat: %s Lon: %s", (ipgeo.lat), (ipgeo.lon));
   }
   else if (gps.lon != "0")
   {
-    currlat = gps.lat;
-    currlon = gps.lon;
+    current.lat = gps.lat;
+    current.lon = gps.lon;
   }
-  double nlat = currlat.toDouble();
-  double nlon = currlon.toDouble();
+  double nlat = (current.lat).toDouble();
+  double nlon = (current.lon).toDouble();
   double olat = savedlat.toDouble();
   double olon = savedlon.toDouble();
   if (abs(nlat - olat) > 0.02 || abs(nlon - olon) > 0.02) {
     ESP_LOGW(TAG, "Major location shift, saving values");
     ESP_LOGW(TAG, "Lat:[%0.6lf]->[%0.6lf] Lon:[%0.6lf]->[%0.6lf]", olat, nlat, olon, nlon);
-    preferences.putString("lat", currlat);
-    preferences.putString("lon", currlon);
+    preferences.putString("lat", current.lat);
+    preferences.putString("lon", current.lon);
   }
   if (olat == 0 || nlat == 0) {
-    preferences.putString("lat", currlat);
-    preferences.putString("lon", currlon);
+    preferences.putString("lat", current.lat);
+    preferences.putString("lon", current.lon);
   }
   buildURLs();
 }
@@ -996,45 +1010,50 @@ void display_showStatus() {
 
 void display_weatherIcon() {
     bool night;
-    if (weather.currentIcon[2] == 'n')
-      night = true;
+    char dn;
     char code1;
     char code2;
+    dn = weather.currentIcon[2];
+    if ((String)dn == "n")
+      night = true;
+    else
+      night = false;
     code1 = weather.currentIcon[0];
     code2 = weather.currentIcon[1];
-    if (code1 == '0' && code2 == '1') {  //clear
-      if (night == true)
-        matrix->drawRGBBitmap(mw-8, 0, clear_night[iconcycle], 8, 8);
+    if (code1 == '0' && code2 == '1')
+    { // clear
+      if (night)
+        matrix->drawRGBBitmap(mw-8, 0, clear_night[cotimer.iconcycle], 8, 8);
       else
-        matrix->drawRGBBitmap(mw-8, 0, clear_day[iconcycle], 8, 8);
+        matrix->drawRGBBitmap(mw-8, 0, clear_day[cotimer.iconcycle], 8, 8);
     }
     else if ((code1 == '0' && code2 == '2') || (code1 == '0' && code2 == '3')) {  //partly cloudy
-      if (night == true)
-        matrix->drawRGBBitmap(mw-8, 0, partly_cloudy_night[iconcycle], 8, 8);
+      if (night)
+        matrix->drawRGBBitmap(mw-8, 0, partly_cloudy_night[cotimer.iconcycle], 8, 8);
       else
-        matrix->drawRGBBitmap(mw-8, 0, partly_cloudy_day[iconcycle], 8, 8);
+        matrix->drawRGBBitmap(mw-8, 0, partly_cloudy_day[cotimer.iconcycle], 8, 8);
     }
     else if ((code1 == '0') && (code2 == '4')) // cloudy
-      matrix->drawRGBBitmap(mw-8, 0, cloudy[iconcycle], 8, 8);
+      matrix->drawRGBBitmap(mw-8, 0, cloudy[cotimer.iconcycle], 8, 8);
     else if (code1 == '5' && code2 == '0')  //fog/mist 
-      matrix->drawRGBBitmap(mw-8, 0, fog[iconcycle], 8, 8);
+      matrix->drawRGBBitmap(mw-8, 0, fog[cotimer.iconcycle], 8, 8);
     else if (code1 == '1' && code2 == '3')  //snow
-      matrix->drawRGBBitmap(mw-8, 0, snow[iconcycle], 8, 8);
+      matrix->drawRGBBitmap(mw-8, 0, snow[cotimer.iconcycle], 8, 8);
     else if (code1 == '0' && code2 == '9') //rain
-      matrix->drawRGBBitmap(mw-8, 0, rain[iconcycle], 8, 8);
+      matrix->drawRGBBitmap(mw-8, 0, rain[cotimer.iconcycle], 8, 8);
     else if (code1 == '1' && code2 == '0') // heavy raid
-      matrix->drawRGBBitmap(mw-8, 0, heavy_rain[iconcycle], 8, 8);
+      matrix->drawRGBBitmap(mw-8, 0, heavy_rain[cotimer.iconcycle], 8, 8);
     else if (code1 == '1' && code2 == '1') //thunderstorm
-      matrix->drawRGBBitmap(mw-8, 0, thunderstorm[iconcycle], 8, 8);
+      matrix->drawRGBBitmap(mw-8, 0, thunderstorm[cotimer.iconcycle], 8, 8);
     else
       ESP_LOGE(TAG, "No Weather icon found to use");
-    if (millis() - wicon_time > 250)
+    if (millis() - cotimer.icontimer > ANI_SPEED)
     {
-    if (iconcycle == 4)
-      iconcycle = 0;
+    if (cotimer.iconcycle == ANI_BITMAP_CYCLES)
+      cotimer.iconcycle = 0;
     else
-      iconcycle++;
-    wicon_time = millis();
+      cotimer.iconcycle++;
+    cotimer.icontimer = millis();
     }
 }
 
@@ -1060,35 +1079,35 @@ void display_temperature() {
       xpos = 9;
     xpos = xpos * (digits);
     int score = abs(temp);
-    temphue = map(weather.currentFeelsLike, 0, 40, NIGHTHUE, 0);
-    if (temphue < 0)
-      temphue = 0;
-    else if (temphue > NIGHTHUE)
-      temphue = NIGHTHUE;
+    current.temphue = map(weather.currentFeelsLike, 0, 40, NIGHTHUE, 0);
+    if (current.temphue < 0)
+      current.temphue = 0;
+    else if (current.temphue > NIGHTHUE)
+      current.temphue = NIGHTHUE;
     while (score)
     {
-      matrix->drawBitmap(xpos, 0, num[score % 10], 8, 8, hsv2rgb(temphue));
+      matrix->drawBitmap(xpos, 0, num[score % 10], 8, 8, hsv2rgb(current.temphue));
       score /= 10;
       xpos = xpos - 7;
     }
     if (isneg == true) 
     {
-      matrix->drawBitmap(xpos, 0, sym[1], 8, 8, hsv2rgb(temphue));
+      matrix->drawBitmap(xpos, 0, sym[1], 8, 8, hsv2rgb(current.temphue));
       xpos = xpos - 7;
     }
-    matrix->drawBitmap(xpos+(digits*7)+7, 0, sym[0], 8, 8, hsv2rgb(temphue));
+    matrix->drawBitmap(xpos+(digits*7)+7, 0, sym[0], 8, 8, hsv2rgb(current.temphue));
 }
 
 void printSystemTime() {
   acetime_t now = systemClock.getNow();
-  auto TimeWZ = ZonedDateTime::forEpochSeconds(now, currtz);
+  auto TimeWZ = ZonedDateTime::forEpochSeconds(now, current.timezone);
   TimeWZ.printTo(SERIAL_PORT_MONITOR);
   SERIAL_PORT_MONITOR.println();
 }
 
 ace_time::ZonedDateTime getSystemTime() {
   acetime_t now = systemClock.getNow();
-  ace_time::ZonedDateTime TimeWZ = ZonedDateTime::forEpochSeconds(now, currtz);
+  ace_time::ZonedDateTime TimeWZ = ZonedDateTime::forEpochSeconds(now, current.timezone);
   return TimeWZ;
 }
 
@@ -1103,14 +1122,13 @@ void wifiConnected() {
   ESP_LOGI(TAG, "WiFi was connected.");
   wifi_connected = true;
   gpsClock.ntpReady();
-  processTimezone();
   display_showStatus();
   matrix->show();
   systemClock.forceSync();
 }
 
+// System Loop
 void loop() {
-  systemClock.loop();
   esp_task_wdt_reset();
   #ifdef COROUTINE_PROFILER
   CoroutineScheduler::loopWithProfiler();
@@ -1119,6 +1137,7 @@ void loop() {
   #endif
 }
 
+// System Setup
 void setup () {
   Serial.begin(115200);
   uint32_t timer = millis();
@@ -1128,11 +1147,11 @@ void setup () {
   ESP_EARLY_LOGD(TAG, "Reading stored preferences...");
   preferences.begin("location", false);
   ESP_EARLY_LOGD(TAG, "Initializing coroutine scheduler...");
+  sysClock.setName("sysclock");
+  scheduleManager.setName("scheduler");
+  showClock.setName("show_clock");
   setBrightness.setName("brightness");
   gps_checkData.setName("gpsdata");
-  #ifdef COROUTINE_PROFILER 
-  printProfiling.setName("profiler");
-  #endif
   print_debugData.setName("debug_print");
   IotWebConf.setName("iotwebconf");
   scrollText.setName("scrolltext");
@@ -1148,9 +1167,8 @@ void setup () {
   #ifndef DISABLE_IPGEOCHECK
   checkIpgeo.setName("check_ipgeo");
   #endif
-  showClock.setName("show_clock");
-  scheduleManager.setName("scheduler");
-  #ifdef COROUTINE_PROFILER
+  #ifdef COROUTINE_PROFILER 
+  printProfiling.setName("profiler");
   LogBinProfiler::createProfilers();
   #endif
   ESP_EARLY_LOGD(TAG, "Initializing the system clock...");
@@ -1204,7 +1222,7 @@ void setup () {
   ESP_EARLY_LOGD(TAG, "Setting class timestamps...");
   bootTime = systemClock.getNow();
   lastntpcheck= systemClock.getNow() - 3601;
-  debugTimer, wicon_time, tstimer = millis(); // reset all delay timers
+  cotimer.icontimer = millis(); // reset all delay timers
   checkipgeo.lastattempt = bootTime - T1Y + 60;
   checkipgeo.lastsuccess = bootTime - T1Y + 60;
   gps.timestamp = bootTime - T1Y + 60;
@@ -1373,8 +1391,8 @@ bool isApiKeyValid(char *apikey) {
 }
 
 void buildURLs() {
-  wurl = (String) "http://api.openweathermap.org/data/2.5/onecall?units=metric&exclude=minutely&appid=" + weatherapi.value() + "&lat=" + currlat + "&lon=" + currlon + "&lang=en";
-  aurl = (String) "https://api.weather.gov/alerts?active=true&status=actual&point=" + currlat + "%2C" + currlon + "&limit=500";
+  wurl = (String) "http://api.openweathermap.org/data/2.5/onecall?units=metric&exclude=minutely&appid=" + weatherapi.value() + "&lat=" + current.lat + "&lon=" + current.lon + "&lang=en";
+  aurl = (String) "https://api.weather.gov/alerts?active=true&status=actual&point=" + current.lat + "%2C" + current.lon + "&limit=500";
 }
 
 String elapsedTime(int32_t seconds) {

@@ -148,4 +148,16 @@ struct CoTimers {
   int16_t scrolliters;
   bool show_alert_ready;
   bool show_weather_ready;
+  uint8_t iconcycle;
+  uint32_t icontimer;
+};
+
+struct Current {
+  uint8_t brightness; 
+  uint8_t clockhue;
+  String lat = "0";
+  String lon = "0"; 
+  uint8_t temphue; 
+  TimeZone timezone; 
+
 };

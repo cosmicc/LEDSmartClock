@@ -141,7 +141,6 @@ void display_weatherIcon();
 acetime_t Now();
 String capString(String str);
 ace_time::ZonedDateTime getSystemTime();
-void loopcycle();
 
 namespace ace_time {
 namespace clock {
@@ -663,6 +662,10 @@ COROUTINE(scheduleManager) {
     if (print_debugData.isSuspended())
       print_debugData.resume();
     }  
+    if (abs(now - bootTime) > (T1Y - 60)) {
+      ESP_LOGE(TAG, "1 year system reset!");
+      ESP.restart();
+    }
     COROUTINE_YIELD();
   }
 }
@@ -861,11 +864,11 @@ COROUTINE(setBrightness) {
       if (avg != currbright) {
         currbright = (currbright + cb) / 2;
         matrix->setBrightness(currbright);
-        matrix->show();
+        //matrix->show();
       }
-#ifdef DEBUG_LIGHT
+      #ifdef DEBUG_LIGHT
       Serial.println((String) "Lux: " + full + " brightness: " + cb + " avg: " + currbright);
-  #endif
+      #endif
     } else
         ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
     COROUTINE_DELAY(20);
@@ -1099,17 +1102,7 @@ void wifiConnected() {
   systemClock.forceSync();
 }
 
-void loopcycle() {
-  esp_task_wdt_reset();
-  systemClock.loop();
-}
-
 void loop() {
-  //acetime_t now = systemClock.getNow();
-  //if (abs(now - bootTime) > (T1Y - 60)) {
-  //  ESP_LOGE(TAG, "1 year system reset!");
-  //ESP.restart();
-  //}
   systemClock.loop();
   esp_task_wdt_reset();
   #ifdef COROUTINE_PROFILER
@@ -1159,10 +1152,7 @@ void setup () {
   systemClock.setup();
   dsClock.setup();
   gpsClock.setup();
-  //systemClock.setupCoroutine(F("systemClock"));
-  //systemClock.loop();
-  //String ts = getSystemTimeString(); // FIXME: fix print time at boot
-  //ESP_LOGI(TAG, "System time: %s", ts);
+  printSystemTime();
   ESP_EARLY_LOGD(TAG,"Initializing IotWebConf...");
   group1.addItem(&brightness_level);
   group1.addItem(&text_scroll_speed);
@@ -1189,8 +1179,6 @@ void setup () {
   iotWebConf.setConfigSavedCallback(&configSaved);
   iotWebConf.setFormValidator(&formValidator);
   iotWebConf.getApTimeoutParameter()->visible = true;
-  //iotWebConf.setStatusPin(STATUS_PIN);
-  //iotWebConf.setConfigPin(CONFIG_PIN);
   iotWebConf.init();
   gurl = (String)"https://api.ipgeolocation.io/ipgeo?apiKey=" + ipgeoapi.value();
   ipgeo.tzoffset = 127;
@@ -1207,8 +1195,6 @@ void setup () {
   ESP_EARLY_LOGD(TAG, "Initializing GPS Module...");
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
   ESP_EARLY_LOGD(TAG, "Setting class timestamps...");
-  //systemClock.runCoroutine();
-  printSystemTime();
   bootTime = systemClock.getNow();
   lastntpcheck= systemClock.getNow() - 3601;
   debugTimer, wicon_time, tstimer = millis(); // reset all delay timers

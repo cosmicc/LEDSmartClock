@@ -114,6 +114,13 @@ struct Checkipgeo {
   bool complete;
 };
 
+struct Alertflash {
+  bool active;
+  uint8_t lap;
+  uint8_t laps;
+  uint16_t color;
+};
+
 struct ScrollText {
   bool active;
   bool displayicon;

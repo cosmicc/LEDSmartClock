@@ -41,7 +41,7 @@
 #define LUXMAX 100                 // Lowest brightness max
 #define mw 32                      // Width of led matrix
 #define mh 8                       // Hight of led matrix
-#define NTPCHECKTIME 300
+#define NTPCHECKTIME 3600
 #define NUMMATRIX (mw*mh)
 
 // second time aliases
@@ -150,159 +150,118 @@ String capString(String str);
 ace_time::ZonedDateTime getSystemTime();
 void loopcycle();
 
-namespace ace_time
-{
-  namespace clock
-  {
-    class GPSClock : public Clock
-    {
-    private:
-      static const uint8_t kNtpPacketSize = 48;
-      const char *const mServer = "172.25.150.1";
-      uint16_t const mLocalPort = 2390;
-      uint16_t const mRequestTimeout = 1000;
-      mutable uint8_t mPacketBuffer[kNtpPacketSize];
-      mutable acetime_t epoch_seconds;
-      mutable uint32_t ntpSeconds;
+namespace ace_time {
+namespace clock {
+class GPSClock: public Clock {
+  private:
+    static const uint8_t kNtpPacketSize = 48;
+    const char* const mServer = "us.pool.ntp.org";
+    uint16_t const mLocalPort = 2390;
+    uint16_t const mRequestTimeout = 1000;
+    mutable WiFiUDP mUdp;
+    mutable uint8_t mPacketBuffer[kNtpPacketSize];
 
-    public:
-      bool ntpIsReady = false;
-      static const acetime_t kInvalidSeconds = LocalTime::kInvalidSeconds;
-      static const uint16_t kConnectTimeoutMillis = 10000;
+  public:
+    mutable bool ntpIsReady = false;
+    static const acetime_t kInvalidSeconds = LocalTime::kInvalidSeconds;
+    /** Number of millis to wait during connect before timing out. */
+    static const uint16_t kConnectTimeoutMillis = 10000;
 
-      bool isSetup() const { return ntpIsReady; }
+    bool isSetup() const { return ntpIsReady; }
 
-      void setup()
-      {
-        if (wifi_connected)
-        {
-          mUdp.begin(mLocalPort);
-          ESP_LOGI(TAG, "GPSClock: setup(): NTP is now ready");
-          ntpIsReady = true;
-        }
+    void setup() {
+      if (wifi_connected) {
+        mUdp.begin(mLocalPort);
+        ESP_LOGD(TAG, "GPSClock: NTP ready");
+        ntpIsReady = true;
       }
+    }
 
-      void ntpReady()
-      {
-        if (wifi_connected && !ntpIsReady)
-        {
-          mUdp.begin(mLocalPort);
-          ESP_LOGI(TAG, "GPSClock: ntpReady(): NTP is now ready");
-          ntpIsReady = true;
-        }
+    void ntpReady() {
+      if (wifi_connected || !ntpIsReady) {
+        mUdp.begin(mLocalPort);
+        ESP_LOGD(TAG, "GPSClock: NTP ready");
+        ntpIsReady = true;
       }
+    }
 
-      acetime_t getNow() const
-      {
-        if (GPS.time.isUpdated()) {
-          ESP_LOGD(TAG, "GPSClock: getNow(): GPS time available");
-          readResponse();
-        }
-        if (!ntpIsReady || !wifi_connected) {
-          ESP_LOGW(TAG, "GPSClock: getNow(): NTP/Wifi not ready.");
-          return kInvalidSeconds;
-        }
-        if (abs(Now() - lastntpcheck) > NTPCHECKTIME) {
-          sendRequest();
-          uint16_t startTime = millis();
-          while ((uint16_t)(millis() - startTime) < mRequestTimeout)
-            if (isResponseReady())
-              return readResponse();
-        }
-        return kInvalidSeconds;
-      }
+  acetime_t getNow() const {
+    if (GPS.time.isUpdated())
+        readResponse();
+    if (!ntpIsReady || !wifi_connected || abs(Now() - lastntpcheck) > NTPCHECKTIME)
+      return kInvalidSeconds;
+    sendRequest();
+    uint16_t startTime = millis();
+    while ((uint16_t)(millis() - startTime) < mRequestTimeout)
+      if (isResponseReady())
+           return readResponse();
+    return kInvalidSeconds;
+    }
 
-      void sendRequest() const
-      {
-        ESP_LOGV(TAG, "GPSClock: sendRequest(): Starting");
-        while (Serial1.available() > 0)
-          GPS.encode(Serial1.read());
-        if (GPS.time.isUpdated()) {
-          ESP_LOGD(TAG, "GPSClock: sendRequest(): GPS time available");
-          return;
-        }
-        if (!ntpIsReady || !wifi_connected)
-        {
-          ESP_LOGW(TAG, "GPSClock: sendRequest(): NTP/wifi not ready");
-          return;
-        }
-        if (abs(Now() - lastntpcheck) > NTPCHECKTIME)
-        {
-          while (mUdp.parsePacket() > 0)
-            loopcycle();
-          ESP_LOGD(TAG, "GPSClock: sendRequest(): sending NTP request");
-          IPAddress ntpServerIP;
-          WiFi.hostByName(mServer, ntpServerIP);
-          sendNtpPacket(ntpServerIP);
-        } else
-          ESP_LOGD(TAG, "GPSClock: sendRequest(): No GPS time available & NTP retry timer not yet expired");
-          return;
-        ESP_LOGV(TAG, "GPSClock: sendRequest(): complete");
-      }
+  void sendRequest() const {
+    while (Serial1.available() > 0)
+        GPS.encode(Serial1.read());
+    if (GPS.time.isUpdated())
+        return;
+    if (!ntpIsReady)
+        return;
+    if (!wifi_connected) {
+    ESP_LOGW(TAG, "GPSClock: NtpsendRequest(): not connected");
+    return;
+    }
+    if (abs(Now() - lastntpcheck) > NTPCHECKTIME) {
+      while (mUdp.parsePacket() > 0) {}
+      ESP_LOGD(TAG, "GPSClock: NtpsendRequest(): sending request");
+      IPAddress ntpServerIP;
+      WiFi.hostByName(mServer, ntpServerIP);
+      sendNtpPacket(ntpServerIP);  
+    }
+  }
 
-      bool isResponseReady() const
-      {
-        if (GPS.time.isUpdated())
-          ESP_LOGV(TAG, "GPSClock: isResponseReady(): GPS time available");
-          return true;
-        if (!ntpIsReady || !wifi_connected)
-          ESP_LOGW(TAG, "GPSClock: isResponseReady(): No GPS time available & NTP not ready or wifi not connected");
-          return false;
-        if (abs(Now() - lastntpcheck) < NTPCHECKTIME) {
-          ESP_LOGD(TAG, "GPSClock: isResponseReady(): No GPS time available & NTP retry timer not yet expired");
-          return false;
-        }
-        ESP_LOGV(TAG, "GPSClock: isResponseReady(): NTP parse packet ready");
-        return mUdp.parsePacket() >= kNtpPacketSize;
-      }
+  bool isResponseReady() const {
+    if (GPS.time.isUpdated()) return true;
+    if (!ntpIsReady || !wifi_connected)
+      return false;
+    return mUdp.parsePacket() >= kNtpPacketSize;
+  }
 
-      acetime_t readResponse() const
-      {
-        ESP_LOGV(TAG, "GPSClock: readResponse(): Starting");
-        if (GPS.time.isUpdated())
-        {
-          if (GPS.time.age() < 100 || gps.fix == false)
-          {
-            setTimeSource("gps");
-            ESP_LOGI(TAG, "GPSClock: readResponse(): GPS Time updated. Age: %d ms", GPS.time.age());
-            resetLastNtpCheck();
-            auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
-            epoch_seconds = localDateTime.toEpochSeconds();
-            return epoch_seconds;
-          } else {
-            ESP_LOGW(TAG, "GPSClock: readResponse(): GPS time update skipped, no gpsfix or time too old: %d ms", GPS.time.age());
+  acetime_t readResponse() const {
+      if (GPS.time.isUpdated()) {
+        if (GPS.time.age() < 100 || gps.fix == false) {
+          setTimeSource("gps");
+          ESP_LOGI(TAG, "GPSClock: GPS Time updated. Age: %d ms", GPS.time.age());
+          resetLastNtpCheck();
+          auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
+          acetime_t epoch_seconds = localDateTime.toEpochSeconds();
+          return epoch_seconds;
+        } else {
+            ESP_LOGW(TAG, "GPS time update skipped, no gpsfix or time too old: %d ms", GPS.time.age());
             return kInvalidSeconds;
           }
       }
-      if (!ntpIsReady || !wifi_connected) {
-          ESP_LOGW(TAG, "GPSClock: readResponse(): NTP/wifi not ready");
-          return kInvalidSeconds;
-      }
-    if (abs(Now() - lastntpcheck) > NTPCHECKTIME) {
-      ESP_LOGV(TAG, "GPSClock: readResponse(): Running ntp packet read");
-      mUdp.read(mPacketBuffer, kNtpPacketSize);
-      ntpSeconds =  (uint32_t) mPacketBuffer[40] << 24;
-      ntpSeconds |= (uint32_t) mPacketBuffer[41] << 16;
-      ntpSeconds |= (uint32_t) mPacketBuffer[42] << 8;
-      ntpSeconds |= (uint32_t) mPacketBuffer[43];
-      if (ntpSeconds != 0) {
-        epoch_seconds = convertUnixEpochToAceTime(ntpSeconds);
-        ESP_LOGI(TAG, "GPSClock: readResponse(): ntpSeconds= %d; epochSeconds=%d", ntpSeconds, epoch_seconds);
-        resetLastNtpCheck();
-        setTimeSource("ntp");
-        return epoch_seconds;
-      } else {
-          ESP_LOGE(TAG, "GPSClock: readResponse(): 0 Ntp seconds recieved");
-          return kInvalidSeconds;
-      }
-    } else {
-      ESP_LOGD(TAG, "GPSClock: readResponse(): No GPS time available & NTP retry timer not yet expired");
+    if (!ntpIsReady) return kInvalidSeconds;
+    if (!wifi_connected) {
+      ESP_LOGW(TAG, "GPSClock: NtpreadResponse: not connected");
       return kInvalidSeconds;
-      }
+    }
+    mUdp.read(mPacketBuffer, kNtpPacketSize);
+    uint32_t ntpSeconds =  (uint32_t) mPacketBuffer[40] << 24;
+    ntpSeconds |= (uint32_t) mPacketBuffer[41] << 16;
+    ntpSeconds |= (uint32_t) mPacketBuffer[42] << 8;
+    ntpSeconds |= (uint32_t) mPacketBuffer[43];
+    if (ntpSeconds != 0) {
+      acetime_t epochSeconds = convertUnixEpochToAceTime(ntpSeconds);
+      ESP_LOGI(TAG, "GPSClock: NtpreadResponse: ntpSeconds= %d; epochSeconds=%d", ntpSeconds, epochSeconds);
+      resetLastNtpCheck();
+      setTimeSource("ntp");
+      return epochSeconds;
+    } else {
+        ESP_LOGE("0 Ntp second recieved");
+        return kInvalidSeconds;
+    }
   }
 
   void sendNtpPacket(const IPAddress& address) const {
-    ESP_LOGD(TAG, "GPSClock: sendNtpPacket(): Sending NTP packet");
     memset(mPacketBuffer, 0, kNtpPacketSize);
     mPacketBuffer[0] = 0b11100011;   // LI, Version, Mode
     mPacketBuffer[1] = 0;     // Stratum, or type of clock
@@ -315,7 +274,6 @@ namespace ace_time
     mUdp.beginPacket(address, 123); //NTP requests are to port 123
     mUdp.write(mPacketBuffer, kNtpPacketSize);
     mUdp.endPacket();
-    ESP_LOGD(TAG, "GPSClock: sendNtpPacket(): NTP packet sent");
   }
 };
 }
@@ -719,7 +677,7 @@ COROUTINE(print_debugData) {
     String alg = elapsedTime(now - checkalerts.lastsuccess);
     String wlg = elapsedTime(now - checkweather.lastsuccess);
     String lst = elapsedTime(now - systemClock.getLastSyncTime());
-    String npt = elapsedTime(NTPCHECKTIME - (now - lastntpcheck));
+    String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME);
 
     debug_print((String) "System - Brightness:" + currbright + " | ClockHue:" + currhue + " | TempHue:" + temphue + " | WifiConnected: " + wifi_connected + " | IP:  | Uptime:" + uptime, true);
     debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
@@ -1226,11 +1184,6 @@ void setup () {
   setBrightness.runCoroutine();
   ESP_EARLY_LOGD(TAG, "Initializing GPS Module...");
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
-  ESP_EARLY_LOGD(TAG, "Initializing the display...");
-  FastLED.addLeds<NEOPIXEL, HSPI_MOSI>(leds, NUMMATRIX).setCorrection(TypicalLEDStrip);
-  matrix->begin();
-  matrix->setTextWrap(false);
-  ESP_EARLY_LOGD(TAG, "Display initalization complete.");
   ESP_EARLY_LOGD(TAG, "Setting class timestamps...");
   //systemClock.runCoroutine();
   printSystemTime();
@@ -1258,6 +1211,11 @@ void setup () {
   showclock.fstop = 250;
   if (flickerfast.isChecked())
     showclock.fstop = 20;
+  ESP_EARLY_LOGD(TAG, "Initializing the display...");
+  FastLED.addLeds<NEOPIXEL, HSPI_MOSI>(leds, NUMMATRIX).setCorrection(TypicalLEDStrip);
+  matrix->begin();
+  matrix->setTextWrap(false);
+  ESP_EARLY_LOGD(TAG, "Display initalization complete.");
   ESP_EARLY_LOGD(TAG, "Setup initialization complete: %d ms", (millis()-timer));
   CoroutineScheduler::setup();
 }
@@ -1411,28 +1369,27 @@ String elapsedTime(int32_t seconds) {
   if (seconds > T1Y)
     return "never";
   if (seconds < 60)
-    granularity = 1;
-  else
-    granularity = 2;
+    return (String)seconds + " sec";
+  else granularity = 2;
   uint32_t value;
   for (uint8_t i = 0; i < 6; i++)
   {
     uint32_t vint = atoi(intervals[i]);
     value = floor(seconds / vint);
-    if (value != 0) {
+    if (value != 0)
+    {
       seconds = seconds - value * vint;
       if (granularity != 0) {
         result = result + value + " " + interval_names[i];
-        if (granularity > 1)
-          result = result + ", ";
+        if (granularity > 0)
+          result = result + ",";
         granularity--;
       }
     }
   }
-  if (granularity > 0) 
-    return (String) tseconds + " sec";
-  else
-    return result;
+  if (granularity != 0)
+    result = result + seconds + " sec";
+  return result;
 }
 
 String capString (String str) {

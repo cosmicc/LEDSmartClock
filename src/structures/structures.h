@@ -6,6 +6,9 @@ typedef struct GPSData
   String lon;
   double elevation;
   double hdop;
+  acetime_t timestamp;
+  acetime_t lastcheck;
+  acetime_t lockage;
 } GPSData;
 
 typedef struct RgbColor
@@ -23,31 +26,33 @@ typedef struct HsvColor
 } HsvColor;
 
 struct Weather {
-  char iconH1[10];
-  char tempH1[10];
-  char feelsLikeH1[10];
-  char humidityH1[6];
-  char descriptionH1[20];
-  char windSpeedH1[6];
-  char windGustH1[6];
+  char currentIcon[5];
+  int currentTemp;
+  int currentFeelsLike;
+  int currentHumidity;
+  char currentDescription[20];
+  int currentWindSpeed;
 
-  char iconD[10];
-  char tempMinD[10];
-  char tempMaxD[10];
-  char humidityD[6];
+  char iconD[5];
+  int tempMinD;
+  int tempMaxD;
+  int humidityD;
   char descriptionD[20];
-  char windSpeedD[6];
-  char windGustD[6];
+  int windSpeedD;
+  int windGustD;
 
-  char iconD1[10];
-  char tempMinD1[10];
-  char tempMaxD1[10];
-  char humidityD1[6];
+  char iconD1[5];
+  int tempMinD1;
+  int tempMaxD1;
+  int humidityD1;
   char descriptionD1[20];
-  char windSpeedD1[6];
-  char windGustD1[6];
+  int windSpeedD1;
+  int windGustD1;
 
-  char updated[20];
+  acetime_t timestamp;
+  acetime_t lastattempt;
+  acetime_t lastshown;
+  acetime_t lastsuccess;
 };
 
 struct Alerts {
@@ -74,4 +79,85 @@ struct Alerts {
   char urgency3[15];
   char event3[50];
   char description3[256];
+
+  acetime_t timestamp;
+  acetime_t lastshown;
+  
+};
+
+struct Ipgeo {
+  int tzoffset;
+  char timezone[32];
+  char lat[12];
+  char lon[12];
+};
+
+struct Checkalerts {
+  int retries;
+  boolean jsonParsed;
+  acetime_t lastattempt;
+  acetime_t lastsuccess;
+};
+
+struct Checkweather {
+  int retries;
+  boolean jsonParsed;
+  acetime_t lastattempt;
+  acetime_t lastsuccess;
+};
+
+struct Checkipgeo {
+  int retries;
+  boolean jsonParsed;
+  acetime_t lastattempt;
+  acetime_t lastsuccess;
+  bool complete;
+};
+
+struct Alertflash {
+  bool active;
+  uint8_t lap;
+  uint8_t laps;
+  uint16_t color;
+};
+
+struct ScrollText {
+  bool active;
+  bool displayicon;
+  bool tempshown;
+  String message;
+  uint32_t color;
+  int16_t position;
+  uint32_t millis;
+};
+
+struct ShowClock {
+  uint8_t fstop;
+  uint32_t millis;
+  uint8_t seconds;
+  bool colonflicker;
+  bool colonoff;
+};
+
+struct CoTimers {
+  bool firstboot;
+  uint8_t flashcycles;
+  uint32_t millis;
+  uint8_t scrollspeed;
+  uint32_t scrollsize;
+  int16_t scrolliters;
+  bool show_alert_ready;
+  bool show_weather_ready;
+  uint8_t iconcycle;
+  uint32_t icontimer;
+};
+
+struct Current {
+  uint8_t brightness; 
+  uint8_t clockhue;
+  String lat = "0";
+  String lon = "0"; 
+  uint8_t temphue; 
+  TimeZone timezone; 
+
 };

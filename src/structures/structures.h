@@ -121,3 +121,14 @@ struct ShowClock {
   bool colonflicker;
   bool colonoff;
 };
+
+struct CoTimers {
+  bool firstboot;
+  uint8_t flashcycles;
+  uint32_t millis;
+  uint8_t scrollspeed;
+  uint32_t scrollsize;
+  int16_t scrolliters;
+  bool show_alert_ready;
+  bool show_weather_ready;
+};

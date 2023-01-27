@@ -30,7 +30,7 @@
 
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock (Everything is coroutines now)
 
-#define COROUTINE_PROFILER         // Enable the coroutine debug profiler
+#undef COROUTINE_PROFILER         // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages
 #undef DISABLE_WEATHERCHECK        // Disable Weather forcast checks
 #undef DISABLE_ALERTCHECK          // Disable Weather Alert checks

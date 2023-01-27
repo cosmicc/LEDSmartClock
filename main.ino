@@ -602,7 +602,6 @@ COROUTINE(print_debugData) {
     String wlg = elapsedTime(now - checkweather.lastsuccess);
     String lst = elapsedTime(now - systemClock.getLastSyncTime());
     String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME);
-
     debug_print((String) "System - Brightness:" + currbright + " | ClockHue:" + currhue + " | TempHue:" + temphue + " | WifiConnected:" + wifi_connected + " | IP:  | Uptime:" + uptime, true);
     debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
     debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + currlat + " | CurrentLon:" + currlon, true);
@@ -661,8 +660,16 @@ COROUTINE(scheduleManager) {
     #endif
     if (print_debugData.isSuspended())
       print_debugData.resume();
-    }  
-    if (abs(now - bootTime) > (T1Y - 60)) {
+  }
+    if (serialdebug.isChecked() && print_debugData.isSuspended()) {
+      print_debugData.reset();
+      print_debugData.resume();
+    }
+    if (!serialdebug.isChecked() && !print_debugData.isSuspended()) {
+      print_debugData.suspend();
+    }
+    if (abs(now - bootTime) > (T1Y - 60))
+    {
       ESP_LOGE(TAG, "1 year system reset!");
       ESP.restart();
     }
@@ -1142,7 +1149,7 @@ void setup () {
   checkIpgeo.setName("check_ipgeo");
   #endif
   showClock.setName("show_clock");
-  scheduleManager.setName("disp_mgr");
+  scheduleManager.setName("scheduler");
   #ifdef COROUTINE_PROFILER
   LogBinProfiler::createProfilers();
   #endif

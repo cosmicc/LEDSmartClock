@@ -30,7 +30,7 @@
 #undef DISABLE_ALERTCHECK
 #undef DISABLE_IPGEOCHECK
 
-#define WDT_TIMEOUT 30             // Watchdog Timeout
+#define WDT_TIMEOUT 30             // Watchdog Timeout seconds
 #define GPS_BAUD 9600              // GPS UART gpsSpeed
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
@@ -94,6 +94,7 @@ Checkweather checkweather;
 Checkipgeo checkipgeo;
 ShowClock showclock;
 CoTimers cotimer;
+ScrollText scrolltext;
 acetime_t lastntpcheck;
 WiFiUDP mUdp;
 GPSData gps;                    // gps data class
@@ -103,9 +104,6 @@ String gurl;                    // Built IPGeolocation.io API URL
 uint8_t currbright;             // Current calculated brightness level
 bool clock_display_offset;      // Clock display offset for single digit hour
 bool wifi_connected;            // Wifi is connected or not
-bool displaying_alert;          // Alert is displaying or ready to display
-bool displaying_weather;        // Weather is displaying 
-bool displaying_clock;        // Clock is displaying 
 bool colon;                     // colon on/off status
 uint8_t currhue;                // Current calculated hue based on time of day
 String currlat = "0";                 // Current calculated latitude
@@ -145,7 +143,6 @@ void display_weatherIcon();
 acetime_t Now();
 void display_alertFlash(uint16_t clr, uint8_t laps);
 void display_scrollWeather(String message, uint8_t spd, uint16_t clr);
-void display_scrollText(String message, uint8_t spd, uint16_t clr);
 String capString(String str);
 ace_time::ZonedDateTime getSystemTime();
 void loopcycle();
@@ -432,7 +429,7 @@ COROUTINE(showClock) {
 COROUTINE(checkWeather) {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkweather.lastsuccess) > (weather_check_interval.value() * T1M) && weather_check_interval.value() != 0 && abs(systemClock.getNow() - checkweather.lastattempt) > T1M && wifi_connected && (currlat).length() > 1 && (weatherapi.value())[0] != '\0' && !displaying_alert && !displaying_weather);
+    COROUTINE_AWAIT(abs(systemClock.getNow() - checkweather.lastsuccess) > (weather_check_interval.value() * T1M) && weather_check_interval.value() != 0 && abs(systemClock.getNow() - checkweather.lastattempt) > T1M && wifi_connected && (currlat).length() > 1 && (weatherapi.value())[0] != '\0' && !cotimer.show_alert_ready && !cotimer.show_weather_ready);
     ESP_LOGD(TAG, "Checking weather forecast...");
     checkweather.retries = 1;
     checkweather.jsonParsed = false;
@@ -454,10 +451,18 @@ COROUTINE(checkWeather) {
       } 
       else if (httpCode == 401) {
         display_alertFlash(RED, 2);
-        display_scrollText("Invalid Openweathermap.org API Key", text_scroll_speed.value(), RED);
+        scrolltext.message = "Invalid Openweathermap.org API Key";
+        scrolltext.color = RED;
+        scrolltext.active = true;
+        scrolltext.displayicon = false;
+        COROUTINE_AWAIT(!scrolltext.active);
       } else {
         display_alertFlash(RED, 2);
-        display_scrollText((String)"Error getting weather forcast: " +httpCode, text_scroll_speed.value(), RED);
+        scrolltext.message = (String)"Error getting weather forcast: " +httpCode;
+        scrolltext.color = RED;
+        scrolltext.active = true;
+        scrolltext.displayicon = false;       
+        COROUTINE_AWAIT(!scrolltext.active);
       }
       http.end();
       checkweather.retries++;
@@ -478,7 +483,7 @@ COROUTINE(checkWeather) {
 COROUTINE(checkAlerts) {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkalerts.lastsuccess) > (alert_check_interval.value() * T1M) && alert_check_interval.value() != 0 && (systemClock.getNow() - checkalerts.lastattempt) > T1M && wifi_connected && (currlat).length() > 1 && !displaying_alert && !displaying_weather);
+    COROUTINE_AWAIT(abs(systemClock.getNow() - checkalerts.lastsuccess) > (alert_check_interval.value() * T1M) && alert_check_interval.value() != 0 && (systemClock.getNow() - checkalerts.lastattempt) > T1M && wifi_connected && (currlat).length() > 1 && !cotimer.show_alert_ready && !cotimer.show_weather_ready);
     ESP_LOGD(TAG, "Checking weather alerts...");
     checkalerts.retries = 1;
     checkalerts.jsonParsed = false;
@@ -500,7 +505,11 @@ COROUTINE(checkAlerts) {
       } else 
       {
         display_alertFlash(RED, 1);
-        display_scrollText((String) "Error getting weather alerts: " + httpCode, text_scroll_speed.value(), RED);
+        scrolltext.message = (String) "Error getting weather alerts: " + httpCode;
+        scrolltext.color = RED;
+        scrolltext.active = true;
+        scrolltext.displayicon = false;
+        COROUTINE_AWAIT(!scrolltext.active);
       }
       http.end();
       checkalerts.retries++;
@@ -520,15 +529,13 @@ COROUTINE(checkAlerts) {
 COROUTINE(showWeather) {
   COROUTINE_LOOP() {
   COROUTINE_AWAIT(cotimer.show_weather_ready);
-  #ifndef DISABLE_WEATHERCHECK
-  checkWeather.suspend();
-  #endif
-  #ifndef DISABLE_ALERTCHECK
-  checkAlerts.suspend();
-  #endif
   showClock.suspend();
   display_alertFlash(BLUE, 1);
-  display_scrollWeather(weather.currentDescription, text_scroll_speed.value(), WHITE); //TODO: merge in regular function to replace this lone like alrets
+  scrolltext.message = weather.currentDescription;
+  scrolltext.color = WHITE;
+  scrolltext.active = true;
+  scrolltext.displayicon = true;
+  COROUTINE_AWAIT(!scrolltext.active);
   cotimer.millis = millis();
   while (millis() - cotimer.millis < 10000) {
     matrix->clear();
@@ -540,40 +547,25 @@ COROUTINE(showWeather) {
   }
   weather.lastshown = systemClock.getNow();
   cotimer.show_weather_ready = false;
-  #ifndef DISABLE_WEATHERCHECK
-  checkWeather.resume();
-  #endif
-  #ifndef DISABLE_ALERTCHECK
-  checkAlerts.resume();
-  #endif
   }
 }
 
 COROUTINE(showAlerts) {
   COROUTINE_LOOP() {
   COROUTINE_AWAIT(cotimer.show_alert_ready);
-  #ifndef DISABLE_WEATHERCHECK
-  checkWeather.suspend();
-  #endif
-  #ifndef DISABLE_ALERTCHECK
-  checkAlerts.suspend();
-  #endif
-  showClock.suspend();
   uint16_t acolor;
   if (alerts.inWarning)
     acolor = RED;
   else if (alerts.inWatch)
     acolor = YELLOW;
+  showClock.suspend();
   display_alertFlash(acolor, 3);
-  display_scrollText(alerts.description1, text_scroll_speed.value(), acolor);
+  scrolltext.message = alerts.description1;
+  scrolltext.color = acolor;
+  scrolltext.active = true;
+  COROUTINE_AWAIT(!scrolltext.active);
   alerts.lastshown = systemClock.getNow();
   cotimer.show_alert_ready = false;
-  #ifndef DISABLE_WEATHERCHECK
-  checkWeather.resume();
-  #endif
-  #ifndef DISABLE_ALERTCHECK
-  checkAlerts.resume();
-  #endif
 }
 }
 
@@ -581,7 +573,7 @@ COROUTINE(scheduleManager) {
   COROUTINE_LOOP() 
   { // start the clock
   acetime_t now = systemClock.getNow();
-  if (!cotimer.show_alert_ready && !cotimer.show_weather_ready && showClock.isSuspended())
+  if (!cotimer.show_alert_ready && !cotimer.show_weather_ready && showClock.isSuspended() && !scrolltext.active)
   {
     showClock.reset();
     showClock.resume();
@@ -624,12 +616,20 @@ COROUTINE(checkIpgeo) {
       else if (httpCode == 401)
       {
         display_alertFlash(RED, 2);
-        display_scrollText("Invalid IPGeolocation API Key", text_scroll_speed.value(), RED);
+        scrolltext.message = "Invalid IPGeolocation API Key";
+        scrolltext.color = RED;
+        scrolltext.active = true;
+        scrolltext.displayicon = false;
+        COROUTINE_AWAIT(!scrolltext.active);
       }
       else
       {
         display_alertFlash(RED, 2);
-        display_scrollText((String) "Error getting ip geolocation: " + httpCode, text_scroll_speed.value(), RED);
+        scrolltext.message = (String) "Error getting ip geolocation: " + httpCode;
+        scrolltext.color = RED;
+        scrolltext.active = true;
+        scrolltext.displayicon = false;
+        COROUTINE_AWAIT(!scrolltext.active);
       }
       http.end();
       checkipgeo.retries++;
@@ -647,14 +647,6 @@ COROUTINE(checkIpgeo) {
   COROUTINE_END();
 }
 #endif
-
-COROUTINE(IotWebConf) {
-  COROUTINE_LOOP() 
-  {
-    iotWebConf.doLoop();
-    COROUTINE_DELAY(5);
-  }
-}
 
 COROUTINE(print_debugData) {
   COROUTINE_LOOP() 
@@ -688,7 +680,71 @@ COROUTINE(print_debugData) {
     debug_print((String) "Alerts - Active:" + alerts.active + " | Watch:" + alerts.inWatch + " | Warn:" + alerts.inWarning + " | LastTry:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
     if (alerts.active)
       debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
-    //CoroutineScheduler::list(Serial);
+  }
+}
+
+
+COROUTINE(IotWebConf) {
+  COROUTINE_LOOP() 
+  {
+    iotWebConf.doLoop();
+    COROUTINE_DELAY(5);
+  }
+}
+
+COROUTINE(scrollText) {
+  COROUTINE_LOOP() 
+  {
+    if (scrolltext.active) {
+      #ifndef DISABLE_WEATHERCHECK
+      if (!checkWeather.isSuspended()) {
+        checkWeather.suspend();
+        COROUTINE_AWAIT(checkWeather.isSuspended());
+      }
+      #endif
+      #ifndef DISABLE_ALERTCHECK
+      if (!checkAlerts.isSuspended()) {
+        checkAlerts.suspend();
+        COROUTINE_AWAIT(checkAlerts.isSuspended());
+    }
+      #endif
+      if (!print_debugData.isSuspended())
+        print_debugData.suspend();
+      if (!showClock.isSuspended()) {
+        showClock.suspend();
+        COROUTINE_AWAIT(showClock.isSuspended());
+      }
+      COROUTINE_AWAIT(millis() - scrolltext.millis >= cotimer.scrollspeed);
+      uint16_t size = (scrolltext.message).length() * 6;
+      if (scrolltext.position >= size - size - size) {
+        matrix->clear();
+        matrix->setCursor(scrolltext.position, 0);
+        matrix->setTextColor(scrolltext.color);
+        matrix->print(scrolltext.message);
+        display_showStatus();
+        if (scrolltext.displayicon)
+          display_weatherIcon();
+        matrix->show();
+        scrolltext.position--;
+        scrolltext.millis = millis();
+      } else {
+      #ifndef DISABLE_WEATHERCHECK
+      if (checkWeather.isSuspended())
+        checkWeather.resume();
+      #endif
+      #ifndef DISABLE_ALERTCHECK
+      if (checkAlerts.isSuspended())
+        checkAlerts.resume();
+      #endif
+      if (print_debugData.isSuspended())
+        print_debugData.resume();
+      scrolltext.active = false;
+      scrolltext.position = mw;
+      scrolltext.displayicon = false;
+      ESP_LOGD(TAG, "Scrolling text end");
+      }
+    }
+    COROUTINE_YIELD();
   }
 }
 
@@ -770,7 +826,7 @@ COROUTINE(setBrightness) {
   #endif
     } else
         ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
-    COROUTINE_DELAY(50);
+    COROUTINE_DELAY(20);
   }
 }
 
@@ -1021,29 +1077,6 @@ void display_temperature() {
     matrix->drawBitmap(xpos+(digits*7)+7, 0, sym[0], 8, 8, hsv2rgb(temphue));
 }
 
-void display_scrollText(String message, uint8_t spd, uint16_t clr) {
-  uint32_t timer = millis();
-  ESP_LOGD(TAG, "Scrolling fullscreen text: %s", message);
-  uint8_t speed = map(spd, 1, 10, 100, 10);
-  uint16_t size = message.length() * 6;
-  uint32_t scrollmilli;
-  for (int16_t x = mw; x >= size - size - size; x--)
-  {
-    scrollmilli = millis();
-    while (millis() - scrollmilli < speed)
-    {
-      matrix->clear();
-      display_showStatus();
-      matrix->setCursor(x, 0);
-      matrix->setTextColor(clr);
-      matrix->print(message);
-      matrix->show();
-      loopcycle();
-    }
-  }
-    ESP_LOGV(TAG, "Scrolling text complete: %d ms", (millis()-timer));
-}
-
 void printSystemTime() {
   acetime_t now = systemClock.getNow();
   auto TimeWZ = ZonedDateTime::forEpochSeconds(now, currtz);
@@ -1205,6 +1238,7 @@ void setup () {
   checkweather.lastsuccess = bootTime - T1Y + 60;
   gps.lat = "0";
   gps.lon = "0";
+  scrolltext.position = mw;
   if (use_fixed_loc.isChecked())
     ESP_EARLY_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
   processLoc();
@@ -1298,23 +1332,23 @@ void fillAlertsFromJson(Alerts* alerts) {
     {
       alerts->inWarning = true;
       alerts->active = true;
-      displaying_alert = true;
+      cotimer.show_alert_ready = true;
     }
     else if ((String)alerts->certainty1 == "Possible") {
       alerts->inWatch= true;
       alerts->active = true;
-      displaying_alert = true;
+      cotimer.show_alert_ready = true;
     } 
     else {
       alerts->active = false;
       alerts->inWarning = false;
       alerts->inWatch= false;     
     }
-    ESP_LOGI(TAG, "Weather Alert found");
+    ESP_LOGI(TAG, "Active weather alert received");
   }
   else {
     alerts->active = false;
-    ESP_LOGD(TAG, "No Alerts found");
+    ESP_LOGI(TAG, "No current weather alerts exist");
   }
 }
 
@@ -1366,7 +1400,7 @@ String elapsedTime(int32_t seconds) {
   uint8_t granularity;
   seconds = abs(seconds);
   uint32_t tseconds = seconds;
-  if (seconds > T1Y)
+  if (seconds > T1Y - 60)
     return "never";
   if (seconds < 60)
     return (String)seconds + " sec";

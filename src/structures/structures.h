@@ -114,6 +114,16 @@ struct Checkipgeo {
   bool complete;
 };
 
+struct ScrollText {
+  bool active;
+  bool displayicon;
+  bool tempshown;
+  String message;
+  uint32_t color;
+  int16_t position;
+  uint32_t millis;
+};
+
 struct ShowClock {
   uint8_t fstop;
   uint32_t millis;

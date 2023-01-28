@@ -21,6 +21,8 @@ uint16_t DARKRED    =	RGB16(150, 0, 0);
 uint16_t DARKBLUE   =	RGB16(0, 0, 150);
 uint16_t DARKYELLOW	=	RGB16(150, 150, 0);
 uint16_t DARKPURPLE	=	RGB16(80, 0, 150);
+uint16_t DARKMAGENTA=	RGB16(150, 0, 150);
+uint16_t DARKCYAN   =	RGB16(0, 150, 150);
 
 uint16_t hsv2rgb(uint8_t hsvr)
 {

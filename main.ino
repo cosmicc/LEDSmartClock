@@ -8,6 +8,7 @@
 #define FASTLED_ALL_PINS_HARDWARE_SPI
 #define FASTLED_ESP32_SPI_BUS HSPI
 
+#include <nvs_flash.h>
 #include <esp_task_wdt.h>
 #include <esp_log.h>
 #include <Preferences.h>
@@ -49,8 +50,9 @@
 #define mw 32                      // Width of led matrix
 #define mh 8                       // Hight of led matrix
 #define ANI_BITMAP_CYCLES 4        // Number of animation frames in each weather icon bitmap
-#define ANI_SPEED 250              // Bitmap animation speed in ms (slower is faster)
+#define ANI_SPEED 100              // Bitmap animation speed in ms (lower is faster)
 #define NTPCHECKTIME 3600          // NTP server check time
+#define LIGHT_CHECK_DELAY 250      // ms delay for each brightness check
 #define NUMMATRIX (mw*mh)
 
 // second time aliases
@@ -80,8 +82,8 @@ static char interval_names[][9] = {"yrs", "mon", "wks", "days", "hrs", "min", "s
 #include "src/bitmaps/bitmaps.h"
 
 // Global Variables & Class Objects
-const char thingName[] = "LedSmartClock";           // Default SSID used for new setup
-const char wifiInitialApPassword[] = "setmeup";     // Default AP password for new setup
+const char thingName[] = "ledsmartclock";           // Default SSID used for new setup
+const char wifiInitialApPassword[] = "ledsmartclock";     // Default AP password for new setup
 static const char* TAG = "LedClock";                // Logging tag
 WireInterface wireInterface(Wire);                  // I2C hardware object
 DS3231Clock<WireInterface> dsClock(wireInterface);  // Hardware DS3231 RTC object
@@ -113,6 +115,7 @@ String aurl;                    // Built AWS API URL
 String gurl;                    // Built IPGeolocation.io API URL
 bool clock_display_offset;      // Clock display offset for single digit hour
 bool wifi_connected;            // Wifi is connected or not
+bool resetme;                   // reset to factory defaults
 acetime_t bootTime;             // boot time
 String timesource = "none";     // Primary timeclock source gps/ntp
 uint8_t userbrightness;         // Current saved brightness setting (from iotwebconf)
@@ -137,10 +140,12 @@ void resetLastNtpCheck();
 void printSystemZonedTime();
 void display_temperature();
 void display_weatherIcon();
+void processTimezone();
 acetime_t Now();
 String capString(String str);
 ace_time::ZonedDateTime getSystemZonedTime();
 uint16_t calcbright(uint16_t bl);
+String getSystemZonedDateString();
 
 // AceTimeClock GPSClock custom class
 namespace ace_time {
@@ -280,20 +285,28 @@ static SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/,
 
 // IotWebConf User custom settings reference
 // bool debugserial
+
 // Group 1 (Display)
 // uint8_t brightness_level;           // 1 low - 3 high
 // uint8_t text_scroll_speed;          // 1 slow - 10 fast
 // bool colonflicker;                  // flicker the colon ;)
 // bool flickerfast;                   // flicker fast
+// bool show_date;                     // show date
+// int8_t show_date_interval;          // show date interval in hours
+// bool disable_status                 // disable status corner led
+
 // Group 2 (Weather)
 // String weatherapi;                  // OpenWeather API Key
 // uint8_t alert_check_interval;       // Time between alert checks
 // uint8_t alert_show_interval;        // Time between alert displays
+// bool show_weather;                  // Show weather toggle
 // uint8_t weather_check_interval;     // Time between weather checks
 // uint8_t weather_show_interval;      // Time between weather displays
+
 // Group 3 (Timezone)
 // bool used_fixed_tz;                 // Use fixed Timezone
 // String fixedTz;                     // Fixed Timezone
+
 // Group 4 (Location)
 // bool used_fixed_loc;                // Use fixed GPS coordinates
 // String fixedLat;                    // Fixed GPS latitude
@@ -301,6 +314,8 @@ static SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/,
 // String ipgeoapi                     // IP Geolocation API
 
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
+  iotwebconf::CheckboxTParameter resetdefaults =
+    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("resetdefaults").label("Reset to Defaults (AP mode)").defaultValue(false).build();
   iotwebconf::CheckboxTParameter serialdebug =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("serialdebug").label("Debug to Serial").defaultValue(false).build();
 iotwebconf::ParameterGroup group1 = iotwebconf::ParameterGroup("Display", "Display Settings");
@@ -312,6 +327,12 @@ iotwebconf::ParameterGroup group1 = iotwebconf::ParameterGroup("Display", "Displ
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("colonflicker").label("Clock Colon Flicker").defaultValue(true).build();
   iotwebconf::CheckboxTParameter flickerfast =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("flickerfast").label("Fast Colon Flicker").defaultValue(true).build();
+  iotwebconf::CheckboxTParameter show_date =
+    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_date").label("Show Date").defaultValue(true).build();
+ iotwebconf::IntTParameter<int8_t> show_date_interval =
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("show_date_interval").label("Show Date Interval in Hours (1-24)").defaultValue(1).min(1).max(24).step(1).placeholder("1..24(hours)").build();
+  iotwebconf::CheckboxTParameter disable_status =  
+  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("disable_status").label("Disable corner status LED").defaultValue(false).build();
 iotwebconf::ParameterGroup group2 = iotwebconf::ParameterGroup("Weather", "Weather Settings");
   iotwebconf::CheckboxTParameter fahrenheit =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("fahrenheit").label("Fahrenheit").defaultValue(true).build();
@@ -319,17 +340,19 @@ iotwebconf::ParameterGroup group2 = iotwebconf::ParameterGroup("Weather", "Weath
     iotwebconf::Builder<iotwebconf::TextTParameter<33>>("weatherapi").label("OpenWeather API Key").defaultValue("").build();
  iotwebconf::IntTParameter<int8_t> alert_check_interval =
     iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("alert_check_interval").label("Weather Alert Check Interval Min (1-60)").defaultValue(5).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
- iotwebconf::IntTParameter<int8_t> alert_show_interval =
+ iotwebconf::IntTParameter<int8_t> show_alert_interval =
     iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("alert_show_interval").label("Weather Alert Display Interval Min (1-60)").defaultValue(5).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
+  iotwebconf::CheckboxTParameter show_weather =
+    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_weather").label("Show Weather Conditions").defaultValue(true).build();
  iotwebconf::IntTParameter<int8_t> weather_check_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("weather_check_interval").label("Weather Forecast Check Interval Min (1-60)").defaultValue(5).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
- iotwebconf::IntTParameter<int8_t> weather_show_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("weather_show_interval").label("Weather Forecast Display Interval Min (1-60)").defaultValue(5).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("weather_check_interval").label("Weather Conditions Check Interval Min (1-60)").defaultValue(10).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
+ iotwebconf::IntTParameter<int8_t> show_weather_interval =
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("weather_show_interval").label("Weather Conditions Display Interval Min (1-60)").defaultValue(10).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
 iotwebconf::ParameterGroup group3 = iotwebconf::ParameterGroup("Timezone", "Timezone Settings");
   iotwebconf::CheckboxTParameter use_fixed_tz =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("use_fixed_tz").label("Use Fixed Timezone").defaultValue(false).build();
   iotwebconf::IntTParameter<int8_t> fixed_offset =   
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("fixed_offset").label("Fixed GMT Hours Offset").defaultValue(-1).min(-12).max(12).step(1).placeholder("-12...+12").build();
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("fixed_offset").label("Fixed GMT Hours Offset").defaultValue(0).min(-12).max(12).step(1).placeholder("-12...12").build();
 iotwebconf::ParameterGroup group4 = iotwebconf::ParameterGroup("Location", "Location Settings");
   iotwebconf::CheckboxTParameter use_fixed_loc =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("use_fixed_loc").label("Use Fixed Location").defaultValue(false).build();
@@ -543,10 +566,21 @@ COROUTINE(checkAlerts) {
 }
 #endif
 
+COROUTINE(showDate) {
+  COROUTINE_LOOP() {
+  COROUTINE_AWAIT(cotimer.show_date_ready && showClock.isSuspended() && !cotimer.show_alert_ready && !cotimer.show_weather_ready && !scrolltext.active && !alertflash.active);
+  scrolltext.message = getSystemZonedDateString();
+  scrolltext.color = ORANGE;
+  scrolltext.active = true;
+  COROUTINE_AWAIT(!scrolltext.active);
+  showclock.datelastshown = systemClock.getNow();
+  cotimer.show_date_ready = false;
+  }
+}
+
 COROUTINE(showWeather) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(cotimer.show_weather_ready && showClock.isSuspended());
-  showClock.suspend();
+  COROUTINE_AWAIT(cotimer.show_weather_ready && showClock.isSuspended() && !cotimer.show_alert_ready && !scrolltext.active && !alertflash.active);
   alertflash.color = BLUE;
   alertflash.laps = 1;
   alertflash.active = true;
@@ -572,7 +606,7 @@ COROUTINE(showWeather) {
 
 COROUTINE(showAlerts) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(cotimer.show_alert_ready && showClock.isSuspended());
+  COROUTINE_AWAIT(cotimer.show_alert_ready && showClock.isSuspended() && !scrolltext.active & !alertflash.active);
   uint16_t acolor;
   if (alerts.inWarning)
     acolor = RED;
@@ -613,8 +647,8 @@ COROUTINE(print_debugData) {
     String wlg = elapsedTime(now - checkweather.lastsuccess);
     String lst = elapsedTime(now - systemClock.getLastSyncTime());
     String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME);
-    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:+" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiConnected:" + wifi_connected + " | IP:  | Uptime:" + uptime, true);
-    debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
+    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiConnected:" + wifi_connected + " | IP:  | Uptime:" + uptime, true);
+    debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
     debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
     debug_print((String) "IPGeo - Complete:" + checkipgeo.complete + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
     debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
@@ -628,7 +662,7 @@ COROUTINE(print_debugData) {
 #ifndef DISABLE_IPGEOCHECK
 COROUTINE(checkIpgeo) {
   COROUTINE_BEGIN();
-  COROUTINE_AWAIT(wifi_connected && (ipgeoapi.value())[0] != '\0' && showAlerts.isYielding() && showWeather.isYielding());
+  COROUTINE_AWAIT(wifi_connected && (ipgeoapi.value())[0] != '\0' && !cotimer.show_alert_ready && !cotimer.show_weather_ready && !scrolltext.active && !alertflash.active);
   while (!checkipgeo.complete)
   {
     COROUTINE_AWAIT(abs(systemClock.getNow() - checkipgeo.lastattempt) > T1M);
@@ -685,6 +719,8 @@ COROUTINE(checkIpgeo) {
       fillIpgeoFromJson(&ipgeo);
       checkipgeo.lastsuccess = systemClock.getNow();
       checkipgeo.complete = true;
+      processLoc();
+      processTimezone();
     }
     checkipgeo.lastattempt = systemClock.getNow();
   }
@@ -692,20 +728,71 @@ COROUTINE(checkIpgeo) {
 }
 #endif
 
+
+COROUTINE(miscScrollers) {
+  COROUTINE_LOOP() 
+  {
+    COROUTINE_AWAIT(iotWebConf.getState() == 1 || resetme);
+    COROUTINE_AWAIT(!scrolltext.active && !alertflash.active && (millis() - scrolltext.resetmsgtime) > T1M*1000);
+    if (resetme)
+    {
+      scrolltext.showingreset = true;
+      showDate.suspend();
+      showWeather.suspend();
+      showAlerts.suspend();
+      showClock.suspend();
+      checkWeather.suspend();
+      checkAlerts.suspend();
+      alertflash.color = RED;
+      alertflash.laps = 5;
+      alertflash.active = true;
+      COROUTINE_AWAIT(!alertflash.active);
+      scrolltext.message = "Resetting to Defaults, Connect to ledsmartclock wifi to setup";
+      scrolltext.color = RED;
+      scrolltext.active = true;
+      COROUTINE_AWAIT(!scrolltext.active);
+      nvs_flash_erase(); // erase the NVS partition and...
+      nvs_flash_init();  // initialize the NVS partition.
+      ESP.restart();
+     }
+     else if (iotWebConf.getState() == 1 && (millis() - scrolltext.resetmsgtime) > T1M*1000) {
+      scrolltext.showingreset = true;
+      showDate.suspend();
+      showWeather.suspend();
+      showAlerts.suspend();
+      showClock.suspend();
+      checkWeather.suspend();
+      checkAlerts.suspend();
+      alertflash.color = RED;
+      alertflash.laps = 5;
+      alertflash.active = true;
+      COROUTINE_AWAIT(!alertflash.active);
+      scrolltext.message = "Connect to ledsmartclock wifi to setup";
+      scrolltext.color = RED;
+      scrolltext.active = true;
+      COROUTINE_AWAIT(!scrolltext.active);
+      scrolltext.resetmsgtime = millis();
+      scrolltext.showingreset = false;
+     }
+  }
+}
+
 COROUTINE(scheduleManager) {
   COROUTINE_LOOP() 
   { // start the clock
   acetime_t now = systemClock.getNow();
-  if (!cotimer.show_alert_ready && !cotimer.show_weather_ready && showClock.isSuspended() && !scrolltext.active && !alertflash.active)
+  if (!resetme && !scrolltext.showingreset && !cotimer.show_alert_ready && !cotimer.show_weather_ready && showClock.isSuspended() && !scrolltext.active && !alertflash.active)
   {
     showClock.reset();
     showClock.resume();
-  } // start the Alert display
-  if ((abs(now - alerts.lastshown) > (alert_show_interval.value()*T1M)) && alert_show_interval.value() != 0 && alerts.active && !cotimer.show_weather_ready && !cotimer.show_alert_ready)
+  } // start the weather alert display
+  if ((abs(now - alerts.lastshown) > (show_alert_interval.value()*T1M)) && show_alert_interval.value() != 0 && alerts.active && !cotimer.show_weather_ready && !cotimer.show_alert_ready)
     cotimer.show_alert_ready = true;
-   // start weathre display
-  else if ((abs(now - weather.lastshown) > (weather_show_interval.value() * T1M)) && (abs(now - weather.timestamp)) < T2H && weather_show_interval.value() != 0 && !cotimer.show_weather_ready && !cotimer.show_alert_ready)
+   // start weather conditions display
+  else if ((abs(now - weather.lastshown) > (show_weather_interval.value() * T1M)) && (abs(now - weather.timestamp)) < T2H && show_weather_interval.value() != 0 && !cotimer.show_weather_ready && !cotimer.show_alert_ready)
     cotimer.show_weather_ready = true;
+    else if ((abs(now - showclock.datelastshown) > (show_date_interval.value() * T1H)) && show_date_interval.value() != 0 && !cotimer.show_weather_ready && !cotimer.show_alert_ready)
+    cotimer.show_date_ready = true;
   if (scrolltext.active || alertflash.active || cotimer.show_weather_ready || cotimer.show_alert_ready) 
   {
     #ifndef DISABLE_WEATHERCHECK
@@ -724,7 +811,7 @@ COROUTINE(scheduleManager) {
       showClock.suspend();
     }
   }
-  if (!scrolltext.active && !alertflash.active && !cotimer.show_weather_ready && !cotimer.show_alert_ready) 
+  if (!resetme && !scrolltext.showingreset && !scrolltext.active && !alertflash.active && !cotimer.show_weather_ready && !cotimer.show_alert_ready) 
   {
     #ifndef DISABLE_WEATHERCHECK
     if (checkWeather.isSuspended()) {
@@ -752,6 +839,25 @@ COROUTINE(scheduleManager) {
     //}
     if (checkipgeo.complete && !checkIpgeo.isSuspended())
       checkIpgeo.suspend();
+    if (!resetme && iotWebConf.getState() != 1 && show_weather.isChecked() && showWeather.isSuspended()) {
+      showWeather.reset();
+      checkWeather.reset();
+      showWeather.resume();
+      checkWeather.resume();
+    }
+     if (!show_weather.isChecked() && !showWeather.isSuspended()) {
+      showWeather.suspend();
+      checkWeather.suspend();
+     }
+     if (!resetme && iotWebConf.getState() != 1 && show_date.isChecked() && showDate.isSuspended()) {
+      showDate.reset();
+      checkWeather.reset();
+      showDate.resume();
+      checkWeather.resume();     
+    }
+     if (!show_date.isChecked() && !showDate.isSuspended()) {
+      showDate.suspend();
+     }
     COROUTINE_YIELD();
   }
 }
@@ -772,16 +878,16 @@ COROUTINE(AlertFlash) {
       matrix->clear();
       matrix->show();
       COROUTINE_DELAY(250);
-      if (alertflash.lap < alertflash.laps) {
+      while (alertflash.lap < alertflash.laps) {
         matrix->clear();
         matrix->fillScreen(alertflash.color);
         matrix->show();
         COROUTINE_DELAY(250);
         matrix->clear();
         matrix->show();
+        COROUTINE_DELAY(250);
         alertflash.lap++;
       }
-      COROUTINE_DELAY(250);
       alertflash.active = false;
   }
 }
@@ -879,7 +985,7 @@ COROUTINE(setBrightness) {
     #ifdef DEBUG_LIGHT
     Serial.println((String) "Lux: " + full + " brightness: " + cb + " avg: " + current.brightness);
     #endif
-    COROUTINE_DELAY(20);
+    COROUTINE_DELAY(LIGHT_CHECK_DELAY);
   }
 }
 
@@ -899,10 +1005,12 @@ void processTimezone()
   savedoffset = preferences.getShort("tzoffset", 0);
   if (use_fixed_tz.isChecked())
   {
+    current.tzoffset = fixed_offset.value();
     current.timezone = TimeZone::forHours(fixed_offset.value());
     ESP_LOGD(TAG, "Using fixed timezone offset: %d", fixed_offset.value());
   }
   else if (ipgeo.tzoffset != 127) {
+    current.tzoffset = ipgeo.tzoffset;
     current.timezone = TimeZone::forHours(ipgeo.tzoffset);
     ESP_LOGD(TAG, "Using ipgeolocation offset: %d", ipgeo.tzoffset);
     if (ipgeo.tzoffset != savedoffset)
@@ -912,6 +1020,7 @@ void processTimezone()
     }
   }
   else {
+    current.tzoffset = savedoffset;
     current.timezone = TimeZone::forHours(savedoffset);
     ESP_LOGD(TAG, "Using saved timezone offset: %d", savedoffset);
   }
@@ -973,27 +1082,43 @@ void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) {
 }
 
 void display_showStatus() {
-  uint16_t clr;
-  uint16_t wclr;
-  if (timesource == "gps" && gps.fix == true)
-      clr = BLACK;
-  else if (timesource == "gps" && gps.fix == false && (Now() - systemClock.getLastSyncTime()) > 3600)
-      clr = DARKBLUE;
-  else if (gps.fix == true && timesource == "ntp")
-      clr = DARKPURPLE;
-  else if (timesource == "ntp")
-    clr = DARKGREEN;
-  else if (wifi_connected)
-    clr = DARKYELLOW;
-  else clr = DARKRED;
-  if (alerts.inWarning)
-    wclr = RED;
-  else if (alerts.inWatch)
-    wclr = YELLOW;
-  else
-    wclr = BLACK;
-  matrix->drawPixel(0, 7, clr);
-  matrix->drawPixel(0, 0, wclr);
+    uint16_t clr;
+    uint16_t wclr;
+    acetime_t now = systemClock.getNow();
+    if (now - systemClock.getLastSyncTime() > 3660)
+        clr = DARKRED;
+    else if (timesource == "gps" && gps.fix == true)
+        clr = BLACK;
+    else if (timesource == "gps" && gps.fix == false && (now - systemClock.getLastSyncTime()) > 300)
+        clr = DARKBLUE;
+    else if (gps.fix == true && timesource == "ntp")
+        clr = DARKPURPLE;
+    else if (timesource == "ntp" && iotWebConf.getState() == 4)
+      clr = DARKGREEN;
+    else if (iotWebConf.getState() == 3)  // connecting
+      clr = DARKYELLOW; 
+    else if (iotWebConf.getState() <= 2)  // boot, apmode, notconfigured
+      clr = DARKMAGENTA;
+    else if (iotWebConf.getState() == 4)  // online
+      clr = DARKCYAN;
+    else if (iotWebConf.getState() == 5) // offline
+      clr = DARKRED;
+    else
+      clr = DARKRED;
+    if (alerts.inWarning)
+      wclr = RED;
+    else if (alerts.inWatch)
+      wclr = YELLOW;
+    else
+      wclr = BLACK;
+    if (!disable_status.isChecked())
+      matrix->drawPixel(0, 7, clr);
+    matrix->drawPixel(0, 0, wclr);
+    if (current.oldstatusclr != clr || current.oldstatuswclr != wclr) {
+      matrix->show();
+      current.oldstatusclr = clr;
+      current.oldstatuswclr = wclr;
+    }
 }
 
 void display_weatherIcon() {
@@ -1105,6 +1230,16 @@ String getSystemZonedTimeString() {
   return (String)string;
 }
 
+String getSystemZonedDateString() {
+  acetime_t now = systemClock.getNow();
+  auto localDate = LocalDate::forEpochSeconds(now);
+  uint8_t dayOfWeek = localDate.dayOfWeek();
+  uint8_t month = localDate.month();
+  uint8_t day = localDate.day();
+  uint8_t year = localDate.year();
+  return (String)DateStrings().dayOfWeekLongString(dayOfWeek) + ", " + DateStrings().monthLongString(month) + " " + day + ordinal_suffix(day);
+}
+
 void wifiConnected() {
   ESP_LOGI(TAG, "WiFi was connected.");
   wifi_connected = true;
@@ -1117,7 +1252,7 @@ void wifiConnected() {
 // System Loop
 void loop() {
   esp_task_wdt_reset();
-  #ifdef COROUTINE_PROFILER
+#ifdef COROUTINE_PROFILER
   CoroutineScheduler::loopWithProfiler();
   #else
   CoroutineScheduler::loop();
@@ -1170,12 +1305,16 @@ void setup () {
   group1.addItem(&text_scroll_speed);
   group1.addItem(&colonflicker);
   group1.addItem(&flickerfast);
+  group1.addItem(&show_date);
+  group1.addItem(&show_date_interval);
+  group1.addItem(&disable_status);
   group2.addItem(&fahrenheit);
   group2.addItem(&weatherapi);
-  group2.addItem(&alert_check_interval);
+  group2.addItem(&show_weather);
+  group2.addItem(&show_weather_interval);
   group2.addItem(&weather_check_interval);
-  group2.addItem(&alert_show_interval);
-  group2.addItem(&weather_show_interval);
+  group2.addItem(&show_alert_interval);
+  group2.addItem(&alert_check_interval);
   group3.addItem(&use_fixed_tz);
   group3.addItem(&fixed_offset);
   group4.addItem(&use_fixed_loc);
@@ -1183,6 +1322,7 @@ void setup () {
   group4.addItem(&fixedLon);
   group4.addItem(&ipgeoapi);
   iotWebConf.addSystemParameter(&serialdebug);
+  iotWebConf.addSystemParameter(&resetdefaults);
   iotWebConf.addParameterGroup(&group1);
   iotWebConf.addParameterGroup(&group2);
   iotWebConf.addParameterGroup(&group3);
@@ -1202,6 +1342,7 @@ void setup () {
   ESP_EARLY_LOGD(TAG, "IotWebConf initilization is complete. Web server is ready.");
   ESP_EARLY_LOGD(TAG, "Initializing Light Sensor...");
   userbrightness = calcbright(brightness_level.value());
+  current.brightness = userbrightness;
   Wire.begin(TSL2561_SDA, TSL2561_SCL);
   Tsl.begin();
   while (!Tsl.available()) {
@@ -1242,9 +1383,11 @@ void setup () {
   ESP_EARLY_LOGD(TAG, "Initializing the display...");
   FastLED.addLeds<NEOPIXEL, HSPI_MOSI>(leds, NUMMATRIX).setCorrection(TypicalLEDStrip);
   matrix->begin();
+  matrix->setBrightness(userbrightness);
   matrix->setTextWrap(false);
   ESP_EARLY_LOGD(TAG, "Display initalization complete.");
   ESP_EARLY_LOGD(TAG, "Setup initialization complete: %d ms", (millis()-timer));
+  scrolltext.resetmsgtime = millis() - 60000;
   CoroutineScheduler::setup();
 }
 
@@ -1292,8 +1435,13 @@ void configSaved()
   cotimer.scrollspeed = map(text_scroll_speed.value(), 1, 10, 100, 10);
   userbrightness = calcbright(brightness_level.value());
   ESP_LOGI(TAG, "Configuration was updated.");
+  if (resetdefaults.isChecked())
+    resetme = true;
   if (!serialdebug.isChecked())
     Serial.println("Serial debug info has been disabled.");
+  scrolltext.message = "Configuration Saved";
+  scrolltext.color = GREEN;
+  scrolltext.active = true;
 }
 
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
@@ -1397,7 +1545,7 @@ String elapsedTime(int32_t seconds) {
   if (seconds > T1Y - 60)
     return "never";
   if (seconds < 60)
-    return (String)seconds + " sec";
+    return (String)seconds + "sec";
   else granularity = 2;
   uint32_t value;
   for (uint8_t i = 0; i < 6; i++)
@@ -1408,7 +1556,7 @@ String elapsedTime(int32_t seconds) {
     {
       seconds = seconds - value * vint;
       if (granularity != 0) {
-        result = result + value + " " + interval_names[i];
+        result = result + value + "" + interval_names[i];
         if (granularity > 0)
           result = result + ",";
         granularity--;
@@ -1480,6 +1628,17 @@ acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds) {
     return 30;
   }
 
+const char* ordinal_suffix(int n)
+{
+        static const char suffixes [][3] = {"th", "st", "nd", "rd"};
+        auto ord = n % 100;
+        if (ord / 10 == 1) { ord = 0; }
+        ord = ord % 10;
+        if (ord > 3) { ord = 0; }
+        return suffixes[ord];
+}
+
   //FIXME: string printouts on debug messages for scrolltext, etc showing garbled
-  //TODO: add date scroller
   //TODO: web interface cleanup
+  //TODO: add more animation frames
+  //FIXME: invalid apis crashing?

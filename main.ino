@@ -31,7 +31,8 @@
 
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock (Everything is coroutines now)
 
-#define VERSION "1.0b"
+#define VERSION "1.0b"             // firmware version
+static const char* CONFIGVER = "1";// config version (advance if iotwebconf config additions to reset defaults)
 
 #undef COROUTINE_PROFILER          // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages
@@ -45,7 +46,7 @@
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
 #define DAYHUE 40                  // 6am daytime hue start
-#define NIGHTHUE 175               // 10pm nighttime hue end
+#define NIGHTHUE 185               // 10pm nighttime hue end
 #define LUXMIN 5                   // Lowest brightness min
 #define LUXMAX 100                 // Lowest brightness max
 #define mw 32                      // Width of led matrix
@@ -321,10 +322,10 @@ static SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/,
 // String fixedLon;                    // Fixed GPS Longitude
 // String ipgeoapi                     // IP Geolocation API
 
-IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
-  iotwebconf::CheckboxTParameter resetdefaults =
+IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIGVER);
+iotwebconf::CheckboxTParameter resetdefaults =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("resetdefaults").label("Reset to Defaults (AP mode)").defaultValue(false).build();
-  iotwebconf::CheckboxTParameter serialdebug =
+iotwebconf::CheckboxTParameter serialdebug =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("serialdebug").label("Debug to Serial").defaultValue(false).build();
 iotwebconf::ParameterGroup group1 = iotwebconf::ParameterGroup("Display", "Display Settings");
   iotwebconf::IntTParameter<int8_t> brightness_level =
@@ -370,9 +371,9 @@ iotwebconf::ParameterGroup group2 = iotwebconf::ParameterGroup("Clock", "Clock S
   iotwebconf::IntTParameter<int8_t> fixed_offset =   
     iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("fixed_offset").label("Fixed GMT Hours Offset").defaultValue(0).min(-12).max(12).step(1).placeholder("-12...12").build();
   iotwebconf::CheckboxTParameter colonflicker =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("colonflicker").label("Clock Colon Flicker").defaultValue(true).build();
+    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("colonflicker").label("Clock Colon Flash").defaultValue(true).build();
   iotwebconf::CheckboxTParameter flickerfast =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("flickerfast").label("Fast Colon Flicker").defaultValue(true).build();
+    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("flickerfast").label("Flash Colon Fast").defaultValue(true).build();
   iotwebconf::CheckboxTParameter use_fixed_clockcolor=
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("use_fixed_clockcolor").label("Use Fixed Clock Color (Disables Auto Color)").defaultValue(false).build();
     iotwebconf::ColorTParameter fixed_clockcolor =
@@ -414,14 +415,17 @@ COROUTINE(showClock) {
     uint8_t myminute = ldt.minute();
     uint8_t mysecs = ldt.second();
     showclock.seconds = mysecs;
-    uint8_t myhour = myhours % 12;
+    uint8_t myhour;
+    if (twelve_clock.isChecked())
+      myhour = myhours % 12;
+    else
+      myhour = myhours;
     if (myhours * 60 >= 1320)
       current.clockhue = NIGHTHUE;
     else if (myhours * 60 < 360)
       current.clockhue = NIGHTHUE;
     else
       current.clockhue = constrain(map(myhours * 60 + myminute, 360, 1319, DAYHUE, NIGHTHUE), DAYHUE, NIGHTHUE);
-
     if (use_fixed_clockcolor.isChecked())
       showclock.color = hex2rgb(fixed_clockcolor.value());
     else
@@ -430,58 +434,57 @@ COROUTINE(showClock) {
     matrix->clear();
     if (myhour / 10 == 0 && myhour % 10 == 0)
     {
-  display_setclockDigit(1, 0, showclock.color);
-  display_setclockDigit(2, 1, showclock.color);
-  clock_display_offset = false;
+      display_setclockDigit(1, 0, showclock.color);
+      display_setclockDigit(2, 1, showclock.color);
+      clock_display_offset = false;
     }
     else
     {
-  if (myhour / 10 != 0)
-  {
-    clock_display_offset = false;
-    display_setclockDigit(myhour / 10, 0, showclock.color); // set first digit of hour
-  }
-  else
-    clock_display_offset = true;
-  display_setclockDigit(myhour % 10, 1, showclock.color); // set second digit of hour
+      if (myhour / 10 != 0)
+      {
+        clock_display_offset = false;
+        display_setclockDigit(myhour / 10, 0, showclock.color); // set first digit of hour
+      }
+      else
+        clock_display_offset = true;
+      display_setclockDigit(myhour % 10, 1, showclock.color); // set second digit of hour
     }
-    display_setclockDigit(myminute / 10, 2, showclock.color); // set first digig of minute
-    display_setclockDigit(myminute % 10, 3, showclock.color); // set second digit of minute
-    if (showclock.colonflicker)
-    {
-  if (clock_display_offset)
-  {
-    matrix->drawPixel(12, 5, showclock.color); // draw colon
-    matrix->drawPixel(12, 2, showclock.color); // draw colon
-  }
-  else
-  {
-    matrix->drawPixel(16, 5, showclock.color); // draw colon
-    matrix->drawPixel(16, 2, showclock.color); // draw colon
-  }
-  display_showStatus();
-  matrix->show();
-  ;
-    }
-    else
-    {
-  display_showStatus();
-  matrix->show();
-  showclock.colonoff = true;
-  COROUTINE_AWAIT(millis() - showclock.millis > showclock.fstop);
-  if (clock_display_offset)
-  {
-    matrix->drawPixel(12, 5, showclock.color); // draw colon
-    matrix->drawPixel(12, 2, showclock.color); // draw colon
-  }
-  else
-  {
-    matrix->drawPixel(16, 5, showclock.color); // draw colon
-    matrix->drawPixel(16, 2, showclock.color); // draw colon
-  }
-  display_showStatus();
-  matrix->show();
-    }
+      display_setclockDigit(myminute / 10, 2, showclock.color); // set first digig of minute
+      display_setclockDigit(myminute % 10, 3, showclock.color); // set second digit of minute
+      if (showclock.colonflicker)
+      {
+        if (clock_display_offset)
+        {
+          matrix->drawPixel(12, 5, showclock.color); // draw colon
+          matrix->drawPixel(12, 2, showclock.color); // draw colon
+        }
+        else
+        {
+          matrix->drawPixel(16, 5, showclock.color); // draw colon
+          matrix->drawPixel(16, 2, showclock.color); // draw colon
+        }
+      display_showStatus();
+      matrix->show();
+      }
+      else
+      {
+        display_showStatus();
+        matrix->show();
+        showclock.colonoff = true;
+        COROUTINE_AWAIT(millis() - showclock.millis > showclock.fstop);
+        if (clock_display_offset)
+        {
+          matrix->drawPixel(12, 5, showclock.color); // draw colon
+          matrix->drawPixel(12, 2, showclock.color); // draw colon
+        }
+        else
+        {
+          matrix->drawPixel(16, 5, showclock.color); // draw colon
+          matrix->drawPixel(16, 2, showclock.color); // draw colon
+        }
+      display_showStatus();
+      matrix->show();
+      }
     COROUTINE_AWAIT(showclock.seconds != getSystemZonedTime().second());
   }
 }
@@ -678,7 +681,9 @@ COROUTINE(print_debugData) {
     String wlg = elapsedTime(now - checkweather.lastsuccess);
     String lst = elapsedTime(now - systemClock.getLastSyncTime());
     String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME * 60);
-    debug_print((String) "System - Version:" + VERSION + " | RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiConnected:" + wifi_connected + " | IP:  | Uptime:" + uptime, true);
+    String lip = (WiFi.localIP()).toString();
+    debug_print((String) "Version - Firmware:v" + VERSION + " | Config:v" + CONFIGVER, true);
+    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiConnected:" + wifi_connected + " | IP:" + lip + " | Uptime:" + uptime, true);
     debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
     debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
     debug_print((String) "IPGeo - Complete:" + checkipgeo.complete + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
@@ -1049,7 +1054,7 @@ void processTimezone()
     ESP_LOGD(TAG, "Using ipgeolocation offset: %d", ipgeo.tzoffset);
     if (ipgeo.tzoffset != savedoffset)
     {
-      ESP_LOGW(TAG, "IP Geo timezone [%d] (%s) is different then saved timezone [%d], saving new timezone", ipgeo.tzoffset, ipgeo.timezone, savedoffset);
+      ESP_LOGI(TAG, "IP Geo timezone [%d] (%s) is different then saved timezone [%d], saving new timezone", ipgeo.tzoffset, ipgeo.timezone, savedoffset);
       preferences.putShort("tzoffset", ipgeo.tzoffset);
     }
   }
@@ -1399,7 +1404,7 @@ void setup () {
   Tsl.begin();
   while (!Tsl.available()) {
       systemClock.loop();
-      debug_print("Waiting for Light Sensor...");
+      debug_print("Waiting for Light Sensor...", true);
   }
   ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
   Tsl.on();
@@ -1694,6 +1699,5 @@ const char* ordinal_suffix(int n)
   //TODO: web interface cleanup
   //TODO: add more animation frames
   //FIXME: invalid apis crashing?
-  //TODO: versioning
   //TODO: 12/24 hour switch
-  //FIXME: ip in debug display
+  //FIXME: reboot after initial config

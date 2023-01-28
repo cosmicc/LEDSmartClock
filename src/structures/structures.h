@@ -163,7 +163,7 @@ struct Current {
   String lon = "0"; 
   uint8_t temphue; 
   TimeZone timezone;
-  uint16_t tzoffset;
+  int16_t tzoffset;
   uint16_t lux;
   uint16_t brightavg;
   uint16_t rawlux;

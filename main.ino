@@ -230,9 +230,8 @@ class GPSClock: public Clock {
         resetLastNtpCheck();
         auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
         acetime_t gpsSeconds = localDateTime.toEpochSeconds();
-        acetime_t epochSeconds = convertUnixEpochToAceTime(gpsSeconds-315878400);
-        ESP_LOGI(TAG, "GPSClock: readResponse(): gpsSeconds: %d | epochSeconds: %d | age: %d ms", gpsSeconds, epochSeconds, GPS.time.age());
-        return epochSeconds;
+        ESP_LOGI(TAG, "GPSClock: readResponse(): gpsSeconds: %d | age: %d ms", gpsSeconds, GPS.time.age());
+        return gpsSeconds;
       } else {
           ESP_LOGW(TAG, "GPSClock: readResponse(): GPS time update skipped, no gpsfix or time too old: %d ms", GPS.time.age());
           return kInvalidSeconds;
@@ -1091,11 +1090,13 @@ void display_showStatus() {
     acetime_t now = systemClock.getNow();
     if (now - systemClock.getLastSyncTime() > 3660)
         clr = DARKRED;
-    else if (timesource == "gps" && gps.fix == true && (now - systemClock.getLastSyncTime()) <= 600)
+    else if (timesource == "gps" && gps.fix && (now - systemClock.getLastSyncTime()) <= 600)
         clr = BLACK;
-    else if (timesource == "gps" && gps.fix == false && (now - systemClock.getLastSyncTime()) > 600 && !ds)
+    else if (timesource == "gps" && !gps.fix && (now - systemClock.getLastSyncTime()) <= 600 && !ds)
         clr = DARKBLUE;
-    else if (gps.fix == true && timesource == "ntp" && !ds)
+    else if (timesource == "gps" && !gps.fix && (now - systemClock.getLastSyncTime()) > 600 && !ds)
+        clr = DARKPURPLE;
+    else if (gps.fix && timesource == "ntp" && !ds)
         clr = DARKPURPLE;
     else if (timesource == "ntp" && iotWebConf.getState() == 4 && !ds)
       clr = DARKGREEN;

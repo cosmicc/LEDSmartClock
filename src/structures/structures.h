@@ -125,10 +125,12 @@ struct ScrollText {
   bool active;
   bool displayicon;
   bool tempshown;
+  bool showingreset;
   String message;
   uint32_t color;
   int16_t position;
   uint32_t millis;
+  uint32_t resetmsgtime;
 };
 
 struct ShowClock {
@@ -137,6 +139,7 @@ struct ShowClock {
   uint8_t seconds;
   bool colonflicker;
   bool colonoff;
+  acetime_t datelastshown;
 };
 
 struct CoTimers {
@@ -148,16 +151,22 @@ struct CoTimers {
   int16_t scrolliters;
   bool show_alert_ready;
   bool show_weather_ready;
+  bool show_date_ready;
   uint8_t iconcycle;
   uint32_t icontimer;
 };
 
 struct Current {
-  uint8_t brightness; 
+  uint16_t brightness; 
   uint8_t clockhue;
   String lat = "0";
   String lon = "0"; 
   uint8_t temphue; 
-  TimeZone timezone; 
-
+  TimeZone timezone;
+  int16_t tzoffset;
+  uint16_t lux;
+  uint16_t brightavg;
+  uint16_t rawlux;
+  uint16_t oldstatusclr;
+  uint16_t oldstatuswclr;
 };

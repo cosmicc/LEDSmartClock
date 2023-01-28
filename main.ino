@@ -225,9 +225,8 @@ class GPSClock: public Clock {
 
   acetime_t readResponse() const {
     if (GPS.time.isUpdated()) {
-      if (GPS.time.age() < 100 || gps.fix == false) {
+      if (GPS.time.age() < 100) {
         setTimeSource("gps");
-        ESP_LOGI(TAG, "GPSClock: GPS Time updated. Age: %d ms", GPS.time.age());
         resetLastNtpCheck();
         auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
         acetime_t gpsSeconds = localDateTime.toEpochSeconds();
@@ -329,6 +328,8 @@ iotwebconf::ParameterGroup group1 = iotwebconf::ParameterGroup("Display", "Displ
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("flickerfast").label("Fast Colon Flicker").defaultValue(true).build();
   iotwebconf::CheckboxTParameter show_date =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_date").label("Show Date").defaultValue(true).build();
+  iotwebconf::ColorTParameter datecolor =
+   iotwebconf::Builder<iotwebconf::ColorTParameter>("datecolor").label("Choose date color").defaultValue("#FF8800").build();
  iotwebconf::IntTParameter<int8_t> show_date_interval =
     iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("show_date_interval").label("Show Date Interval in Hours (1-24)").defaultValue(1).min(1).max(24).step(1).placeholder("1..24(hours)").build();
   iotwebconf::CheckboxTParameter disable_status =  
@@ -570,7 +571,7 @@ COROUTINE(showDate) {
   COROUTINE_LOOP() {
   COROUTINE_AWAIT(cotimer.show_date_ready && showClock.isSuspended() && !cotimer.show_alert_ready && !cotimer.show_weather_ready && !scrolltext.active && !alertflash.active);
   scrolltext.message = getSystemZonedDateString();
-  scrolltext.color = ORANGE;
+  scrolltext.color = (uint32_t)datecolor.value();
   scrolltext.active = true;
   COROUTINE_AWAIT(!scrolltext.active);
   showclock.datelastshown = systemClock.getNow();
@@ -1084,26 +1085,29 @@ void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) {
 void display_showStatus() {
     uint16_t clr;
     uint16_t wclr;
+    bool ds = disable_status.isChecked();
+    if (ds)
+      clr = BLACK;
     acetime_t now = systemClock.getNow();
     if (now - systemClock.getLastSyncTime() > 3660)
         clr = DARKRED;
-    else if (timesource == "gps" && gps.fix == true)
+    else if (timesource == "gps" && gps.fix == true && (now - systemClock.getLastSyncTime()) <= 600)
         clr = BLACK;
-    else if (timesource == "gps" && gps.fix == false && (now - systemClock.getLastSyncTime()) > 300)
+    else if (timesource == "gps" && gps.fix == false && (now - systemClock.getLastSyncTime()) > 600 && !ds)
         clr = DARKBLUE;
-    else if (gps.fix == true && timesource == "ntp")
+    else if (gps.fix == true && timesource == "ntp" && !ds)
         clr = DARKPURPLE;
-    else if (timesource == "ntp" && iotWebConf.getState() == 4)
+    else if (timesource == "ntp" && iotWebConf.getState() == 4 && !ds)
       clr = DARKGREEN;
-    else if (iotWebConf.getState() == 3)  // connecting
+    else if (iotWebConf.getState() == 3 && !ds)  // connecting
       clr = DARKYELLOW; 
-    else if (iotWebConf.getState() <= 2)  // boot, apmode, notconfigured
+    else if (iotWebConf.getState() <= 2 && !ds)  // boot, apmode, notconfigured
       clr = DARKMAGENTA;
-    else if (iotWebConf.getState() == 4)  // online
+    else if (iotWebConf.getState() == 4 && !ds)  // online
       clr = DARKCYAN;
-    else if (iotWebConf.getState() == 5) // offline
+    else if (iotWebConf.getState() == 5 && !ds) // offline
       clr = DARKRED;
-    else
+    else if (!ds)
       clr = DARKRED;
     if (alerts.inWarning)
       wclr = RED;
@@ -1111,8 +1115,7 @@ void display_showStatus() {
       wclr = YELLOW;
     else
       wclr = BLACK;
-    if (!disable_status.isChecked())
-      matrix->drawPixel(0, 7, clr);
+    matrix->drawPixel(0, 7, clr);
     matrix->drawPixel(0, 0, wclr);
     if (current.oldstatusclr != clr || current.oldstatuswclr != wclr) {
       matrix->show();
@@ -1306,6 +1309,7 @@ void setup () {
   group1.addItem(&colonflicker);
   group1.addItem(&flickerfast);
   group1.addItem(&show_date);
+  group1.addItem(&datecolor);
   group1.addItem(&show_date_interval);
   group1.addItem(&disable_status);
   group2.addItem(&fahrenheit);

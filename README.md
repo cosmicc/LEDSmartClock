@@ -18,5 +18,16 @@ DS3231 RTC Module<br>
 TSL2561 Light Luminosiy Sensor<br>
 NEO-6M GPS Module<br>
 
+Status LED:<br>
+Red: Wifi offline, or old time data<br>
+Yellow: Connecting to wifi<br>
+BlueGreen: Wifi connected, not ntp sync yet<br>
+Green: NTP sync<br>
+Purple: GPS fix, no GPS time yet<br>
+Blue: No GPS fix, recent GPS time within 10 min<br>
+Off: GPS time sync within 10 min<br>
+
+Disabled status led still shows red if time is not updated by ntp or gps in an hour<br>
+
 
 

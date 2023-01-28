@@ -153,11 +153,13 @@ struct CoTimers {
 };
 
 struct Current {
-  uint8_t brightness; 
+  uint16_t brightness; 
   uint8_t clockhue;
   String lat = "0";
   String lon = "0"; 
   uint8_t temphue; 
-  TimeZone timezone; 
-
+  TimeZone timezone;
+  uint16_t lux;
+  uint16_t brightavg;
+  uint16_t rawlux;
 };

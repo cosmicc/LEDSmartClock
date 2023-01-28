@@ -30,7 +30,7 @@
 
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock (Everything is coroutines now)
 
-#define COROUTINE_PROFILER         // Enable the coroutine debug profiler
+#undef COROUTINE_PROFILER         // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages
 #undef DISABLE_WEATHERCHECK        // Disable Weather forcast checks
 #undef DISABLE_ALERTCHECK          // Disable Weather Alert checks
@@ -42,7 +42,7 @@
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
 #define DAYHUE 40                  // 6am daytime hue start
-#define NIGHTHUE 174               // 10pm nighttime hue end
+#define NIGHTHUE 175               // 10pm nighttime hue end
 #define CONFIG_PIN 2               // Pin for the IotWebConf config pushbutton
 #define LUXMIN 5                   // Lowest brightness min
 #define LUXMAX 100                 // Lowest brightness max
@@ -116,7 +116,6 @@ bool wifi_connected;            // Wifi is connected or not
 acetime_t bootTime;             // boot time
 String timesource = "none";     // Primary timeclock source gps/ntp
 uint8_t userbrightness;         // Current saved brightness setting (from iotwebconf)
-char fixedTz[32];
 
 // Function Declarations
 void processLoc();
@@ -141,6 +140,7 @@ void display_weatherIcon();
 acetime_t Now();
 String capString(String str);
 ace_time::ZonedDateTime getSystemZonedTime();
+uint16_t calcbright(uint16_t bl);
 
 // AceTimeClock GPSClock custom class
 namespace ace_time {
@@ -219,21 +219,21 @@ class GPSClock: public Clock {
   }
 
   acetime_t readResponse() const {
-      if (GPS.time.isUpdated()) {
-        if (GPS.time.age() < 100 || gps.fix == false) {
-          setTimeSource("gps");
-          ESP_LOGI(TAG, "GPSClock: GPS Time updated. Age: %d ms", GPS.time.age());
-          resetLastNtpCheck();
-          auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
-          acetime_t gpsSeconds = localDateTime.toEpochSeconds();
-          acetime_t epochSeconds = convertUnixEpochToAceTime(gpsSeconds);
-          ESP_LOGI(TAG, "GPSClock: readResponse(): gpsSeconds= %d; epochSeconds=%d", gpsSeconds, epochSeconds);
-          return epochSeconds;
-        } else {
-            ESP_LOGW(TAG, "GPSClock: readResponse(): GPS time update skipped, no gpsfix or time too old: %d ms", GPS.time.age());
-            return kInvalidSeconds;
-          }
-      }
+    if (GPS.time.isUpdated()) {
+      if (GPS.time.age() < 100 || gps.fix == false) {
+        setTimeSource("gps");
+        ESP_LOGI(TAG, "GPSClock: GPS Time updated. Age: %d ms", GPS.time.age());
+        resetLastNtpCheck();
+        auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
+        acetime_t gpsSeconds = localDateTime.toEpochSeconds();
+        acetime_t epochSeconds = convertUnixEpochToAceTime(gpsSeconds-315878400);
+        ESP_LOGI(TAG, "GPSClock: readResponse(): gpsSeconds: %d | epochSeconds: %d | age: %d ms", gpsSeconds, epochSeconds, GPS.time.age());
+        return epochSeconds;
+      } else {
+          ESP_LOGW(TAG, "GPSClock: readResponse(): GPS time update skipped, no gpsfix or time too old: %d ms", GPS.time.age());
+          return kInvalidSeconds;
+        }
+    }
     if (!ntpIsReady) return kInvalidSeconds;
     if (!wifi_connected) {
       ESP_LOGW(TAG, "GPSClock: NtpreadResponse: not connected");
@@ -246,7 +246,7 @@ class GPSClock: public Clock {
     ntpSeconds |= (uint32_t) mPacketBuffer[43];
     if (ntpSeconds != 0) {
       acetime_t epochSeconds = convertUnixEpochToAceTime(ntpSeconds);
-      ESP_LOGI(TAG, "GPSClock: readResponse(): ntpSeconds= %d; epochSeconds=%d", ntpSeconds, epochSeconds);
+      ESP_LOGI(TAG, "GPSClock: readResponse(): ntpSeconds: %d | epochSeconds: %d", ntpSeconds, epochSeconds);
       resetLastNtpCheck();
       setTimeSource("ntp");
       return epochSeconds;
@@ -305,7 +305,7 @@ IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("serialdebug").label("Debug to Serial").defaultValue(false).build();
 iotwebconf::ParameterGroup group1 = iotwebconf::ParameterGroup("Display", "Display Settings");
   iotwebconf::IntTParameter<int8_t> brightness_level =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("brightness_level").label("Brightness Level (1-3)").defaultValue(2).min(1).max(3).step(1).placeholder("1(low)..3(high)").build();
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("brightness_level").label("Brightness Level (1-5)").defaultValue(2).min(1).max(5).step(1).placeholder("1(low)..5(high)").build();
   iotwebconf::IntTParameter<int8_t> text_scroll_speed =
     iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("text_scroll_speed").label("Text Scroll Speed (1-10)").defaultValue(5).min(1).max(10).step(1).placeholder("1(low)..10(high)").build();
   iotwebconf::CheckboxTParameter colonflicker =
@@ -345,7 +345,8 @@ iotwebconf::ParameterGroup group4 = iotwebconf::ParameterGroup("Location", "Loca
 COROUTINE(printProfiling) {
   COROUTINE_LOOP() {
     LogBinTableRenderer::printTo(Serial, 2 /*startBin*/, 13 /*endBin*/, false /*clear*/);
-    COROUTINE_DELAY(PROFILER_DELAY*1000);
+    CoroutineScheduler::list(Serial);
+    COROUTINE_DELAY(PROFILER_DELAY * 1000);
   }
 }
 #endif
@@ -550,7 +551,7 @@ COROUTINE(showWeather) {
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = weather.currentDescription;
+  scrolltext.message = capString((String)weather.currentDescription);
   scrolltext.color = WHITE;
   scrolltext.active = true;
   scrolltext.displayicon = true;
@@ -581,8 +582,8 @@ COROUTINE(showAlerts) {
   alertflash.laps = 3;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = alerts.description1;
-  scrolltext.color = acolor;
+  scrolltext.message = (String)alerts.description1;
+  scrolltext.color = RED;
   scrolltext.active = true;
   COROUTINE_AWAIT(!scrolltext.active);
   alerts.lastshown = systemClock.getNow();
@@ -612,7 +613,7 @@ COROUTINE(print_debugData) {
     String wlg = elapsedTime(now - checkweather.lastsuccess);
     String lst = elapsedTime(now - systemClock.getLastSyncTime());
     String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME);
-    debug_print((String) "System - Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiConnected:" + wifi_connected + " | IP:  | Uptime:" + uptime, true);
+    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:+" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiConnected:" + wifi_connected + " | IP:  | Uptime:" + uptime, true);
     debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
     debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
     debug_print((String) "IPGeo - Complete:" + checkipgeo.complete + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
@@ -717,7 +718,7 @@ COROUTINE(scheduleManager) {
       checkAlerts.suspend();
     }
     #endif
-    if (!print_debugData.isSuspended())
+    if (!serialdebug.isChecked() && !print_debugData.isSuspended())
       print_debugData.suspend();
     if (!showClock.isSuspended()) {
       showClock.suspend();
@@ -735,21 +736,20 @@ COROUTINE(scheduleManager) {
       checkAlerts.resume();
     }
     #endif
-    if (print_debugData.isSuspended())
-      print_debugData.resume();
   }
-    if (serialdebug.isChecked() && print_debugData.isSuspended()) {
+    if (serialdebug.isChecked() && !scrolltext.active && !alertflash.active && print_debugData.isSuspended() && !cotimer.show_alert_ready && !cotimer.show_weather_ready) 
+    {
       print_debugData.reset();
       print_debugData.resume();
     }
     if (!serialdebug.isChecked() && !print_debugData.isSuspended()) {
       print_debugData.suspend();
     }
-    if (abs(now - bootTime) > (T1Y - 60))
-    {
-      ESP_LOGE(TAG, "1 year system reset!");
-      ESP.restart();
-    }
+    //if (abs(now - bootTime) > (T1Y - 60))
+    //{
+    //  ESP_LOGE(TAG, "1 year system reset!");
+      //ESP.restart();
+    //}
     if (checkipgeo.complete && !checkIpgeo.isSuspended())
       checkIpgeo.suspend();
     COROUTINE_YIELD();
@@ -860,20 +860,19 @@ COROUTINE(gps_checkData) {
       ESP_LOGV(TAG, "GPS HDOP updated: %f m",gps.hdop);
     }
     if (GPS.charsProcessed() < 10) ESP_LOGE(TAG, "No GPS data. Check wiring.");
-  }
   COROUTINE_DELAY(1000);
+  }
 }
 
 COROUTINE(setBrightness) {
   COROUTINE_LOOP() {
     COROUTINE_AWAIT(Tsl.available());
-    uint16_t full;
-    Tsl.fullLuminosity(full);
-    uint16_t cb = constrain(map(full, 0, 500, LUXMIN, LUXMAX), LUXMIN, LUXMAX);
-    uint16_t avg = (current.brightness + (cb + userbrightness)) / 2;
-    if (avg != current.brightness) 
+    Tsl.fullLuminosity(current.rawlux);
+    current.lux = constrain(map(current.rawlux, 0, 500, LUXMIN, LUXMAX), LUXMIN, LUXMAX);
+    current.brightavg = ((current.brightness) + (current.lux + userbrightness)) / 2;
+    if (current.brightavg != current.brightness) 
     {
-      current.brightness = avg;
+      current.brightness = current.brightavg;
       matrix->setBrightness(current.brightness);
       matrix->show();
     }
@@ -1068,11 +1067,10 @@ void display_temperature() {
       xpos = 9;
     xpos = xpos * (digits);
     int score = abs(temp);
-    current.temphue = map(weather.currentFeelsLike, 0, 40, NIGHTHUE, 0);
-    if (current.temphue < 0)
-      current.temphue = 0;
-    else if (current.temphue > NIGHTHUE)
-      current.temphue = NIGHTHUE;
+    current.temphue = constrain(map(weather.currentFeelsLike, 0, 40, NIGHTHUE, 0), NIGHTHUE, 0);
+    if (weather.currentFeelsLike < 0) {
+      current.temphue = NIGHTHUE + abs(weather.currentFeelsLike);
+    }
     while (score)
     {
       matrix->drawBitmap(xpos, 0, num[score % 10], 8, 8, hsv2rgb(current.temphue));
@@ -1203,14 +1201,16 @@ void setup () {
   cotimer.scrollspeed = map(text_scroll_speed.value(), 1, 10, 100, 10);
   ESP_EARLY_LOGD(TAG, "IotWebConf initilization is complete. Web server is ready.");
   ESP_EARLY_LOGD(TAG, "Initializing Light Sensor...");
-  userbrightness = brightness_level.value();
+  userbrightness = calcbright(brightness_level.value());
   Wire.begin(TSL2561_SDA, TSL2561_SCL);
   Tsl.begin();
-  if (!Tsl.available()) {
-    ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
-    Tsl.on();
-    Tsl.setSensitivity(true, Tsl2561::EXP_14);
+  while (!Tsl.available()) {
+      systemClock.loop();
+      debug_print("Waiting for Light Sensor...");
   }
+  ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
+  Tsl.on();
+  Tsl.setSensitivity(true, Tsl2561::EXP_14);
   ESP_EARLY_LOGD(TAG, "Initializing GPS Module...");
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Initialize GPS UART
   ESP_EARLY_LOGD(TAG, "Setting class timestamps...");
@@ -1290,21 +1290,10 @@ void configSaved()
   if (flickerfast.isChecked())
     showclock.fstop = 20;
   cotimer.scrollspeed = map(text_scroll_speed.value(), 1, 10, 100, 10);
-  switch (brightness_level.value()) 
-    {
-      case 2:
-       userbrightness = 5;
-      case 3:
-       userbrightness = 10;
-      case 4:
-      userbrightness = 15;
-      case 5:
-      userbrightness = 20;
-    }
+  userbrightness = calcbright(brightness_level.value());
   ESP_LOGI(TAG, "Configuration was updated.");
   if (!serialdebug.isChecked())
     Serial.println("Serial debug info has been disabled.");
-
 }
 
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
@@ -1477,3 +1466,20 @@ acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds) {
   void resetLastNtpCheck() {
     lastntpcheck = systemClock.getNow();
   }
+
+  uint16_t calcbright(uint16_t bl) {
+  if (bl == 1)
+    return 0;
+  else if (bl == 2)
+    return 5;
+  else if (bl == 3)
+    return 10;
+  else if (bl == 4)
+    return 20;
+  else if (bl == 5)
+    return 30;
+  }
+
+  //FIXME: string printouts on debug messages for scrolltext, etc showing garbled
+  //TODO: add date scroller
+  //TODO: web interface cleanup

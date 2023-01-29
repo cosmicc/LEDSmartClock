@@ -51,8 +51,8 @@ static const char* CONFIGVER = "1";// config version (advance if iotwebconf conf
 #define LUXMAX 100                 // Lowest brightness max
 #define mw 32                      // Width of led matrix
 #define mh 8                       // Hight of led matrix
-#define ANI_BITMAP_CYCLES 5        // Number of animation frames in each weather icon bitmap
-#define ANI_SPEED 100              // Bitmap animation speed in ms (lower is faster)
+#define ANI_BITMAP_CYCLES 8        // Number of animation frames in each weather icon bitmap
+#define ANI_SPEED 80             // Bitmap animation speed in ms (lower is faster)
 #define NTPCHECKTIME 60            // NTP server check time in minutes
 #define LIGHT_CHECK_DELAY 250      // delay for each brightness check in ms
 #define NUMMATRIX (mw*mh)
@@ -116,7 +116,6 @@ String wurl;                    // Built Openweather API URL
 String aurl;                    // Built AWS API URL
 String gurl;                    // Built IPGeolocation.io API URL
 bool clock_display_offset;      // Clock display offset for single digit hour
-bool wifi_connected;            // Wifi is connected or not
 bool resetme;                   // reset to factory defaults
 acetime_t bootTime;             // boot time
 String timesource = "none";     // Primary timeclock source gps/ntp
@@ -148,140 +147,7 @@ String capString(String str);
 ace_time::ZonedDateTime getSystemZonedTime();
 uint16_t calcbright(uint16_t bl);
 String getSystemZonedDateString();
-
-// AceTimeClock GPSClock custom class
-namespace ace_time {
-namespace clock {
-class GPSClock: public Clock {
-  private:
-    static const uint8_t kNtpPacketSize = 48;
-    const char* const mServer = "us.pool.ntp.org";
-    uint16_t const mLocalPort = 2390;
-    uint16_t const mRequestTimeout = 1000;
-    mutable WiFiUDP mUdp;
-    mutable uint8_t mPacketBuffer[kNtpPacketSize];
-
-  public:
-    mutable bool ntpIsReady = false;
-    static const acetime_t kInvalidSeconds = LocalTime::kInvalidSeconds;
-    /** Number of millis to wait during connect before timing out. */
-    static const uint16_t kConnectTimeoutMillis = 10000;
-
-    bool isSetup() const { return ntpIsReady; }
-
-    void setup() {
-      if (wifi_connected) {
-        mUdp.begin(mLocalPort);
-        ESP_LOGD(TAG, "GPSClock: NTP ready");
-        ntpIsReady = true;
-      }
-    }
-
-    void ntpReady() {
-      if (wifi_connected || !ntpIsReady) {
-        mUdp.begin(mLocalPort);
-        ESP_LOGD(TAG, "GPSClock: NTP ready");
-        ntpIsReady = true;
-      }
-    }
-
-  acetime_t getNow() const {
-    if (GPS.time.isUpdated())
-        readResponse();
-    if (!ntpIsReady || !wifi_connected || abs(Now() - lastntpcheck) > NTPCHECKTIME*60)
-      return kInvalidSeconds;
-    sendRequest();
-    uint16_t startTime = millis();
-    while ((uint16_t)(millis() - startTime) < mRequestTimeout)
-      if (isResponseReady())
-           return readResponse();
-    return kInvalidSeconds;
-    }
-
-  void sendRequest() const {
-    while (Serial1.available() > 0)
-        GPS.encode(Serial1.read());
-    if (GPS.time.isUpdated())
-        return;
-    if (!ntpIsReady)
-        return;
-    if (!wifi_connected) {
-    ESP_LOGW(TAG, "GPSClock: NtpsendRequest(): not connected");
-    return;
-    }
-    if (abs(Now() - lastntpcheck) > NTPCHECKTIME*60) {
-      while (mUdp.parsePacket() > 0) {}
-      ESP_LOGD(TAG, "GPSClock: NtpsendRequest(): sending request");
-      IPAddress ntpServerIP;
-      WiFi.hostByName(mServer, ntpServerIP);
-      sendNtpPacket(ntpServerIP);  
-    }
-  }
-
-  bool isResponseReady() const {
-    if (GPS.time.isUpdated()) return true;
-    if (!ntpIsReady || !wifi_connected)
-      return false;
-    return mUdp.parsePacket() >= kNtpPacketSize;
-  }
-
-  acetime_t readResponse() const {
-    if (GPS.time.isUpdated()) {
-      if (GPS.time.age() < 100) {
-        setTimeSource("gps");
-        resetLastNtpCheck();
-        auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
-        acetime_t gpsSeconds = localDateTime.toEpochSeconds();
-        ESP_LOGI(TAG, "GPSClock: readResponse(): gpsSeconds: %d | age: %d ms", gpsSeconds, GPS.time.age());
-        return gpsSeconds;
-      } else {
-          ESP_LOGW(TAG, "GPSClock: readResponse(): GPS time update skipped, no gpsfix or time too old: %d ms", GPS.time.age());
-          return kInvalidSeconds;
-        }
-    }
-    if (!ntpIsReady) return kInvalidSeconds;
-    if (!wifi_connected) {
-      ESP_LOGW(TAG, "GPSClock: NtpreadResponse: not connected");
-      return kInvalidSeconds;
-    }
-    mUdp.read(mPacketBuffer, kNtpPacketSize);
-    uint32_t ntpSeconds =  (uint32_t) mPacketBuffer[40] << 24;
-    ntpSeconds |= (uint32_t) mPacketBuffer[41] << 16;
-    ntpSeconds |= (uint32_t) mPacketBuffer[42] << 8;
-    ntpSeconds |= (uint32_t) mPacketBuffer[43];
-    if (ntpSeconds != 0) {
-      acetime_t epochSeconds = convertUnixEpochToAceTime(ntpSeconds);
-      ESP_LOGI(TAG, "GPSClock: readResponse(): ntpSeconds: %d | epochSeconds: %d", ntpSeconds, epochSeconds);
-      resetLastNtpCheck();
-      setTimeSource("ntp");
-      return epochSeconds;
-    } else {
-        ESP_LOGE("0 Ntp second recieved");
-        return kInvalidSeconds;
-    }
-  }
-
-  void sendNtpPacket(const IPAddress& address) const {
-    memset(mPacketBuffer, 0, kNtpPacketSize);
-    mPacketBuffer[0] = 0b11100011;   // LI, Version, Mode
-    mPacketBuffer[1] = 0;     // Stratum, or type of clock
-    mPacketBuffer[2] = 6;     // Polling Interval
-    mPacketBuffer[3] = 0xEC;  // Peer Clock Precision
-    mPacketBuffer[12] = 49;
-    mPacketBuffer[13] = 0x4E;
-    mPacketBuffer[14] = 49;
-    mPacketBuffer[15] = 52;
-    mUdp.beginPacket(address, 123); //NTP requests are to port 123
-    mUdp.write(mPacketBuffer, kNtpPacketSize);
-    mUdp.endPacket();
-  }
-};
-}
-}
-
-using ace_time::clock::GPSClock;
-static GPSClock gpsClock;
-static SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/, 60, 5, 1000);  // reference & backup clock
+bool readyToDisplay();
 
 // IotWebConf User custom settings reference
 // bool debugserial
@@ -388,6 +254,338 @@ iotwebconf::ParameterGroup group4 = iotwebconf::ParameterGroup("Location", "Loca
   iotwebconf::TextTParameter<33> ipgeoapi =
     iotwebconf::Builder<iotwebconf::TextTParameter<33>>("ipgeoapi").label("IPGeolocation.io API Key").defaultValue("").build();
 
+// AceTimeClock GPSClock custom class
+namespace ace_time {
+namespace clock {
+class GPSClock: public Clock {
+  private:
+    static const uint8_t kNtpPacketSize = 48;
+    const char* const mServer = "us.pool.ntp.org";
+    uint16_t const mLocalPort = 2390;
+    uint16_t const mRequestTimeout = 1000;
+    mutable WiFiUDP mUdp;
+    mutable uint8_t mPacketBuffer[kNtpPacketSize];
+
+  public:
+    mutable bool ntpIsReady = false;
+    static const acetime_t kInvalidSeconds = LocalTime::kInvalidSeconds;
+    /** Number of millis to wait during connect before timing out. */
+    static const uint16_t kConnectTimeoutMillis = 10000;
+
+    bool isSetup() const { return ntpIsReady; }
+
+    void setup() {
+      if (iotWebConf.getState() == 4) {
+        mUdp.begin(mLocalPort);
+        ESP_LOGD(TAG, "GPSClock: NTP ready");
+        ntpIsReady = true;
+      }
+    }
+
+    void ntpReady() {
+      if (iotWebConf.getState() == 4 || !ntpIsReady) {
+        mUdp.begin(mLocalPort);
+        ESP_LOGD(TAG, "GPSClock: NTP ready");
+        ntpIsReady = true;
+      }
+    }
+
+  acetime_t getNow() const {
+    if (GPS.time.isUpdated())
+        readResponse();
+    if (!ntpIsReady || iotWebConf.getState() != 4 || abs(Now() - lastntpcheck) > NTPCHECKTIME*60)
+      return kInvalidSeconds;
+    sendRequest();
+    uint16_t startTime = millis();
+    while ((uint16_t)(millis() - startTime) < mRequestTimeout)
+      if (isResponseReady())
+           return readResponse();
+    return kInvalidSeconds;
+    }
+
+  void sendRequest() const {
+    while (Serial1.available() > 0)
+        GPS.encode(Serial1.read());
+    if (GPS.time.isUpdated())
+        return;
+    if (!ntpIsReady)
+        return;
+    if (iotWebConf.getState() != 4) {
+    ESP_LOGW(TAG, "GPSClock: NtpsendRequest(): not connected");
+    return;
+    }
+    if (abs(Now() - lastntpcheck) > NTPCHECKTIME*60) {
+      while (mUdp.parsePacket() > 0) {}
+      ESP_LOGD(TAG, "GPSClock: NtpsendRequest(): sending request");
+      IPAddress ntpServerIP;
+      WiFi.hostByName(mServer, ntpServerIP);
+      sendNtpPacket(ntpServerIP);  
+    }
+  }
+
+  bool isResponseReady() const {
+    if (GPS.time.isUpdated()) return true;
+    if (!ntpIsReady || iotWebConf.getState() != 4)
+      return false;
+    return mUdp.parsePacket() >= kNtpPacketSize;
+  }
+
+  acetime_t readResponse() const {
+    if (GPS.time.isUpdated()) {
+      if (GPS.time.age() < 100) {
+        setTimeSource("gps");
+        resetLastNtpCheck();
+        auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
+        acetime_t gpsSeconds = localDateTime.toEpochSeconds();
+        ESP_LOGI(TAG, "GPSClock: readResponse(): gpsSeconds: %d | age: %d ms", gpsSeconds, GPS.time.age());
+        return gpsSeconds;
+      } else {
+          ESP_LOGW(TAG, "GPSClock: readResponse(): GPS time update skipped, no gpsfix or time too old: %d ms", GPS.time.age());
+          return kInvalidSeconds;
+        }
+    }
+    if (!ntpIsReady) return kInvalidSeconds;
+    if (iotWebConf.getState() != 4) {
+      ESP_LOGW(TAG, "GPSClock: NtpreadResponse: not connected");
+      return kInvalidSeconds;
+    }
+    mUdp.read(mPacketBuffer, kNtpPacketSize);
+    uint32_t ntpSeconds =  (uint32_t) mPacketBuffer[40] << 24;
+    ntpSeconds |= (uint32_t) mPacketBuffer[41] << 16;
+    ntpSeconds |= (uint32_t) mPacketBuffer[42] << 8;
+    ntpSeconds |= (uint32_t) mPacketBuffer[43];
+    if (ntpSeconds != 0) {
+      acetime_t epochSeconds = convertUnixEpochToAceTime(ntpSeconds);
+      ESP_LOGI(TAG, "GPSClock: readResponse(): ntpSeconds: %d | epochSeconds: %d", ntpSeconds, epochSeconds);
+      resetLastNtpCheck();
+      setTimeSource("ntp");
+      return epochSeconds;
+    } else {
+        ESP_LOGE("0 Ntp second recieved");
+        return kInvalidSeconds;
+    }
+  }
+
+  void sendNtpPacket(const IPAddress& address) const {
+    memset(mPacketBuffer, 0, kNtpPacketSize);
+    mPacketBuffer[0] = 0b11100011;   // LI, Version, Mode
+    mPacketBuffer[1] = 0;     // Stratum, or type of clock
+    mPacketBuffer[2] = 6;     // Polling Interval
+    mPacketBuffer[3] = 0xEC;  // Peer Clock Precision
+    mPacketBuffer[12] = 49;
+    mPacketBuffer[13] = 0x4E;
+    mPacketBuffer[14] = 49;
+    mPacketBuffer[15] = 52;
+    mUdp.beginPacket(address, 123); //NTP requests are to port 123
+    mUdp.write(mPacketBuffer, kNtpPacketSize);
+    mUdp.endPacket();
+  }
+};
+}
+}
+
+using ace_time::clock::GPSClock;
+static GPSClock gpsClock;
+static SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/, 60, 5, 1000);  // reference & backup clock
+
+class DisplayToken
+{
+  public:
+    String showTokens() {
+      String buf;
+      if (token1)
+        buf = buf + "1,";
+      if (token2)
+        buf = buf + "2,";
+      if (token3)
+        buf = buf + "3,";
+      if (token4)
+        buf = buf + "4,";
+      if (token5)
+        buf = buf + "5,";
+      if (token6)
+        buf = buf + "6,";
+      if (token7)
+        buf = buf + "7,";
+      if (token8)
+        buf = buf + "8,";
+      if (buf.length() == 0)
+        buf = "0";
+      return buf;
+    }
+
+    bool getToken(uint8_t position)
+    {
+      switch (position) {
+        case 1:
+        return token1;
+        break;
+        case 2:
+          return token2;
+          break;
+        case 3:
+          return token3;
+          break;
+        case 4:
+          return token4;
+          break;
+        case 5:
+          return token5;
+          break;
+        case 6:
+          return token6;
+          break;
+        case 7:
+          return token7;
+          break;
+        case 8:
+          return token8;
+          break;
+        }
+    }
+
+
+    void setToken(uint8_t position)
+    {
+      ESP_LOGD(TAG, "Setting display token: %d", position);
+      switch (position) {
+        case 1:
+          token1 = true;
+          break;
+        case 2:
+          token2 = true;
+          break;
+        case 3:
+          token3 = true;
+          break;
+        case 4:
+          token4 = true;
+          break;
+        case 5:
+          token5 = true;
+          break;
+        case 6:
+          token6 = true;
+          break;
+        case 7:
+          token7 = true;
+          break;
+        case 8:
+          token8 = true;
+          break;
+        }
+    }
+
+    void resetToken(uint8_t position)
+    {
+      ESP_LOGD(TAG, "Releasing display token: %d", position);
+      switch (position) {
+        case 1:
+          token1 = false;
+          break;
+        case 2:
+          token2 = false;
+          break;
+        case 3:
+          token3 = false;
+          break;
+        case 4:
+          token4 = false;
+          break;
+        case 5:
+          token5 = false;
+          break;
+        case 6:
+          token6 = false;
+          break;
+        case 7:
+          token7 = false;
+          break;
+        case 8:
+          token8 = false;
+          break;
+        }
+    }
+
+    void resetAllTokens()
+    {
+        token1 = token2 = token3 = token4 = token5 = token6 = token7 = token8 = false;
+    }
+
+    bool isReady(uint8_t position)
+    {
+        //ESP_LOGD(TAG, "Display token %d is requesting ready, set tokens: [%s]", position, showTokens());
+        switch (position)
+        {
+        case 0:
+           if (token1 || token2 || token3 || token4 || token5 || token6 || token7 || token8)
+            return false;
+          else
+            return true;
+          break;
+        case 1:
+          if (token2 || token3 || token4 || token5 || token6 || token7 || token8)
+            return false;
+          else
+            return true;
+          break;
+        case 2:
+          if (token1 || token3 || token4 || token5 || token6 || token7 || token8)
+            return false;
+          else
+            return true;
+          break;
+        case 3:
+          if (token1 || token2 || token4 || token5 || token6 || token7 || token8)
+            return false;
+          else
+            return true;          
+          break;
+        case 4:
+          if (token1 || token2 || token3 || token5 || token6 || token7 || token8)
+            return false;
+          else
+            return true;          
+          break;
+        case 5:
+          if (token1 || token2 || token3 || token4 || token6 || token7 || token8)
+            return false;
+          else
+            return true;          
+          break;
+        case 6:
+          if (token1 || token2 || token3 || token4 || token5 || token7 || token8)
+            return false;
+          else
+            return true;          
+          break;
+        case 7:
+          if (token1 || token2 || token3 || token4 || token5 || token6 || token8)
+            return false;
+          else
+            return true;          
+          break;
+        case 8:
+          if (token1 || token2 || token3 || token4 || token5 || token6 || token7)
+            return false;          
+          else
+            return true;
+          break;
+        }
+    }
+  private:
+    bool token1;
+    bool token2;
+    bool token3;
+    bool token4;
+    bool token5;
+    bool token6;
+    bool token7;
+    bool token8;
+};
+
+DisplayToken displaytoken;
+
 // Coroutines
 #ifdef COROUTINE_PROFILER
 COROUTINE(printProfiling) {
@@ -408,8 +606,8 @@ COROUTINE(sysClock) {
 }
 
 COROUTINE(showClock) {
-  COROUTINE_LOOP()
-  {
+  COROUTINE_LOOP() {
+    COROUTINE_AWAIT(displaytoken.isReady(0));
     ace_time::ZonedDateTime ldt = getSystemZonedTime();
     uint8_t myhours = ldt.hour();
     uint8_t myminute = ldt.minute();
@@ -491,9 +689,8 @@ COROUTINE(showClock) {
 
 #ifndef DISABLE_WEATHERCHECK
 COROUTINE(checkWeather) {
-  COROUTINE_LOOP() 
-  {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkweather.lastsuccess) > (weather_check_interval.value() * T1M) && weather_check_interval.value() != 0 && abs(systemClock.getNow() - checkweather.lastattempt) > T1M && wifi_connected && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && !cotimer.show_alert_ready && !cotimer.show_weather_ready);
+  COROUTINE_LOOP() {
+    COROUTINE_AWAIT(abs(systemClock.getNow() - checkweather.lastsuccess) > (weather_check_interval.value() * T1M) && weather_check_interval.value() != 0 && abs(systemClock.getNow() - checkweather.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0));
     ESP_LOGD(TAG, "Checking weather forecast...");
     checkweather.retries = 1;
     checkweather.jsonParsed = false;
@@ -551,9 +748,8 @@ COROUTINE(checkWeather) {
 
 #ifndef DISABLE_ALERTCHECK
 COROUTINE(checkAlerts) {
-  COROUTINE_LOOP() 
-  {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkalerts.lastsuccess) > (alert_check_interval.value() * T1M) && alert_check_interval.value() != 0 && (systemClock.getNow() - checkalerts.lastattempt) > T1M && wifi_connected && (current.lat).length() > 1 && !cotimer.show_alert_ready && !cotimer.show_weather_ready);
+  COROUTINE_LOOP() {
+    COROUTINE_AWAIT(abs(systemClock.getNow() - checkalerts.lastsuccess) > (alert_check_interval.value() * T1M) && alert_check_interval.value() != 0 && (systemClock.getNow() - checkalerts.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && displaytoken.isReady(0));
     ESP_LOGD(TAG, "Checking weather alerts...");
     checkalerts.retries = 1;
     checkalerts.jsonParsed = false;
@@ -601,25 +797,27 @@ COROUTINE(checkAlerts) {
 
 COROUTINE(showDate) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(cotimer.show_date_ready && showClock.isSuspended() && !cotimer.show_alert_ready && !cotimer.show_weather_ready && !scrolltext.active && !alertflash.active);
+  COROUTINE_AWAIT(cotimer.show_date_ready && show_date.isChecked() && displaytoken.isReady(1));
+  displaytoken.setToken(1);
   scrolltext.message = getSystemZonedDateString();
   scrolltext.color = hex2rgb(datecolor.value());
   scrolltext.active = true;
   COROUTINE_AWAIT(!scrolltext.active);
   showclock.datelastshown = systemClock.getNow();
   cotimer.show_date_ready = false;
+  displaytoken.resetToken(1);
   }
 }
 
 COROUTINE(showWeather) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(cotimer.show_weather_ready && showClock.isSuspended() && !cotimer.show_alert_ready && !scrolltext.active && !alertflash.active);
+  COROUTINE_AWAIT(cotimer.show_weather_ready && show_weather.isChecked() && displaytoken.isReady(2));
+  displaytoken.setToken(2);
   alertflash.color = hex2rgb(weather_color.value());
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
   scrolltext.message = capString((String)weather.currentDescription);
-  
   scrolltext.color = hex2rgb(weather_color.value());
   scrolltext.active = true;
   scrolltext.displayicon = true;
@@ -635,12 +833,14 @@ COROUTINE(showWeather) {
   }
   weather.lastshown = systemClock.getNow();
   cotimer.show_weather_ready = false;
+  displaytoken.resetToken(2);
   }
 }
 
 COROUTINE(showAlerts) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(cotimer.show_alert_ready && showClock.isSuspended() && !scrolltext.active & !alertflash.active);
+  COROUTINE_AWAIT(cotimer.show_alert_ready && displaytoken.isReady(3));
+  displaytoken.setToken(3);
   uint16_t acolor;
   if (alerts.inWarning)
     acolor = RED;
@@ -656,14 +856,14 @@ COROUTINE(showAlerts) {
   COROUTINE_AWAIT(!scrolltext.active);
   alerts.lastshown = systemClock.getNow();
   cotimer.show_alert_ready = false;
-}
+  displaytoken.resetToken(3);
+  }
 }
 
 COROUTINE(print_debugData) {
-  COROUTINE_LOOP() 
-  {
+  COROUTINE_LOOP() {
     COROUTINE_DELAY_SECONDS(15);
-    COROUTINE_AWAIT(serialdebug.isChecked() && showAlerts.isYielding() && showWeather.isYielding());
+    COROUTINE_AWAIT(serialdebug.isChecked() && displaytoken.isReady(0));
     debug_print("----------------------------------------------------------------", true);
     printSystemZonedTime();
     acetime_t now = systemClock.getNow();
@@ -682,9 +882,8 @@ COROUTINE(print_debugData) {
     String lst = elapsedTime(now - systemClock.getLastSyncTime());
     String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME * 60);
     String lip = (WiFi.localIP()).toString();
-    printSystemZonedTime();
     debug_print((String) "Version - Firmware:v" + VERSION + " | Config:v" + CONFIGVER, true);
-    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiConnected:" + wifi_connected + " | IP:" + lip + " | Uptime:" + uptime, true);
+    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + iotWebConf.getState() + " | IP:" + lip + " | Uptime:" + uptime, true);
     debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
     debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
     debug_print((String) "IPGeo - Complete:" + checkipgeo.complete + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
@@ -699,7 +898,7 @@ COROUTINE(print_debugData) {
 #ifndef DISABLE_IPGEOCHECK
 COROUTINE(checkIpgeo) {
   COROUTINE_BEGIN();
-  COROUTINE_AWAIT(wifi_connected && (ipgeoapi.value())[0] != '\0' && !cotimer.show_alert_ready && !cotimer.show_weather_ready && !scrolltext.active && !alertflash.active);
+  COROUTINE_AWAIT(iotWebConf.getState() == 4 && (ipgeoapi.value())[0] != '\0' && displaytoken.isReady(0));
   while (!checkipgeo.complete)
   {
     COROUTINE_AWAIT(abs(systemClock.getNow() - checkipgeo.lastattempt) > T1M);
@@ -770,16 +969,21 @@ COROUTINE(miscScrollers) {
   COROUTINE_LOOP() 
   {
     COROUTINE_AWAIT(iotWebConf.getState() == 1 || resetme);
-    COROUTINE_AWAIT(!scrolltext.active && !alertflash.active && (millis() - scrolltext.resetmsgtime) > T1M*1000);
+    COROUTINE_AWAIT((millis() - scrolltext.resetmsgtime) > T1M*1000 && displaytoken.isReady(4));
     if (resetme)
     {
+      displaytoken.setToken(4);
       scrolltext.showingreset = true;
       showDate.suspend();
       showWeather.suspend();
       showAlerts.suspend();
       showClock.suspend();
+      #ifndef DISABLE_WEATHERCHECK
       checkWeather.suspend();
+      #endif
+      #ifndef DISABLE_ALERTCHECK
       checkAlerts.suspend();
+      #endif
       alertflash.color = RED;
       alertflash.laps = 5;
       alertflash.active = true;
@@ -793,13 +997,18 @@ COROUTINE(miscScrollers) {
       ESP.restart();
      }
      else if (iotWebConf.getState() == 1 && (millis() - scrolltext.resetmsgtime) > T1M*1000) {
+      displaytoken.setToken(5);
       scrolltext.showingreset = true;
       showDate.suspend();
       showWeather.suspend();
       showAlerts.suspend();
       showClock.suspend();
+      #ifndef DISABLE_WEATHERCHECK
       checkWeather.suspend();
+      #endif
+      #ifndef DISABLE_ALERTCHECK
       checkAlerts.suspend();
+      #endif
       alertflash.color = RED;
       alertflash.laps = 5;
       alertflash.active = true;
@@ -810,113 +1019,83 @@ COROUTINE(miscScrollers) {
       COROUTINE_AWAIT(!scrolltext.active);
       scrolltext.resetmsgtime = millis();
       scrolltext.showingreset = false;
+      displaytoken.resetToken(5);
      }
   }
 }
 
-COROUTINE(scheduleManager) {
+COROUTINE(coroutineManager) {
   COROUTINE_LOOP() 
-  { // start the clock
+  { 
   acetime_t now = systemClock.getNow();
-  if (!resetme && !scrolltext.showingreset && !cotimer.show_alert_ready && !cotimer.show_weather_ready && showClock.isSuspended() && !scrolltext.active && !alertflash.active)
-  {
-    showClock.reset();
+  if (!displaytoken.isReady(0))
+    showClock.suspend();
+  if (displaytoken.isReady(0) && showClock.isSuspended())
     showClock.resume();
-  } // start the weather alert display
-  if ((abs(now - alerts.lastshown) > (show_alert_interval.value()*T1M)) && show_alert_interval.value() != 0 && alerts.active && !cotimer.show_weather_ready && !cotimer.show_alert_ready)
+  if (serialdebug.isChecked() && print_debugData.isSuspended())
+    print_debugData.resume();
+  else if (!serialdebug.isChecked() && !print_debugData.isSuspended())
+    print_debugData.suspend();
+  if (show_weather.isChecked() && showWeather.isSuspended() && iotWebConf.getState() != 1)
+    showWeather.resume();
+  else if ((!show_weather.isChecked() && !showWeather.isSuspended()) || iotWebConf.getState() == 1)
+    showWeather.suspend();
+  if (show_date.isChecked() && showDate.isSuspended() && iotWebConf.getState() != 1)
+    showDate.resume();
+  else if ((!show_date.isChecked() && !showDate.isSuspended()) || iotWebConf.getState() == 1)
+    showDate.suspend();
+  if (showAlerts.isSuspended() && iotWebConf.getState() != 1)
+    showAlerts.resume();
+  else if (iotWebConf.getState() == 1)
+    showAlerts.suspend();
+  #ifndef DISABLE_WEATHERCHECK
+  if (show_weather.isChecked() && checkWeather.isSuspended() && iotWebConf.getState() != 1 && iotWebConf.getState() == 4) {
+    checkWeather.reset();
+    checkWeather.resume();
+  }
+  else if ((!show_weather.isChecked() && !showWeather.isSuspended()) || iotWebConf.getState() == 1 || iotWebConf.getState() != 4)
+    checkWeather.suspend();
+  #endif
+  #ifndef DISABLE_ALERTCHECK
+  if (checkAlerts.isSuspended() && iotWebConf.getState() != 1 && iotWebConf.getState() == 4) {
+    checkAlerts.reset();
+    checkAlerts.resume();
+  }
+  else if (iotWebConf.getState() == 1 || iotWebConf.getState() != 4)
+    checkAlerts.suspend();
+  #endif
+  // start the weather alert display
+  if ((abs(now - alerts.lastshown) > (show_alert_interval.value()*T1M)) && show_alert_interval.value() != 0 && displaytoken.isReady(0) && alerts.active)
     cotimer.show_alert_ready = true;
    // start weather conditions display
-  else if ((abs(now - weather.lastshown) > (show_weather_interval.value() * T1M)) && (abs(now - weather.timestamp)) < T2H && show_weather_interval.value() != 0 && !cotimer.show_weather_ready && !cotimer.show_alert_ready)
+  if ((abs(now - weather.lastshown) > (show_weather_interval.value() * T1M)) && (abs(now - weather.timestamp)) < T2H && show_weather_interval.value() != 0 && displaytoken.isReady(0))
     cotimer.show_weather_ready = true;
-    else if ((abs(now - showclock.datelastshown) > (show_date_interval.value() * T1H)) && show_date_interval.value() != 0 && !cotimer.show_weather_ready && !cotimer.show_alert_ready)
+  if ((abs(now - showclock.datelastshown) > (show_date_interval.value() * T1H)) && show_date_interval.value() != 0 && displaytoken.isReady(0))
     cotimer.show_date_ready = true;
-  if (scrolltext.active || alertflash.active || cotimer.show_weather_ready || cotimer.show_alert_ready) 
-  {
-    #ifndef DISABLE_WEATHERCHECK
-    if (!checkWeather.isSuspended()) {
-      checkWeather.suspend();
-    }
-    #endif
-    #ifndef DISABLE_ALERTCHECK
-    if (!checkAlerts.isSuspended()) {
-      checkAlerts.suspend();
-    }
-    #endif
-    if (!serialdebug.isChecked() && !print_debugData.isSuspended())
-      print_debugData.suspend();
-    if (!showClock.isSuspended()) {
-      showClock.suspend();
-    }
-  }
-  if (!resetme && !scrolltext.showingreset && !scrolltext.active && !alertflash.active && !cotimer.show_weather_ready && !cotimer.show_alert_ready) 
-  {
-    #ifndef DISABLE_WEATHERCHECK
-    if (checkWeather.isSuspended()) {
-      checkWeather.resume();
-    }
-    #endif
-    #ifndef DISABLE_ALERTCHECK
-    if (checkAlerts.isSuspended()) {
-      checkAlerts.resume();
-    }
-    #endif
-  }
-    if (serialdebug.isChecked() && !scrolltext.active && !alertflash.active && print_debugData.isSuspended() && !cotimer.show_alert_ready && !cotimer.show_weather_ready) 
-    {
-      print_debugData.reset();
-      print_debugData.resume();
-    }
-    if (!serialdebug.isChecked() && !print_debugData.isSuspended()) {
-      print_debugData.suspend();
-    }
-    //if (abs(now - bootTime) > (T1Y - 60))
-    //{
-    //  ESP_LOGE(TAG, "1 year system reset!");
-      //ESP.restart();
-    //}
-    if (checkipgeo.complete && !checkIpgeo.isSuspended())
-      checkIpgeo.suspend();
-    if (!resetme && iotWebConf.getState() != 1 && show_weather.isChecked() && showWeather.isSuspended()) {
-      showWeather.reset();
-      checkWeather.reset();
-      showWeather.resume();
-      checkWeather.resume();
-    }
-     if (!show_weather.isChecked() && !showWeather.isSuspended()) {
-      showWeather.suspend();
-      checkWeather.suspend();
-     }
-     if (!resetme && iotWebConf.getState() != 1 && show_date.isChecked() && showDate.isSuspended()) {
-      showDate.reset();
-      checkWeather.reset();
-      showDate.resume();
-      checkWeather.resume();     
-    }
-     if (!show_date.isChecked() && !showDate.isSuspended()) {
-      showDate.suspend();
-     }
-    COROUTINE_YIELD();
+  COROUTINE_YIELD();
   }
 }
 
 COROUTINE(IotWebConf) {
   COROUTINE_LOOP() 
   {
+    COROUTINE_AWAIT(displaytoken.isReady(0) && millis() - cotimer.iotloop > 5000);
     iotWebConf.doLoop();
-    COROUTINE_DELAY(5);
+    cotimer.iotloop = millis();
   }
 }
 
 COROUTINE(AlertFlash) {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(alertflash.active && showClock.isSuspended());
-    if (!disable_alertflash.isChecked()) {
+    COROUTINE_AWAIT(alertflash.active && showClock.isSuspended() && !disable_alertflash.isChecked());
+      displaytoken.setToken(6);
       alertflash.lap = 0;
       matrix->clear();
       matrix->show();
       COROUTINE_DELAY(250);
-      while (alertflash.lap < alertflash.laps) {
+      while (alertflash.lap < alertflash.laps)
+      {
         matrix->clear();
         matrix->fillScreen(alertflash.color);
         matrix->show();
@@ -927,8 +1106,7 @@ COROUTINE(AlertFlash) {
         alertflash.lap++;
       }
       alertflash.active = false;
-    } else
-        alertflash.active = false;
+      displaytoken.resetToken(6);
   }
 }
 
@@ -936,7 +1114,10 @@ COROUTINE(scrollText) {
   COROUTINE_LOOP() 
   {
       COROUTINE_AWAIT(scrolltext.active && showClock.isSuspended());
-      COROUTINE_AWAIT(millis() - scrolltext.millis >= cotimer.scrollspeed);
+      COROUTINE_AWAIT(millis() - scrolltext.millis >= cotimer.scrollspeed-1);
+      if (!displaytoken.getToken(8)) {
+        displaytoken.setToken(8);
+      }
       uint16_t size = (scrolltext.message).length() * 6;
       if (scrolltext.position >= size - size - size) {
         matrix->clear();
@@ -953,6 +1134,7 @@ COROUTINE(scrollText) {
       scrolltext.active = false;
       scrolltext.position = mw;
       scrolltext.displayicon = false;
+      displaytoken.resetToken(8);
       ESP_LOGD(TAG, "Scrolling text end");
       }
   }
@@ -1202,7 +1384,7 @@ void display_weatherIcon() {
       matrix->drawRGBBitmap(mw-8, 0, snow[cotimer.iconcycle], 8, 8);
     else if (code1 == '0' && code2 == '9') //rain
       matrix->drawRGBBitmap(mw-8, 0, rain[cotimer.iconcycle], 8, 8);
-    else if (code1 == '1' && code2 == '0') // heavy raid
+    else if (code1 == '1' && code2 == '0') // heavy rain
       matrix->drawRGBBitmap(mw-8, 0, heavy_rain[cotimer.iconcycle], 8, 8);
     else if (code1 == '1' && code2 == '1') //thunderstorm
       matrix->drawRGBBitmap(mw-8, 0, thunderstorm[cotimer.iconcycle], 8, 8);
@@ -1210,7 +1392,7 @@ void display_weatherIcon() {
       ESP_LOGE(TAG, "No Weather icon found to use");
     if (millis() - cotimer.icontimer > ANI_SPEED)
     {
-    if (cotimer.iconcycle == ANI_BITMAP_CYCLES)
+    if (cotimer.iconcycle == ANI_BITMAP_CYCLES-1)
       cotimer.iconcycle = 0;
     else
       cotimer.iconcycle++;
@@ -1288,7 +1470,6 @@ String getSystemZonedDateString() {
   ace_time::ZonedDateTime ldt = getSystemZonedTime();
   uint8_t day = ldt.day();
   char buf[100];
-  //eatshit = "eat my fucking shit";
   sprintf(buf, "%s, %s %d%s %d", DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
   return (String)buf;
 }
@@ -1315,6 +1496,7 @@ String getSystemZonedDateTimeString() {
 // System Loop
 void loop() {
   esp_task_wdt_reset();
+  //Serial.println(displaytoken.showTokens());
 #ifdef COROUTINE_PROFILER
   CoroutineScheduler::loopWithProfiler();
   #else
@@ -1333,8 +1515,10 @@ void setup () {
   preferences.begin("location", false);
   ESP_EARLY_LOGD(TAG, "Initializing coroutine scheduler...");
   sysClock.setName("sysclock");
-  scheduleManager.setName("scheduler");
+  coroutineManager.setName("manager");
   showClock.setName("show_clock");
+  showDate.setName("show_date");
+  miscScrollers.setName("miscscrollers");
   setBrightness.setName("brightness");
   gps_checkData.setName("gpsdata");
   print_debugData.setName("debug_print");
@@ -1459,6 +1643,7 @@ void setup () {
   ESP_EARLY_LOGD(TAG, "Display initalization complete.");
   ESP_EARLY_LOGD(TAG, "Setup initialization complete: %d ms", (millis()-timer));
   scrolltext.resetmsgtime = millis() - 60000;
+  displaytoken.resetAllTokens();
   CoroutineScheduler::setup();
 }
 
@@ -1499,9 +1684,15 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
   return valid;
 }
 
+bool readyToDisplay() {
+  if (scrolltext.active || alertflash.active || cotimer.show_alert_ready || cotimer.show_weather_ready || cotimer.show_date_ready || resetme)
+    return false;
+  else
+    return true;
+}
+
 void wifiConnected() {
   ESP_LOGI(TAG, "WiFi was connected.");
-  wifi_connected = true;
   gpsClock.ntpReady();
   display_showStatus();
   matrix->show();
@@ -1605,14 +1796,14 @@ String elapsedTime(int32_t seconds) {
       seconds = seconds - value * vint;
       if (granularity != 0) {
         result = result + value + " " + interval_names[i];
+        granularity--;
         if (granularity > 0)
           result = result + ", ";
-        granularity--;
       }
     }
   }
   if (granularity != 0)
-    result = result + seconds + " sec";
+    result = result + seconds + " seconds";
   return result;
 }
 
@@ -1772,6 +1963,8 @@ void handleRoot()
   s += "</span></body></html>\n";
   server.send(200, "text/html", s);
 }
+
+
 
 
   //FIXME: string printouts on debug messages for scrolltext, etc showing garbled

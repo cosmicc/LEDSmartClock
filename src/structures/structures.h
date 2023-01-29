@@ -155,6 +155,7 @@ struct CoTimers {
   bool show_date_ready;
   uint8_t iconcycle;
   uint32_t icontimer;
+  uint32_t iotloop;
 };
 
 struct Current {

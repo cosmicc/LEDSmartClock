@@ -46,7 +46,7 @@ static const char* CONFIGVER = "1";// config version (advance if iotwebconf conf
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
 #define DAYHUE 40                  // 6am daytime hue start
-#define NIGHTHUE 185               // 10pm nighttime hue end
+#define NIGHTHUE 175               // 10pm nighttime hue end
 #define LUXMIN 5                   // Lowest brightness min
 #define LUXMAX 100                 // Lowest brightness max
 #define mw 32                      // Width of led matrix
@@ -77,7 +77,7 @@ using ace_routine::CoroutineScheduler;
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 
 static char intervals[][9] = {"31536000", "2592000", "604800", "86400", "3600", "60", "1"};
-static char interval_names[][9] = {"yrs", "mon", "wks", "days", "hrs", "min", "sec"};
+static char interval_names[][9] = {"years", "months", "weeks", "days", "hours", "minutes", "seconds"};
 
 #include "src/structures/structures.h"
 #include "src/colors/colors.h"
@@ -682,6 +682,7 @@ COROUTINE(print_debugData) {
     String lst = elapsedTime(now - systemClock.getLastSyncTime());
     String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME * 60);
     String lip = (WiFi.localIP()).toString();
+    printSystemZonedTime();
     debug_print((String) "Version - Firmware:v" + VERSION + " | Config:v" + CONFIGVER, true);
     debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiConnected:" + wifi_connected + " | IP:" + lip + " | Uptime:" + uptime, true);
     debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
@@ -1280,22 +1281,30 @@ String getSystemZonedTimeString() {
 }
 
 String getSystemZonedDateString() {
-  acetime_t now = systemClock.getNow();
-  auto localDate = LocalDate::forEpochSeconds(now);
-  uint8_t dayOfWeek = localDate.dayOfWeek();
-  uint8_t month = localDate.month();
-  uint8_t day = localDate.day();
-  uint8_t year = localDate.year();
-  return (String)DateStrings().dayOfWeekLongString(dayOfWeek) + ", " + DateStrings().monthLongString(month) + " " + day + ordinal_suffix(day);
+  ace_time::ZonedDateTime ldt = getSystemZonedTime();
+  uint8_t day = ldt.day();
+  char *string;
+  sprintf(string, "%s, %s %d%s %04d", DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
+  return (String)string;
 }
 
-void wifiConnected() {
-  ESP_LOGI(TAG, "WiFi was connected.");
-  wifi_connected = true;
-  gpsClock.ntpReady();
-  display_showStatus();
-  matrix->show();
-  systemClock.forceSync();
+String getSystemZonedDateTimeString() {
+  ace_time::ZonedDateTime ldt = getSystemZonedTime();
+  uint8_t day = ldt.day();
+  uint8_t hour = ldt.day();
+  char *string;
+  String ap = "am";
+  //if (twelve_clock.isChecked())
+  //{
+  //  if (hour > 11)
+  //    ap = "pm";
+  //  if (hour > 12)
+  //    hour = hour - 12;
+  //  sprintf(string, "%d:%02d%s %s, %s %d%s %04d []", ldt.hour(), ldt.minute(), ap, DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
+  //} 
+  //else
+    sprintf(string, "%02d:%02d %s, %s %d%s %04d []", ldt.hour(), ldt.minute(), DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
+  return (String)string;
 }
 
 // System Loop
@@ -1349,7 +1358,7 @@ void setup () {
   dsClock.setup();
   gpsClock.setup();
   printSystemZonedTime();
-  ESP_EARLY_LOGD(TAG,"Initializing IotWebConf...");
+  ESP_EARLY_LOGD(TAG, "Initializing IotWebConf...");
   group1.addItem(&brightness_level);
   group1.addItem(&text_scroll_speed);
   group1.addItem(&show_date);
@@ -1448,39 +1457,7 @@ void setup () {
   CoroutineScheduler::setup();
 }
 
-void handleRoot()
-{
-  // -- Let IotWebConf test and handle captive portal requests.
-  if (iotWebConf.handleCaptivePortal())
-  {
-    // -- Captive portal request were already served.
-    return;
-  }
-  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-  s += "<title>Smart Led Matrix Clock</title></head><body>Hello world!";
-  s += "<ul>";
-  s += "<li>Display Brightness: ";
-  s += brightness_level.value();
-  s += "<li>Text Scroll Speed: ";
-  s += text_scroll_speed.value();
-  s += "<li>Clock Colon Flicker: ";
-  s += colonflicker.isChecked();
-  s += "<li>Fast Flicker: ";
-  s += flickerfast.isChecked();
-  s += "<li>Weather Alert Check Interval Min: ";
-  s += alert_check_interval.value();
-  s += "<li>Use Fixed Location: ";
-  s += use_fixed_loc.isChecked();
-  s += "<li>Fixed latitude: ";
-  s += fixedLat.value();
-  s += "<li>Fixed Longitude: ";
-  s += fixedLon.value();
-  s += "</ul>";
-  s += "Go to <a href='config'>configure page</a> to change values.";
-  s += "</body></html>\n";
-  server.send(200, "text/html", s);
-}
-
+//callbacks 
 void configSaved()
 {
   processLoc();
@@ -1515,6 +1492,15 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
   }
 */
   return valid;
+}
+
+void wifiConnected() {
+  ESP_LOGI(TAG, "WiFi was connected.");
+  wifi_connected = true;
+  gpsClock.ntpReady();
+  display_showStatus();
+  matrix->show();
+  systemClock.forceSync();
 }
 
 void fillAlertsFromJson(Alerts* alerts) {
@@ -1602,7 +1588,7 @@ String elapsedTime(int32_t seconds) {
   if (seconds > T1Y - 60)
     return "never";
   if (seconds < 60)
-    return (String)seconds + "sec";
+    return (String)seconds + " seconds";
   else granularity = 2;
   uint32_t value;
   for (uint8_t i = 0; i < 6; i++)
@@ -1613,9 +1599,9 @@ String elapsedTime(int32_t seconds) {
     {
       seconds = seconds - value * vint;
       if (granularity != 0) {
-        result = result + value + "" + interval_names[i];
+        result = result + value + " " + interval_names[i];
         if (granularity > 0)
-          result = result + ",";
+          result = result + ", ";
         granularity--;
       }
     }
@@ -1695,9 +1681,95 @@ const char* ordinal_suffix(int n)
         return suffixes[ord];
 }
 
+void handleRoot()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  acetime_t now = systemClock.getNow();
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/><body style=\"background-color:#222222; font-family: Verdana, sans-serif;\">";
+  s += "<style>a:link {color: #11ffff;background-color: transparent;text-decoration: none;} a:visited {color: #11ffff;background-color: transparent;text-decoration: none;} a:hover {color: #11ffff;background-color: transparent;text-decoration: underline;} a:active {color: #11ffff;background-color: transparent;text-decoration: underline;}</style>";
+  s += "<span style=\"color: #ffffff; background-color: #222222;\"><table style=\"font-size: 14px; width: 500px; margin-left: auto; margin-right: auto; height: 22px;\"><tbody><tr><td style=\"width: 500px;\"><blockquote><h2 style=\"text-align: center;\"><span style=\"color: #aa11ff;\">LED Smart Clock</span><p style=\"text-align: center;\"></h2><span style=\"color: #ffff99;\"><h3><em><strong>";
+  s += getSystemZonedDateTimeString();
+  s += "</strong></h3></em></span></p></blockquote><p style=\"text-align: center;\"><a title=\"Configure Settings\" href=\"config\">->[ Configure Settings ]<-</a></p></td></tr></tbody></table><table style=\"width: 518px; height: 869px; margin-left: auto; margin-right: auto;\" border=\"0\"><tbody><tr style=\"height: 20px;\"><td style=\"height: 20px; text-align: right; width: 247px;\">Firmware Version:</td><td style=\"height: 20px; width: 255px;\">";
+  s += (String)VERSION;
+  s += "</td></tr><tr style=\"height: 20px;\"><td style=\"height: 20px; text-align: right; width: 247px;\">Uptime:</td><td style=\"height: 20px; width: 255px;\">";
+  s += elapsedTime(now - bootTime);
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Time Source:</td><td style=\"height: 2px; width: 255px;\">";
+  timesource.toUpperCase();
+  s += timesource;
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current LED Brightness:</td><td style=\"height: 2px; width: 255px;\">";
+  s += map(current.brightness, (5+userbrightness), (LUXMAX + userbrightness), 1, 100);
+  s += "/100</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Timezone Offset:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)current.tzoffset;
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Time Sync:</td><td style=\"height: 2px; width: 255px;\">";
+  s += elapsedTime(now - systemClock.getLastSyncTime());
+  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Latitude:</td><td style=\"height: 2px; width: 255px;\">";
+  s += current.lat;
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Longitude:</td><td style=\"height: 2px; width: 255px;\">";
+  s += current.lon;
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Location Source:</td><td style=\"height: 2px; width: 255px;\">";
+  s += "LOCATION_SOURCE</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix:</td><td style=\"height: 2px; width: 255px;\">";
+  if (gps.fix)
+    s += "Yes";
+  else
+    s += "No";
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Aquired Sattelites:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)gps.sats;
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix Age:</td><td style=\"height: 2px; width: 255px;\">";
+  s += elapsedTime(now - gps.timestamp);
+  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Location Age:</td><td style=\"height: 2px; width: 255px;\">";
+  s += elapsedTime(now - gps.lockage);
+  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Precision:</td><td style=\"height: 2px; width: 255px;\">";
+  s += gps.hdop;
+  s += " meters</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Elevation:</td><td style=\"height: 2px; width: 255px;\">";
+  s += gps.elevation;
+  s += " meters</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Total Events:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)GPS.charsProcessed();
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Passed Events:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)GPS.passedChecksum();
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Failed Events:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)GPS.failedChecksum();
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix Events:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)GPS.sentencesWithFix();
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Current Temp:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)weather.currentTemp;
+  s += "&#8451;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Feels Like Temp:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)weather.currentFeelsLike;
+  s += "&#8451;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Humidity:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)weather.currentHumidity;
+  s += "%</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Wind Speed:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)weather.currentWindSpeed;
+  s += "kph</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Conditions:</td><td style=\"height: 2px; width: 255px;\">";
+  s += capString(weather.currentDescription);
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Forcast Check Attempt:</td><td style=\"height: 2px; width: 255px;\">";
+  s += elapsedTime(now - checkweather.lastattempt);
+  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Forcast Check Success:</td><td style=\"height: 2px; width: 255px;\">";
+  s += elapsedTime(now - checkweather.lastsuccess);
+  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Next Forcast Check Attempt:</td><td style=\"height: 2px; width: 255px;\">";
+  
+  s += "hhhh</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Alert Active:</td><td style=\"height: 2px; width: 255px;\">";
+  if (alerts.active)
+    s += "Yes";
+  else
+    s += "No";
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Warnings:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)alerts.inWarning;
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Watches:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)alerts.inWatch;
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Alerts Last Attempt:</td><td style=\"height: 2px; width: 255px;\">";
+  s += elapsedTime(now - checkalerts.lastattempt);
+  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Alerts Last Success:</td><td style=\"height: 2px; width: 255px;\">";
+  s += elapsedTime(now - checkalerts.lastsuccess);
+  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Weather Alert Shown:</td><td style=\"height: 2px; width: 255px;\">";
+  s += elapsedTime(now - alerts.lastshown);
+  s += " ago</td></tr></tbody></table>";
+  s += "</span></body></html>\n";
+  server.send(200, "text/html", s);
+}
+
+
   //FIXME: string printouts on debug messages for scrolltext, etc showing garbled
   //TODO: web interface cleanup
   //TODO: add more animation frames
-  //FIXME: invalid apis crashing?
-  //TODO: 12/24 hour switch
+  //FIXME: invalid apis crashing on 401
   //FIXME: reboot after initial config

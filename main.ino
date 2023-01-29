@@ -51,7 +51,7 @@ static const char* CONFIGVER = "1";// config version (advance if iotwebconf conf
 #define LUXMAX 100                 // Lowest brightness max
 #define mw 32                      // Width of led matrix
 #define mh 8                       // Hight of led matrix
-#define ANI_BITMAP_CYCLES 4        // Number of animation frames in each weather icon bitmap
+#define ANI_BITMAP_CYCLES 5        // Number of animation frames in each weather icon bitmap
 #define ANI_SPEED 100              // Bitmap animation speed in ms (lower is faster)
 #define NTPCHECKTIME 60            // NTP server check time in minutes
 #define LIGHT_CHECK_DELAY 250      // delay for each brightness check in ms
@@ -1074,6 +1074,7 @@ void processLoc(){
     gps.lon = fixedLon.value();
     current.lat = fixedLat.value();
     current.lon = fixedLon.value();
+    current.locsource = "User Defined";
   }
   String savedlat = preferences.getString("lat", "0");
   String savedlon = preferences.getString("lon", "0");
@@ -1081,17 +1082,20 @@ void processLoc(){
   {
     current.lat = savedlat;
     current.lon = savedlon;
+    current.locsource = "Previous Saved";
   }
   else if (gps.lon == "0" && ipgeo.lon[0] != '\0' && current.lon == "0")
   {
     current.lat = (String)ipgeo.lat; 
     current.lon = (String)ipgeo.lon;
+    current.locsource = "IP Geolocation";
     ESP_LOGI(TAG, "Using IPGeo location information: Lat: %s Lon: %s", (ipgeo.lat), (ipgeo.lon));
   }
   else if (gps.lon != "0")
   {
     current.lat = gps.lat;
     current.lon = gps.lon;
+    current.locsource = "GPS";
   }
   double nlat = (current.lat).toDouble();
   double nlon = (current.lon).toDouble();
@@ -1283,28 +1287,29 @@ String getSystemZonedTimeString() {
 String getSystemZonedDateString() {
   ace_time::ZonedDateTime ldt = getSystemZonedTime();
   uint8_t day = ldt.day();
-  char *string;
-  sprintf(string, "%s, %s %d%s %04d", DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
-  return (String)string;
+  char buf[100];
+  //eatshit = "eat my fucking shit";
+  sprintf(buf, "%s, %s %d%s %d", DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
+  return (String)buf;
 }
 
 String getSystemZonedDateTimeString() {
   ace_time::ZonedDateTime ldt = getSystemZonedTime();
   uint8_t day = ldt.day();
   uint8_t hour = ldt.day();
-  char *string;
+  char buf[100];
   String ap = "am";
-  //if (twelve_clock.isChecked())
-  //{
-  //  if (hour > 11)
-  //    ap = "pm";
-  //  if (hour > 12)
-  //    hour = hour - 12;
-  //  sprintf(string, "%d:%02d%s %s, %s %d%s %04d []", ldt.hour(), ldt.minute(), ap, DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
-  //} 
-  //else
-    sprintf(string, "%02d:%02d %s, %s %d%s %04d []", ldt.hour(), ldt.minute(), DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
-  return (String)string;
+  if (twelve_clock.isChecked())
+  {
+    if (hour > 11)
+      ap = "pm";
+    if (hour > 12)
+      hour = hour - 12;
+    sprintf(buf, "%d:%02d%s %s, %s %d%s %04d []", ldt.hour(), ldt.minute(), ap, DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
+  } 
+  else
+    sprintf(buf, "%02d:%02d %s, %s %d%s %04d []", ldt.hour(), ldt.minute(), DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
+  return (String)buf;
 }
 
 // System Loop
@@ -1708,7 +1713,8 @@ void handleRoot()
   s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Longitude:</td><td style=\"height: 2px; width: 255px;\">";
   s += current.lon;
   s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Location Source:</td><td style=\"height: 2px; width: 255px;\">";
-  s += "LOCATION_SOURCE</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix:</td><td style=\"height: 2px; width: 255px;\">";
+  s += current.locsource;
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix:</td><td style=\"height: 2px; width: 255px;\">";
   if (gps.fix)
     s += "Yes";
   else

@@ -170,4 +170,5 @@ struct Current {
   uint16_t rawlux;
   uint16_t oldstatusclr;
   uint16_t oldstatuswclr;
+  String locsource;
 };

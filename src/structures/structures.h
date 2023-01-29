@@ -127,7 +127,7 @@ struct ScrollText {
   bool tempshown;
   bool showingreset;
   String message;
-  uint32_t color;
+  uint16_t color;
   int16_t position;
   uint32_t millis;
   uint32_t resetmsgtime;
@@ -140,6 +140,7 @@ struct ShowClock {
   bool colonflicker;
   bool colonoff;
   acetime_t datelastshown;
+  uint16_t color;
 };
 
 struct CoTimers {
@@ -154,6 +155,7 @@ struct CoTimers {
   bool show_date_ready;
   uint8_t iconcycle;
   uint32_t icontimer;
+  uint32_t iotloop;
 };
 
 struct Current {
@@ -169,4 +171,5 @@ struct Current {
   uint16_t rawlux;
   uint16_t oldstatusclr;
   uint16_t oldstatuswclr;
+  String locsource;
 };

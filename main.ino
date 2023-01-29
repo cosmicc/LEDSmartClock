@@ -1964,11 +1964,8 @@ void handleRoot()
   server.send(200, "text/html", s);
 }
 
-
-
-
   //FIXME: string printouts on debug messages for scrolltext, etc showing garbled
   //TODO: web interface cleanup
-  //TODO: add more animation frames
   //FIXME: invalid apis crashing on 401
   //FIXME: reboot after initial config
+  //TODO: web temp to fah

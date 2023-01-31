@@ -4,8 +4,8 @@ typedef struct GPSData
   uint8_t sats;
   String lat;
   String lon;
-  double elevation;
-  double hdop;
+  int32_t elevation;
+  int32_t hdop;
   acetime_t timestamp;
   acetime_t lastcheck;
   acetime_t lockage;
@@ -27,27 +27,29 @@ typedef struct HsvColor
 
 struct Weather {
   char currentIcon[5];
-  int currentTemp;
-  int currentFeelsLike;
-  int currentHumidity;
+  int16_t currentTemp;
+  int16_t currentFeelsLike;
+  uint8_t currentHumidity;
   char currentDescription[20];
   int currentWindSpeed;
-
-  char iconD[5];
-  int tempMinD;
-  int tempMaxD;
-  int humidityD;
-  char descriptionD[20];
-  int windSpeedD;
-  int windGustD;
-
-  char iconD1[5];
-  int tempMinD1;
-  int tempMaxD1;
-  int humidityD1;
-  char descriptionD1[20];
-  int windSpeedD1;
-  int windGustD1;
+  int currentWindGust;
+  char dayIcon[5];
+  int16_t dayTempMin;
+  int16_t dayTempMax;
+  acetime_t daySunrise;
+  acetime_t daySunset;
+  char dayDescription[20];
+  double dayMoonPhase;
+  int dayWindSpeed;
+  int dayWindGust;
+  enum airQualityIndex
+  {
+    Good = 1,
+    Fair,
+    Moderate,
+    Poor,
+    VeryPoor
+  };
 
   acetime_t timestamp;
   acetime_t lastattempt;
@@ -65,21 +67,18 @@ struct Alerts {
   char urgency1[15];
   char event1[50];
   char description1[256];
-
   char status2[15];
   char severity2[15];
   char certainty2[15];
   char urgency2[15];
   char event2[50];
   char description2[256];
-
   char status3[15];
   char severity3[15];
   char certainty3[15];
   char urgency3[15];
   char event3[50];
   char description3[256];
-
   acetime_t timestamp;
   acetime_t lastshown;
   
@@ -92,26 +91,40 @@ struct Ipgeo {
   char lon[12];
 };
 
+struct Geocode {
+  char city[32];
+  char state[32];
+  char country[32];
+};
+
 struct Checkalerts {
-  int retries;
-  boolean jsonParsed;
+  uint8_t retries;
+  bool jsonParsed;
   acetime_t lastattempt;
   acetime_t lastsuccess;
 };
 
 struct Checkweather {
-  int retries;
-  boolean jsonParsed;
+  uint8_t retries;
+  bool jsonParsed;
   acetime_t lastattempt;
   acetime_t lastsuccess;
 };
 
 struct Checkipgeo {
-  int retries;
+  uint8_t retries;
   boolean jsonParsed;
   acetime_t lastattempt;
   acetime_t lastsuccess;
   bool complete;
+};
+
+struct Checkgeocode {
+  bool active;
+  uint8_t retries;
+  boolean jsonParsed;
+  acetime_t lastattempt;
+  acetime_t lastsuccess;
 };
 
 struct Alertflash {
@@ -126,6 +139,7 @@ struct ScrollText {
   bool displayicon;
   bool tempshown;
   bool showingreset;
+  bool showingip;
   String message;
   uint16_t color;
   int16_t position;
@@ -173,3 +187,201 @@ struct Current {
   uint16_t oldstatuswclr;
   String locsource;
 };
+
+class DisplayToken
+{
+  public:
+    String showTokens() {
+      String buf;
+      if (token1)
+        buf = buf + "1,";
+      if (token2)
+        buf = buf + "2,";
+      if (token3)
+        buf = buf + "3,";
+      if (token4)
+        buf = buf + "4,";
+      if (token5)
+        buf = buf + "5,";
+      if (token6)
+        buf = buf + "6,";
+      if (token7)
+        buf = buf + "7,";
+      if (token8)
+        buf = buf + "8,";
+      if (buf.length() == 0)
+        buf = "0";
+      return buf;
+    }
+
+    bool getToken(uint8_t position)
+    {
+      switch (position) {
+        case 1:
+        return token1;
+        break;
+        case 2:
+          return token2;
+          break;
+        case 3:
+          return token3;
+          break;
+        case 4:
+          return token4;
+          break;
+        case 5:
+          return token5;
+          break;
+        case 6:
+          return token6;
+          break;
+        case 7:
+          return token7;
+          break;
+        case 8:
+          return token8;
+          break;
+        }
+    }
+
+
+    void setToken(uint8_t position)
+    {
+      ESP_LOGD(TAG, "Setting display token: %d", position);
+      switch (position) {
+        case 1:
+          token1 = true;
+          break;
+        case 2:
+          token2 = true;
+          break;
+        case 3:
+          token3 = true;
+          break;
+        case 4:
+          token4 = true;
+          break;
+        case 5:
+          token5 = true;
+          break;
+        case 6:
+          token6 = true;
+          break;
+        case 7:
+          token7 = true;
+          break;
+        case 8:
+          token8 = true;
+          break;
+        }
+    }
+
+    void resetToken(uint8_t position)
+    {
+      ESP_LOGD(TAG, "Releasing display token: %d", position);
+      switch (position) {
+        case 1:
+          token1 = false;
+          break;
+        case 2:
+          token2 = false;
+          break;
+        case 3:
+          token3 = false;
+          break;
+        case 4:
+          token4 = false;
+          break;
+        case 5:
+          token5 = false;
+          break;
+        case 6:
+          token6 = false;
+          break;
+        case 7:
+          token7 = false;
+          break;
+        case 8:
+          token8 = false;
+          break;
+        }
+    }
+
+    void resetAllTokens()
+    {
+        token1 = token2 = token3 = token4 = token5 = token6 = token7 = token8 = false;
+    }
+
+    bool isReady(uint8_t position)
+    {
+        //ESP_LOGD(TAG, "Display token %d is requesting ready, set tokens: [%s]", position, showTokens());
+        switch (position)
+        {
+        case 0:
+           if (token1 || token2 || token3 || token4 || token5 || token6 || token7 || token8)
+            return false;
+          else
+            return true;
+          break;
+        case 1:
+          if (token2 || token3 || token4 || token5 || token6 || token7 || token8)
+            return false;
+          else
+            return true;
+          break;
+        case 2:
+          if (token1 || token3 || token4 || token5 || token6 || token7 || token8)
+            return false;
+          else
+            return true;
+          break;
+        case 3:
+          if (token1 || token2 || token4 || token5 || token6 || token7 || token8)
+            return false;
+          else
+            return true;          
+          break;
+        case 4:
+          if (token1 || token2 || token3 || token5 || token6 || token7 || token8)
+            return false;
+          else
+            return true;          
+          break;
+        case 5:
+          if (token1 || token2 || token3 || token4 || token6 || token7 || token8)
+            return false;
+          else
+            return true;          
+          break;
+        case 6:
+          if (token1 || token2 || token3 || token4 || token5 || token7 || token8)
+            return false;
+          else
+            return true;          
+          break;
+        case 7:
+          if (token1 || token2 || token3 || token4 || token5 || token6 || token8)
+            return false;
+          else
+            return true;          
+          break;
+        case 8:
+          if (token1 || token2 || token3 || token4 || token5 || token6 || token7)
+            return false;          
+          else
+            return true;
+          break;
+        }
+    }
+  private:
+    bool token1;
+    bool token2;
+    bool token3;
+    bool token4;
+    bool token5;
+    bool token6;
+    bool token7;
+    bool token8;
+};
+
+DisplayToken displaytoken;

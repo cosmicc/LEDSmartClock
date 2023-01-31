@@ -78,13 +78,15 @@ using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 
 static char intervals[][9] = {"31536000", "2592000", "604800", "86400", "3600", "60", "1"};
 static char interval_names[][9] = {"years", "months", "weeks", "days", "hours", "minutes", "seconds"};
+static char imperial_units[][7] = {"\u2109", "Mph", "Feet"};
+static char metric_units[][7] = {"\u2103", "Kph", "Meters"};
 
 #include "src/structures/structures.h"
 #include "src/colors/colors.h"
 #include "src/bitmaps/bitmaps.h"
 
 // Global Variables & Class Objects
-const char thingName[] = "ledsmartclock";           // Default SSID used for new setup
+const char thingName[] = "ledsmartclock";                 // Default SSID used for new setup
 const char wifiInitialApPassword[] = "ledsmartclock";     // Default AP password for new setup
 static const char* TAG = "LedClock";                // Logging tag
 WireInterface wireInterface(Wire);                  // I2C hardware object
@@ -99,13 +101,16 @@ Preferences preferences;        // ESP32 EEPROM preferences storage object
 JSONVar weatherJson;            // JSON object for weather
 JSONVar alertsJson;             // JSON object for alerts
 JSONVar ipgeoJson;              // JSON object for ip geolocation
+JSONVar geocodeJson;    
 Weather weather;                // weather info data class
 Alerts alerts;                  // wweather alerts data class
 Ipgeo ipgeo;                    // ip geolocation data class
-GPSData gps;                    // gps data class
+Geocode geocode;
+GPSData gps; // gps data class
 Checkalerts checkalerts;
 Checkweather checkweather;
 Checkipgeo checkipgeo;
+Checkgeocode checkgeocode;
 ShowClock showclock;
 CoTimers cotimer;
 ScrollText scrolltext;
@@ -115,6 +120,8 @@ acetime_t lastntpcheck;
 String wurl;                    // Built Openweather API URL
 String aurl;                    // Built AWS API URL
 String gurl;                    // Built IPGeolocation.io API URL
+String curl;                    // Built geocoding url
+String qurl;                    // Built air quality url
 bool clock_display_offset;      // Clock display offset for single digit hour
 bool resetme;                   // reset to factory defaults
 acetime_t bootTime;             // boot time
@@ -134,6 +141,7 @@ void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color);
 void fillAlertsFromJson(Alerts *alerts);
 void fillWeatherFromJson(Weather *weather);
 void fillIpgeoFromJson(Ipgeo *ipgeo);
+void fillGeocodeFromJson(Geocode *geocode);
 void debug_print(String message, bool cr);
 acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds);
 void setTimeSource(String);
@@ -211,8 +219,8 @@ iotwebconf::CheckboxTParameter disable_alertflash =
 iotwebconf::ParameterGroup group3 = iotwebconf::ParameterGroup("Weather", "Weather Settings");
   iotwebconf::CheckboxTParameter show_weather =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_weather").label("Show Weather Conditions").defaultValue(true).build();
-  iotwebconf::CheckboxTParameter fahrenheit =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("fahrenheit").label("Fahrenheit").defaultValue(true).build();
+  iotwebconf::CheckboxTParameter imperial =
+    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("imperial").label("Imperial Units").defaultValue(true).build();
   iotwebconf::ColorTParameter weather_color =
    iotwebconf::Builder<iotwebconf::ColorTParameter>("weather_color").label("Weather Conditions Text Color").defaultValue("#FF8800").build();
 iotwebconf::CheckboxTParameter use_fixed_tempcolor =  
@@ -340,7 +348,7 @@ class GPSClock: public Clock {
         ESP_LOGI(TAG, "GPSClock: readResponse(): gpsSeconds: %d | age: %d ms", gpsSeconds, GPS.time.age());
         return gpsSeconds;
       } else {
-          ESP_LOGW(TAG, "GPSClock: readResponse(): GPS time update skipped, no gpsfix or time too old: %d ms", GPS.time.age());
+          ESP_LOGW(TAG, "GPSClock: readResponse(): GPS time update skipped, time too old: %d ms", GPS.time.age());
           return kInvalidSeconds;
         }
     }
@@ -387,204 +395,6 @@ class GPSClock: public Clock {
 using ace_time::clock::GPSClock;
 static GPSClock gpsClock;
 static SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/, 60, 5, 1000);  // reference & backup clock
-
-class DisplayToken
-{
-  public:
-    String showTokens() {
-      String buf;
-      if (token1)
-        buf = buf + "1,";
-      if (token2)
-        buf = buf + "2,";
-      if (token3)
-        buf = buf + "3,";
-      if (token4)
-        buf = buf + "4,";
-      if (token5)
-        buf = buf + "5,";
-      if (token6)
-        buf = buf + "6,";
-      if (token7)
-        buf = buf + "7,";
-      if (token8)
-        buf = buf + "8,";
-      if (buf.length() == 0)
-        buf = "0";
-      return buf;
-    }
-
-    bool getToken(uint8_t position)
-    {
-      switch (position) {
-        case 1:
-        return token1;
-        break;
-        case 2:
-          return token2;
-          break;
-        case 3:
-          return token3;
-          break;
-        case 4:
-          return token4;
-          break;
-        case 5:
-          return token5;
-          break;
-        case 6:
-          return token6;
-          break;
-        case 7:
-          return token7;
-          break;
-        case 8:
-          return token8;
-          break;
-        }
-    }
-
-
-    void setToken(uint8_t position)
-    {
-      ESP_LOGD(TAG, "Setting display token: %d", position);
-      switch (position) {
-        case 1:
-          token1 = true;
-          break;
-        case 2:
-          token2 = true;
-          break;
-        case 3:
-          token3 = true;
-          break;
-        case 4:
-          token4 = true;
-          break;
-        case 5:
-          token5 = true;
-          break;
-        case 6:
-          token6 = true;
-          break;
-        case 7:
-          token7 = true;
-          break;
-        case 8:
-          token8 = true;
-          break;
-        }
-    }
-
-    void resetToken(uint8_t position)
-    {
-      ESP_LOGD(TAG, "Releasing display token: %d", position);
-      switch (position) {
-        case 1:
-          token1 = false;
-          break;
-        case 2:
-          token2 = false;
-          break;
-        case 3:
-          token3 = false;
-          break;
-        case 4:
-          token4 = false;
-          break;
-        case 5:
-          token5 = false;
-          break;
-        case 6:
-          token6 = false;
-          break;
-        case 7:
-          token7 = false;
-          break;
-        case 8:
-          token8 = false;
-          break;
-        }
-    }
-
-    void resetAllTokens()
-    {
-        token1 = token2 = token3 = token4 = token5 = token6 = token7 = token8 = false;
-    }
-
-    bool isReady(uint8_t position)
-    {
-        //ESP_LOGD(TAG, "Display token %d is requesting ready, set tokens: [%s]", position, showTokens());
-        switch (position)
-        {
-        case 0:
-           if (token1 || token2 || token3 || token4 || token5 || token6 || token7 || token8)
-            return false;
-          else
-            return true;
-          break;
-        case 1:
-          if (token2 || token3 || token4 || token5 || token6 || token7 || token8)
-            return false;
-          else
-            return true;
-          break;
-        case 2:
-          if (token1 || token3 || token4 || token5 || token6 || token7 || token8)
-            return false;
-          else
-            return true;
-          break;
-        case 3:
-          if (token1 || token2 || token4 || token5 || token6 || token7 || token8)
-            return false;
-          else
-            return true;          
-          break;
-        case 4:
-          if (token1 || token2 || token3 || token5 || token6 || token7 || token8)
-            return false;
-          else
-            return true;          
-          break;
-        case 5:
-          if (token1 || token2 || token3 || token4 || token6 || token7 || token8)
-            return false;
-          else
-            return true;          
-          break;
-        case 6:
-          if (token1 || token2 || token3 || token4 || token5 || token7 || token8)
-            return false;
-          else
-            return true;          
-          break;
-        case 7:
-          if (token1 || token2 || token3 || token4 || token5 || token6 || token8)
-            return false;
-          else
-            return true;          
-          break;
-        case 8:
-          if (token1 || token2 || token3 || token4 || token5 || token6 || token7)
-            return false;          
-          else
-            return true;
-          break;
-        }
-    }
-  private:
-    bool token1;
-    bool token2;
-    bool token3;
-    bool token4;
-    bool token5;
-    bool token6;
-    bool token7;
-    bool token8;
-};
-
-DisplayToken displaytoken;
 
 // Coroutines
 #ifdef COROUTINE_PROFILER
@@ -691,7 +501,7 @@ COROUTINE(showClock) {
 COROUTINE(checkWeather) {
   COROUTINE_LOOP() {
     COROUTINE_AWAIT(abs(systemClock.getNow() - checkweather.lastsuccess) > (weather_check_interval.value() * T1M) && weather_check_interval.value() != 0 && abs(systemClock.getNow() - checkweather.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0));
-    ESP_LOGD(TAG, "Checking weather forecast...");
+    ESP_LOGI(TAG, "Checking weather forecast...");
     checkweather.retries = 1;
     checkweather.jsonParsed = false;
     while (!checkweather.jsonParsed && (checkweather.retries <= 2))
@@ -750,7 +560,7 @@ COROUTINE(checkWeather) {
 COROUTINE(checkAlerts) {
   COROUTINE_LOOP() {
     COROUTINE_AWAIT(abs(systemClock.getNow() - checkalerts.lastsuccess) > (alert_check_interval.value() * T1M) && alert_check_interval.value() != 0 && (systemClock.getNow() - checkalerts.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && displaytoken.isReady(0));
-    ESP_LOGD(TAG, "Checking weather alerts...");
+    ESP_LOGI(TAG, "Checking weather alerts...");
     checkalerts.retries = 1;
     checkalerts.jsonParsed = false;
     while (!checkalerts.jsonParsed && (checkalerts.retries <= 2))
@@ -817,7 +627,7 @@ COROUTINE(showWeather) {
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = capString((String)weather.currentDescription);
+  scrolltext.message = capString((String)"Currently " + weather.currentDescription + " Humidity " + weather.currentHumidity + "% Wind " + int(weather.currentWindSpeed) + "/" + int(weather.currentWindGust));
   scrolltext.color = hex2rgb(weather_color.value());
   scrolltext.active = true;
   scrolltext.displayicon = true;
@@ -882,17 +692,88 @@ COROUTINE(print_debugData) {
     String lst = elapsedTime(now - systemClock.getLastSyncTime());
     String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME * 60);
     String lip = (WiFi.localIP()).toString();
+    String tempunit;
+    String speedunit;
+    if (imperial.isChecked()) {
+      tempunit = imperial_units[0];
+      speedunit = imperial_units[1];
+    } else {
+      tempunit = metric_units[0];
+      speedunit = metric_units[1];
+    }
     debug_print((String) "Version - Firmware:v" + VERSION + " | Config:v" + CONFIGVER, true);
     debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + iotWebConf.getState() + " | IP:" + lip + " | Uptime:" + uptime, true);
     debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
     debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
     debug_print((String) "IPGeo - Complete:" + checkipgeo.complete + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
     debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
-    debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + " | FeelsLike:" + weather.currentFeelsLike + " | Humidity:" + weather.currentHumidity + " | Wind:" + weather.currentWindSpeed + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
+    debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
     debug_print((String) "Alerts - Active:" + alerts.active + " | Watch:" + alerts.inWatch + " | Warn:" + alerts.inWarning + " | LastTry:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
+    debug_print((String) "Location: " + geocode.city + ", " + geocode.state + ", " + geocode.country, true);
     if (alerts.active)
       debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
   }
+}
+
+COROUTINE(checkGeocode) {
+  COROUTINE_BEGIN();
+  COROUTINE_AWAIT(checkgeocode.active && checkipgeo.complete && abs(systemClock.getNow() - checkgeocode.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0));
+  ESP_LOGI(TAG, "Checking Geocode Location...");
+  checkgeocode.retries = 1;
+  checkgeocode.jsonParsed = false;
+  while (!checkgeocode.jsonParsed && (checkgeocode.retries <= 1))
+  {
+    COROUTINE_DELAY(1000);
+    ESP_LOGD(TAG, "Connecting to %s", curl);
+    HTTPClient http;
+    http.begin(curl);
+    int httpCode = http.GET();
+    ESP_LOGD(TAG, "HTTP code : %d", httpCode);
+    if (httpCode == 200)
+    {
+      geocodeJson = JSON.parse(http.getString());
+      if (JSON.typeof(geocodeJson) == "undefined")
+        ESP_LOGE(TAG, "Parsing geocodeJson input failed!");
+      else
+        checkgeocode.jsonParsed = true;
+    }
+    else if (httpCode == 401)
+    {
+      alertflash.color = RED;
+      alertflash.laps = 1;
+      alertflash.active = true;
+      COROUTINE_AWAIT(!alertflash.active);
+      scrolltext.message = "Invalid Openweather API Key";
+      scrolltext.color = RED;
+      scrolltext.active = true;
+      scrolltext.displayicon = false;
+      COROUTINE_AWAIT(!scrolltext.active);
+    }
+    else
+    {
+      alertflash.color = RED;
+      alertflash.laps = 1;
+      alertflash.active = true;
+      COROUTINE_AWAIT(!alertflash.active);
+      scrolltext.message = (String) "Error getting geocode location: " + httpCode;
+      scrolltext.color = RED;
+      scrolltext.active = true;
+      scrolltext.displayicon = false;
+      COROUTINE_AWAIT(!scrolltext.active);
+    }
+    http.end();
+    checkgeocode.retries++;
+  }
+  if (!checkgeocode.jsonParsed)
+    ESP_LOGE(TAG, "Error: JSON");
+  else
+  {
+    fillGeocodeFromJson(&geocode);
+    checkgeocode.lastsuccess = systemClock.getNow();
+  }
+  checkgeocode.lastattempt = systemClock.getNow();
+  checkgeocode.active = false;
+  COROUTINE_YIELD();
 }
 
 #ifndef DISABLE_IPGEOCHECK
@@ -902,7 +783,7 @@ COROUTINE(checkIpgeo) {
   while (!checkipgeo.complete)
   {
     COROUTINE_AWAIT(abs(systemClock.getNow() - checkipgeo.lastattempt) > T1M);
-    ESP_LOGD(TAG, "Checking IP Geolocation...");
+    ESP_LOGI(TAG, "Checking IP Geolocation...");
     checkipgeo.retries = 1;
     checkipgeo.jsonParsed = false;
     while (!checkipgeo.jsonParsed && (checkipgeo.retries <= 1))
@@ -964,12 +845,21 @@ COROUTINE(checkIpgeo) {
 }
 #endif
 
-
 COROUTINE(miscScrollers) {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(iotWebConf.getState() == 1 || resetme);
+    COROUTINE_AWAIT(iotWebConf.getState() == 1 || resetme || scrolltext.showingip);
     COROUTINE_AWAIT((millis() - scrolltext.resetmsgtime) > T1M*1000 && displaytoken.isReady(4));
+    if (scrolltext.showingip) 
+    {
+      displaytoken.setToken(4);
+      scrolltext.message = (String)"IP: " + (WiFi.localIP()).toString();
+      scrolltext.color = GREEN;
+      scrolltext.active = true;
+      COROUTINE_AWAIT(!scrolltext.active);
+      scrolltext.showingip = false;
+      displaytoken.resetToken(4);
+    }
     if (resetme)
     {
       displaytoken.setToken(4);
@@ -1079,7 +969,7 @@ COROUTINE(coroutineManager) {
 COROUTINE(IotWebConf) {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(displaytoken.isReady(0) && millis() - cotimer.iotloop > 5000);
+    COROUTINE_AWAIT(displaytoken.isReady(0) && millis() - cotimer.iotloop > 5);
     iotWebConf.doLoop();
     cotimer.iotloop = millis();
   }
@@ -1272,6 +1162,7 @@ void processLoc(){
     current.lon = (String)ipgeo.lon;
     current.locsource = "IP Geolocation";
     ESP_LOGI(TAG, "Using IPGeo location information: Lat: %s Lon: %s", (ipgeo.lat), (ipgeo.lon));
+    checkgeocode.active = true;
   }
   else if (gps.lon != "0")
   {
@@ -1288,6 +1179,7 @@ void processLoc(){
     ESP_LOGW(TAG, "Lat:[%0.6lf]->[%0.6lf] Lon:[%0.6lf]->[%0.6lf]", olat, nlat, olon, nlon);
     preferences.putString("lat", current.lat);
     preferences.putString("lon", current.lon);
+    checkgeocode.active = true;
   }
   if (olat == 0 || nlat == 0) {
     preferences.putString("lat", current.lat);
@@ -1402,10 +1294,7 @@ void display_weatherIcon() {
 
 void display_temperature() {
     int temp;
-    if (fahrenheit.isChecked())
-      temp = weather.currentFeelsLike * 1.8 + 32;
-    else
-      temp = weather.currentFeelsLike;
+    temp = weather.currentFeelsLike;
     int xpos;
     int digits = (abs(temp == 0)) ? 1 : (log10(abs(temp)) + 1);
     bool isneg = false;
@@ -1423,11 +1312,20 @@ void display_temperature() {
     xpos = xpos * (digits);
     int score = abs(temp);
     uint32_t tc;
+    int16_t tl = 0;
+    int16_t th = 40;
+    if (imperial.isChecked()) {
+      tl = 32;
+      th = 104;
+    }
     if (!use_fixed_tempcolor.isChecked())
     {
-      current.temphue = constrain(map(weather.currentFeelsLike, 0, 40, NIGHTHUE, 0), NIGHTHUE, 0);
-      if (weather.currentFeelsLike < 0)
-        current.temphue = NIGHTHUE + abs(weather.currentFeelsLike);
+      current.temphue = constrain(map(weather.currentFeelsLike, tl, th, NIGHTHUE, 0), NIGHTHUE, 0);
+      if (weather.currentFeelsLike < tl)
+        if (imperial.isChecked() && weather.currentFeelsLike + abs(weather.currentFeelsLike) == 0)
+          current.temphue = NIGHTHUE + tl;
+        else
+          current.temphue = NIGHTHUE + abs(weather.currentFeelsLike);
       tc = hsv2rgb(current.temphue);
     }
     else
@@ -1486,10 +1384,10 @@ String getSystemZonedDateTimeString() {
       ap = "pm";
     if (hour > 12)
       hour = hour - 12;
-    sprintf(buf, "%d:%02d%s %s, %s %d%s %04d []", ldt.hour(), ldt.minute(), ap, DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
+    sprintf(buf, "%d:%02d%s %s, %s %d%s %04d", ldt.hour(), ldt.minute(), ap, DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
   } 
   else
-    sprintf(buf, "%02d:%02d %s, %s %d%s %04d []", ldt.hour(), ldt.minute(), DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
+    sprintf(buf, "%02d:%02d %s, %s %d%s %04d", ldt.hour(), ldt.minute(), DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
   return (String)buf;
 }
 
@@ -1562,7 +1460,7 @@ void setup () {
   group2.addItem(&flickerfast);
   group2.addItem(&use_fixed_clockcolor);
   group2.addItem(&fixed_clockcolor);
-  group3.addItem(&fahrenheit);
+  group3.addItem(&imperial);
   group3.addItem(&show_weather);
   group3.addItem(&weather_color);
   group3.addItem(&use_fixed_tempcolor);
@@ -1643,6 +1541,7 @@ void setup () {
   ESP_EARLY_LOGD(TAG, "Display initalization complete.");
   ESP_EARLY_LOGD(TAG, "Setup initialization complete: %d ms", (millis()-timer));
   scrolltext.resetmsgtime = millis() - 60000;
+  cotimer.iotloop = millis();
   displaytoken.resetAllTokens();
   CoroutineScheduler::setup();
 }
@@ -1697,6 +1596,8 @@ void wifiConnected() {
   display_showStatus();
   matrix->show();
   systemClock.forceSync();
+  scrolltext.showingip = true;
+  checkgeocode.active = true;
 }
 
 void fillAlertsFromJson(Alerts* alerts) {
@@ -1707,7 +1608,7 @@ void fillAlertsFromJson(Alerts* alerts) {
     sprintf(alerts->certainty1, "%s", (const char *)alertsJson["features"][0]["properties"]["certainty"]);
     sprintf(alerts->urgency1, "%s", (const char *)alertsJson["features"][0]["properties"]["urgency"]);
     sprintf(alerts->event1, "%s", (const char *)alertsJson["features"][0]["properties"]["event"]);
-    sprintf(alerts->description1, "%s", (const char *)alertsJson["features"][0]["properties"]["parameters"]["NWSheadline"][0]);
+    sprintf(alerts->description1, "%s", (char*)cleanString((const char *)alertsJson["features"][0]["properties"]["description"]));
     alerts->timestamp = systemClock.getNow();
     if ((String)alerts->certainty1 == "Observed" || (String)alerts->certainty1 == "Likely")
     {
@@ -1729,6 +1630,8 @@ void fillAlertsFromJson(Alerts* alerts) {
   }
   else {
     alerts->active = false;
+    alerts->inWarning = false;
+    alerts->inWatch= false;    
     ESP_LOGI(TAG, "No current weather alerts exist");
   }
 }
@@ -1739,21 +1642,18 @@ void fillWeatherFromJson(Weather* weather) {
   weather->currentFeelsLike = weatherJson["current"]["feels_like"];
   weather->currentHumidity = weatherJson["current"]["humidity"];
   weather->currentWindSpeed = weatherJson["current"]["wind_speed"];
+  weather->currentWindSpeed = weatherJson["current"]["wind_gust"];
   sprintf(weather->currentDescription, "%s", (const char*) weatherJson["current"]["weather"][0]["description"]);
-  //sprintf(weather->iconD, "%s", (const char*) weatherJson["daily"][0]["weather"][0]["icon"]);
-  //weather->tempMinD = weatherJson["daily"][0]["temp"]["min"];
-  //weather->tempMaxD = weatherJson["daily"][0]["temp"]["max"];
-  //weather->humidityD = weatherJson["daily"][0]["humidity"];
-  //weather->windSpeedD = weatherJson["daily"][0]["wind_speed"];
-  //weather->windGustD = weatherJson["daily"][0]["wind_gust"];
-  //sprintf(weather->descriptionD, "%s", (const char*) weatherJson["daily"][0]["weather"][0]["description"]);
-  //sprintf(weather->iconD1, "%s", (const char*) weatherJson["daily"][1]["weather"][0]["icon"]);
-  //weather->tempMinD1 = weatherJson["daily"][1]["temp"]["min"];
-  //weather->tempMaxD1 = weatherJson["daily"][1]["temp"]["max"];
-  //weather->humidityD1 = weatherJson["daily"][1]["humidity"];
-  //weather->windSpeedD1 = weatherJson["daily"][1]["wind_speed"];
-  //weather->windGustD1 = weatherJson["daily"][1]["wind_gust"];
-  //sprintf(weather->descriptionD1, "%s", (const char*) weatherJson["daily"][1]["weather"][0]["description"]);
+  weather->dayTempMin = weatherJson["daily"][0]["feels_like"]["min"];
+  weather->dayTempMax = weatherJson["daily"][0]["feels_like"]["max"];
+  weather->dayWindSpeed = weatherJson["daily"][0]["wind_speed"];
+  weather->dayWindGust = weatherJson["daily"][0]["wind_gust"];
+  sprintf(weather->dayDescription, "%s", (const char*) weatherJson["daily"][0]["weather"][0]["description"]);
+  sprintf(weather->dayIcon, "%s", (const char*) weatherJson["daily"][0]["weather"][0]["icon"]);
+  weather->dayMoonPhase = weatherJson["daily"][0]["moon_phase"];
+  weather->daySunrise = weatherJson["daily"][0]["sunrise"];
+  weather->daySunset = weatherJson["daily"][0]["sunset"];
+
   weather->timestamp = systemClock.getNow();
 }
 
@@ -1764,6 +1664,12 @@ void fillIpgeoFromJson(Ipgeo* ipgeo) {
   sprintf(ipgeo->lon, "%s", (const char*) ipgeoJson["longitude"]);
 }
 
+void fillGeocodeFromJson(Geocode* geocode) {
+  sprintf(geocode->city, "%s", (const char*) geocodeJson[0]["name"]);
+  sprintf(geocode->state, "%s", (const char*) geocodeJson[0]["state"]);
+  sprintf(geocode->country, "%s", (const char*) geocodeJson[0]["country"]);
+}
+
 bool isApiKeyValid(char *apikey) {
   if (apikey[0] == '\0')
     return false;
@@ -1772,8 +1678,15 @@ bool isApiKeyValid(char *apikey) {
 }
 
 void buildURLs() {
-  wurl = (String) "http://api.openweathermap.org/data/2.5/onecall?units=metric&exclude=minutely&appid=" + weatherapi.value() + "&lat=" + current.lat + "&lon=" + current.lon + "&lang=en";
-  aurl = (String) "https://api.weather.gov/alerts?active=true&status=actual&point=" + current.lat + "%2C" + current.lon + "&limit=500";
+  String units;
+  if (imperial.isChecked())
+    units = "imperial";
+  else
+    units = "metric";
+  wurl = (String) "http://api.openweathermap.org/data/2.5/onecall?units=" + units + "&exclude=minutely,hourly&appid=" + weatherapi.value() + "&lat=" + current.lat + "&lon=" + current.lon + "&lang=en";  // weather forecast url
+  aurl = (String) "https://api.weather.gov/alerts?active=true&status=actual&point=" + current.lat + "%2C" + current.lon + "&limit=3";                                                                     // Weather alert url
+  curl = (String) "http://api.openweathermap.org/geo/1.0/reverse?lat=" + current.lat + "&lon=" + current.lon + "&limit=5&appid=" + weatherapi.value();                                                    // Geocoding url
+  qurl = (String) "http://api.openweathermap.org/data/2.5/air_pollution?lat=" + current.lat + "&lon=" + current.lon + "&appid=" + weatherapi.value();                                                                                 //air pollution url
 }
 
 String elapsedTime(int32_t seconds) {
@@ -1877,6 +1790,22 @@ const char* ordinal_suffix(int n)
         return suffixes[ord];
 }
 
+
+char* cleanString(const char* p) {        //char *buf;
+    char* q = (char *)p;
+    while (p != 0 && *p != '\0') {
+        if (*p == '\n') {
+            p++;
+            *q = *p;
+        } 
+        else {
+            *q++ = *p++;
+        }
+    }
+    *q = '\0';
+    return q;
+}
+
 void handleRoot()
 {
   if (iotWebConf.handleCaptivePortal())
@@ -1905,6 +1834,8 @@ void handleRoot()
   s += current.lon;
   s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Location Source:</td><td style=\"height: 2px; width: 255px;\">";
   s += current.locsource;
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Location:</td><td style=\"height: 2px; width: 255px;\">";
+  s += (String)geocode.city + ", " + geocode.state + ", " + geocode.country;
   s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix:</td><td style=\"height: 2px; width: 255px;\">";
   if (gps.fix)
     s += "Yes";
@@ -1930,21 +1861,34 @@ void handleRoot()
   s += (String)GPS.sentencesWithFix();
   s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Current Temp:</td><td style=\"height: 2px; width: 255px;\">";
   s += (String)weather.currentTemp;
-  s += "&#8451;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Feels Like Temp:</td><td style=\"height: 2px; width: 255px;\">";
+  if (imperial.isChecked())
+    s += "&#8457;";
+  else
+    s += "&#8451;";
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Feels Like Temp:</td><td style=\"height: 2px; width: 255px;\">";
   s += (String)weather.currentFeelsLike;
-  s += "&#8451;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Humidity:</td><td style=\"height: 2px; width: 255px;\">";
+    if (imperial.isChecked())
+    s += "&#8457;";
+  else
+    s += "&#8451;";
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Humidity:</td><td style=\"height: 2px; width: 255px;\">";
   s += (String)weather.currentHumidity;
   s += "%</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Wind Speed:</td><td style=\"height: 2px; width: 255px;\">";
   s += (String)weather.currentWindSpeed;
-  s += "kph</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Conditions:</td><td style=\"height: 2px; width: 255px;\">";
+  s += "&nbsp;";
+  if (imperial.isChecked())
+    s += imperial_units[1];
+  else
+    s += metric_units[1];
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Conditions:</td><td style=\"height: 2px; width: 255px;\">";
   s += capString(weather.currentDescription);
   s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Forcast Check Attempt:</td><td style=\"height: 2px; width: 255px;\">";
   s += elapsedTime(now - checkweather.lastattempt);
   s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Forcast Check Success:</td><td style=\"height: 2px; width: 255px;\">";
   s += elapsedTime(now - checkweather.lastsuccess);
-  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Next Forcast Check Attempt:</td><td style=\"height: 2px; width: 255px;\">";
-  
-  s += "hhhh</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Alert Active:</td><td style=\"height: 2px; width: 255px;\">";
+  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Next Forecast Display: in </td><td style=\"height: 2px; width: 255px;\">";
+  s += elapsedTime((now - weather.lastshown) - (show_weather_interval.value() * 60));
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Alert Active:</td><td style=\"height: 2px; width: 255px;\">";
   if (alerts.active)
     s += "Yes";
   else

@@ -32,7 +32,7 @@
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock (Everything is coroutines now)
 
 #define VERSION "1.0b"             // firmware version
-static const char* CONFIGVER = "2";// config version (advance if iotwebconf config additions to reset defaults)
+static const char* CONFIGVER = "3";// config version (advance if iotwebconf config additions to reset defaults)
 
 #undef COROUTINE_PROFILER          // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages
@@ -257,6 +257,8 @@ iotwebconf::CheckboxTParameter use_fixed_tempcolor =
     iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("weather_daily_show_interval").label("Daily Conditions Display Interval Hrs (1-24)").defaultValue(1).min(1).max(24).step(1).placeholder("1(hour)..24(hours)").build();
   iotwebconf::CheckboxTParameter show_airquality =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_airquality").label("Show Current Air Quality").defaultValue(true).build();
+iotwebconf::CheckboxTParameter use_fixed_aqicolor =  
+  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("use_fixed_aqicolor").label("Use Fixed Air Quality Color (Disables Auto Color)").defaultValue(false).build();
   iotwebconf::ColorTParameter airquality_color =
    iotwebconf::Builder<iotwebconf::ColorTParameter>("airquality_color").label("Air Quality Text Color").defaultValue("#FF8800").build();
  iotwebconf::IntTParameter<int8_t> airquality_interval =
@@ -767,12 +769,32 @@ COROUTINE(showAirquality) {
   COROUTINE_LOOP() {
   COROUTINE_AWAIT(cotimer.show_airquality_ready && show_airquality.isChecked() && displaytoken.isReady(9));
   displaytoken.setToken(9);
-  alertflash.color = hex2rgb(airquality_color.value());
+  uint32_t color;
+  if (airquality_fixed.isChecked())
+    color = hex2rgb(airquality_color.value());
+  else
+    switch weather.aqi {
+    case 1:
+	color = GREEN;
+	break;
+    case 2:
+	color = YELLOW;
+	break;
+    case 3:
+	color = ORANGE;
+	break;
+    case 4:
+	color = RED;
+	break;
+    case 5:
+	color = PURPLE;
+	break;
+  alertflash.color = color;
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
   scrolltext.message = capString((String)"Air Quality: ");
-  scrolltext.color = hex2rgb(airquality_color.value());
+  scrolltext.color = color;
   scrolltext.active = true;
   scrolltext.displayicon = true;
   COROUTINE_AWAIT(!scrolltext.active);
@@ -1351,6 +1373,7 @@ void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) {
 void display_showStatus() {
     uint16_t clr;
     uint16_t wclr;
+    uint16_t aclr;
     bool ds = disable_status.isChecked();
     if (ds)
       clr = BLACK;
@@ -1377,6 +1400,16 @@ void display_showStatus() {
       clr = DARKRED;
     else if (!ds)
       clr = DARKRED;
+    if (weather.aqi == 1)
+      aclr = BLACK;
+    else if (weather.aqi == 2)
+      aclr = YELLOW;
+    else if (weather.aqi == 3)
+      aclr = ORANGE;
+    else if (weather.aqi == 4)
+      aclr = RED;
+    else if (weather.aqi == 5)
+      aclr = PURPLE;
     if (alerts.inWarning)
       wclr = RED;
     else if (alerts.inWatch)
@@ -1384,11 +1417,13 @@ void display_showStatus() {
     else
       wclr = BLACK;
     matrix->drawPixel(0, 7, clr);
+    matrix->drawPixel(0, 4, aclr);
     matrix->drawPixel(0, 0, wclr);
-    if (current.oldstatusclr != clr || current.oldstatuswclr != wclr) {
+    if (current.oldaqiclr != aclr || current.oldstatusclr != clr || current.oldstatuswclr != wclr) {
       matrix->show();
       current.oldstatusclr = clr;
       current.oldstatuswclr = wclr;
+      current.oldaqiclr = aclr;
     }
 }
 
@@ -1619,6 +1654,7 @@ void setup () {
   group3.addItem(&weather_daily_color);
   group3.addItem(&show_weather_daily_interval);
   group3.addItem(&show_airquality);
+  group3.addItem(&use_fixed_aqicolor);
   group3.addItem(&airquality_color);
   group3.addItem(&airquality_interval);  
   group3.addItem(&weather_check_interval);

@@ -36,7 +36,6 @@ static const char* CONFIGVER = "3";// config version (advance if iotwebconf conf
 
 #undef COROUTINE_PROFILER          // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages
-#undef DISABLE_WEATHERCHECK        // Disable Weather forcast checks
 #undef DISABLE_ALERTCHECK          // Disable Weather Alert checks
 #undef DISABLE_IPGEOCHECK          // Disable IPGEO checks
 
@@ -263,12 +262,8 @@ iotwebconf::CheckboxTParameter use_fixed_aqicolor =
    iotwebconf::Builder<iotwebconf::ColorTParameter>("airquality_color").label("Air Quality Text Color").defaultValue("#FF8800").build();
  iotwebconf::IntTParameter<int8_t> airquality_interval =
     iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("airquality_interval").label("Air Quality Display Interval Min (1-120)").defaultValue(30).min(1).max(120).step(1).placeholder("1(min)..120(min)").build();
- iotwebconf::IntTParameter<int8_t> weather_check_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("weather_check_interval").label("Weather Conditions Check Interval Min (1-60)").defaultValue(10).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
   iotwebconf::IntTParameter<int8_t> show_alert_interval =
     iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("alert_show_interval").label("Weather Alert Display Interval Min (1-60)").defaultValue(5).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
- iotwebconf::IntTParameter<int8_t> alert_check_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("alert_check_interval").label("Weather Alert Check Interval Min (1-60)").defaultValue(5).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
   iotwebconf::TextTParameter<33> weatherapi =
     iotwebconf::Builder<iotwebconf::TextTParameter<33>>("weatherapi").label("OpenWeather API Key").defaultValue("").build();
 iotwebconf::ParameterGroup group2 = iotwebconf::ParameterGroup("Clock", "Clock Settings");
@@ -1079,12 +1074,16 @@ COROUTINE(coroutineManager) {
   acetime_t now = systemClock.getNow();
   if (!displaytoken.isReady(0))
     showClock.suspend();
-  if (displaytoken.isReady(0) && showClock.isSuspended() && displaytoken.isReady(0))
+  if (showClock.isSuspended() && displaytoken.isReady(0))
     showClock.resume();
   if (serialdebug.isChecked() && print_debugData.isSuspended() && displaytoken.isReady(0))
     print_debugData.resume();
   else if (!serialdebug.isChecked() && !print_debugData.isSuspended())
     print_debugData.suspend();
+  if (show_date.isChecked() && showDate.isSuspended() && iotWebConf.getState() != 1)
+    showDate.resume();
+  else if ((!show_date.isChecked() && !showDate.isSuspended()) || iotWebConf.getState() == 1)
+    showDate.suspend();
   if (show_weather.isChecked() && showWeather.isSuspended() && iotWebConf.getState() != 1 && displaytoken.isReady(0))
     showWeather.resume();
   else if ((!show_weather.isChecked() && !showWeather.isSuspended()) || iotWebConf.getState() == 1)
@@ -1097,34 +1096,24 @@ COROUTINE(coroutineManager) {
     showAirquality.resume();
   else if ((!show_airquality.isChecked() && !showAirquality.isSuspended()) || iotWebConf.getState() == 1)
     showAirquality.suspend();
-  if (show_date.isChecked() && showDate.isSuspended() && iotWebConf.getState() != 1)
-    showDate.resume();
-  else if ((!show_date.isChecked() && !showDate.isSuspended()) || iotWebConf.getState() == 1)
-    showDate.suspend();
-  if (showAlerts.isSuspended() && iotWebConf.getState() != 1 && displaytoken.isReady(0))
-    showAlerts.resume();
-  else if (iotWebConf.getState() == 1)
-    showAlerts.suspend();
-  #ifndef DISABLE_WEATHERCHECK
-  if (show_weather.isChecked() && checkWeather.isSuspended() && iotWebConf.getState() != 1 && iotWebConf.getState() == 4 && displaytoken.isReady(0)) {
+  if ((show_weather.isChecked() || show_weather_daily.isChecked()) && showWeather.isSuspended() && iotWebConf.getState() != 1 && iotWebConf.getState() == 4 && displaytoken.isReady(0)) {
     checkWeather.reset();
     checkWeather.resume();
   }
-  else if ((!show_weather.isChecked() && !showWeather.isSuspended()) || iotWebConf.getState() == 1 || iotWebConf.getState() != 4)
+  else if ((!show_weather.isChecked() && !show_weather_daily.isChecked() && !showWeather.isSuspended()) || iotWebConf.getState() == 1 || iotWebConf.getState() != 4)
     checkWeather.suspend();
-  #endif
   #ifndef DISABLE_ALERTCHECK
-  if (checkAlerts.isSuspended() && iotWebConf.getState() != 1 && iotWebConf.getState() == 4) {
+  if (checkAlerts.isSuspended() && iotWebConf.getState() != 1 && iotWebConf.getState() == 4 && displaytoken.isReady(0)) {
     checkAlerts.reset();
     checkAlerts.resume();
+    showAlerts.resume();
   }
-  else if (iotWebConf.getState() == 1 || iotWebConf.getState() != 4)
+  else if (!checkAlerts.isSuspended() && (iotWebConf.getState() == 1 || iotWebConf.getState() != 4))
     checkAlerts.suspend();
+    showAlerts.suspend();
   #endif
-  // start the weather alert display
   if ((abs(now - alerts.lastshown) > (show_alert_interval.value()*T1M)) && show_alert_interval.value() != 0 && displaytoken.isReady(0) && alerts.active)
     cotimer.show_alert_ready = true;
-   // start weather conditions display
   if ((abs(now - weather.lastshown) > (show_weather_interval.value() * T1M)) && (abs(now - weather.timestamp)) < T2H && displaytoken.isReady(0))
     cotimer.show_weather_ready = true;
   if ((abs(now - showclock.datelastshown) > (show_date_interval.value() * T1H)) && displaytoken.isReady(0))

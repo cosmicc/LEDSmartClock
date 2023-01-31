@@ -26,7 +26,7 @@
 #include <Adafruit_GFX.h>
 #include <FastLED_NeoMatrix.h>
 #include <FastLED.h>
-#include <HTTPClient.h>
+#include <HTTPClient.h>  //TODO: Replace with async
 #include <Arduino_JSON.h>
 
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock (Everything is coroutines now)
@@ -1776,6 +1776,22 @@ void wifiConnected() {
   scrolltext.showingip = true;
   checkgeocode.active = true;
 }
+	
+uint8_t calculateAqi() {
+  char pm25_clow[][8] = {0, 12.1, 35.5, 55.5, 150.5, 250.5, 350.5};
+  char pm25_chi[][8] = {12.0, 35.4, 55.4, 150.4, 250.4, 350.4, 500.4};
+  int32_t highestaqi;
+  double c;
+  double c_low;
+  double c_hi;
+  double i_low;
+  double i_hi;
+  int16_t aqi;
+}
+
+uint16_t calcaqi(double i_hi, double i_low, double c_hi, double c_low) {
+  return (i_hi - i_low)/(c_hi - c_low)*(c - c_low) + i_low;
+}
 
 void fillAlertsFromJson(Alerts* alerts) {
   if (alertsJson["features"].length() != 0)
@@ -2049,29 +2065,30 @@ void handleRoot()
   s += (String)GPS.failedChecksum();
   s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix Events:</td><td style=\"height: 2px; width: 255px;\">";
   s += (String)GPS.sentencesWithFix();
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Current Temp:</td><td style=\"height: 2px; width: 255px;\">";
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Temp:</td><td style=\"height: 2px; width: 255px;\">";
   s += (String)weather.currentTemp;
   if (imperial.isChecked())
     s += "&#8457;";
   else
     s += "&#8451;";
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Feels Like Temp:</td><td style=\"height: 2px; width: 255px;\">";
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Feels Like Temp:</td><td style=\"height: 2px; width: 255px;\">";
   s += (String)weather.currentFeelsLike;
     if (imperial.isChecked())
     s += "&#8457;";
   else
     s += "&#8451;";
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Humidity:</td><td style=\"height: 2px; width: 255px;\">";
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Humidity:</td><td style=\"height: 2px; width: 255px;\">";
   s += (String)weather.currentHumidity;
-  s += "%</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Wind Speed:</td><td style=\"height: 2px; width: 255px;\">";
+  s += "%</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Wind Speed:</td><td style=\"height: 2px; width: 255px;\">";
   s += (String)weather.currentWindSpeed;
   s += "&nbsp;";
   if (imperial.isChecked())
     s += imperial_units[1];
   else
     s += metric_units[1];
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Conditions:</td><td style=\"height: 2px; width: 255px;\">";
+  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Conditions:</td><td style=\"height: 2px; width: 255px;\">";
   s += capString(weather.currentDescription);
+	
   s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Forcast Check Attempt:</td><td style=\"height: 2px; width: 255px;\">";
   s += elapsedTime(now - checkweather.lastattempt);
   s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Forcast Check Success:</td><td style=\"height: 2px; width: 255px;\">";
@@ -2107,8 +2124,6 @@ void handleRoot()
  //TODO: sync alertcheck with alertshow
  //TODO: advanced aqi calulations
  //TODO: basic aqi in current and daily weather
- //TODO: auto aqi color
- //TODO: fixed aqi color checkbox
  //TODO: table titles
  //TODO: remove tables is show is disabled 
  //TODO: weather daily in web

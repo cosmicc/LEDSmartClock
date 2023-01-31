@@ -38,23 +38,27 @@ struct Weather {
   int16_t dayTempMax;
   acetime_t daySunrise;
   acetime_t daySunset;
+  int dayHumidity;
   char dayDescription[20];
   double dayMoonPhase;
   int dayWindSpeed;
   int dayWindGust;
-  enum airQualityIndex
-  {
-    Good = 1,
-    Fair,
-    Moderate,
-    Poor,
-    VeryPoor
-  };
+  uint8_t aqi;
+  double carbon_monoxide;
+  double nitrogen_monoxide;
+  double nitrogen_dioxide;
+  double ozone;
+  double sulfer_dioxide;
+  double particulates_small;
+  double particulates_medium;
+  double ammonia;
 
   acetime_t timestamp;
   acetime_t lastattempt;
   acetime_t lastshown;
   acetime_t lastsuccess;
+  acetime_t lastdailyshown;
+  acetime_t lastaqishown;
 };
 
 struct Alerts {
@@ -105,6 +109,13 @@ struct Checkalerts {
 };
 
 struct Checkweather {
+  uint8_t retries;
+  bool jsonParsed;
+  acetime_t lastattempt;
+  acetime_t lastsuccess;
+};
+
+struct Checkaqi {
   uint8_t retries;
   bool jsonParsed;
   acetime_t lastattempt;
@@ -167,6 +178,8 @@ struct CoTimers {
   bool show_alert_ready;
   bool show_weather_ready;
   bool show_date_ready;
+  bool show_weather_daily_ready;
+  bool show_airquality_ready;
   uint8_t iconcycle;
   uint32_t icontimer;
   uint32_t iotloop;
@@ -209,6 +222,10 @@ class DisplayToken
         buf = buf + "7,";
       if (token8)
         buf = buf + "8,";
+      if (token9)
+        buf = buf + "9,";
+      if (token10)
+        buf = buf + "10";
       if (buf.length() == 0)
         buf = "0";
       return buf;
@@ -240,6 +257,12 @@ class DisplayToken
           break;
         case 8:
           return token8;
+          break;
+        case 9:
+          return token9;
+          break;
+        case 10:
+          return token10;
           break;
         }
     }
@@ -273,6 +296,12 @@ class DisplayToken
         case 8:
           token8 = true;
           break;
+        case 9:
+          token9 = true;
+          break;
+        case 10:
+          token10 = true;
+          break;
         }
     }
 
@@ -304,12 +333,18 @@ class DisplayToken
         case 8:
           token8 = false;
           break;
+        case 9:
+          token9 = false;
+          break;
+        case 10:
+          token10 = false;
+          break;
         }
     }
 
     void resetAllTokens()
     {
-        token1 = token2 = token3 = token4 = token5 = token6 = token7 = token8 = false;
+        token1 = token2 = token3 = token4 = token5 = token6 = token7 = token8 = token9 = token10 = false;
     }
 
     bool isReady(uint8_t position)
@@ -318,55 +353,67 @@ class DisplayToken
         switch (position)
         {
         case 0:
-           if (token1 || token2 || token3 || token4 || token5 || token6 || token7 || token8)
+           if (token1 || token2 || token3 || token4 || token5 || token6 || token7 || token8 || token9 || token10)
             return false;
           else
             return true;
           break;
         case 1:
-          if (token2 || token3 || token4 || token5 || token6 || token7 || token8)
+          if (token2 || token3 || token4 || token5 || token6 || token7 || token8 || token9 || token10)
             return false;
           else
             return true;
           break;
         case 2:
-          if (token1 || token3 || token4 || token5 || token6 || token7 || token8)
+          if (token1 || token3 || token4 || token5 || token6 || token7 || token8 || token9 || token10)
             return false;
           else
             return true;
           break;
         case 3:
-          if (token1 || token2 || token4 || token5 || token6 || token7 || token8)
+          if (token1 || token2 || token4 || token5 || token6 || token7 || token8 || token9 || token10)
             return false;
           else
             return true;          
           break;
         case 4:
-          if (token1 || token2 || token3 || token5 || token6 || token7 || token8)
+          if (token1 || token2 || token3 || token5 || token6 || token7 || token8 || token9 || token10)
             return false;
           else
             return true;          
           break;
         case 5:
-          if (token1 || token2 || token3 || token4 || token6 || token7 || token8)
+          if (token1 || token2 || token3 || token4 || token6 || token7 || token8 || token9 || token10)
             return false;
           else
             return true;          
           break;
         case 6:
-          if (token1 || token2 || token3 || token4 || token5 || token7 || token8)
+          if (token1 || token2 || token3 || token4 || token5 || token7 || token8 || token9 || token10)
             return false;
           else
             return true;          
           break;
         case 7:
-          if (token1 || token2 || token3 || token4 || token5 || token6 || token8)
+          if (token1 || token2 || token3 || token4 || token5 || token6 || token8 || token9 || token10)
             return false;
           else
             return true;          
           break;
         case 8:
-          if (token1 || token2 || token3 || token4 || token5 || token6 || token7)
+          if (token1 || token2 || token3 || token4 || token5 || token6 || token7 || token9 || token10)
+            return false;          
+          else
+            return true;
+          break;
+        case 9:
+          if (token1 || token2 || token3 || token4 || token5 || token6 || token7 || token8 || token10)
+            return false;          
+          else
+            return true;
+          break;
+        case 10:
+          if (token1 || token2 || token3 || token4 || token5 || token6 || token7 || token8 || token9)
             return false;          
           else
             return true;
@@ -382,6 +429,8 @@ class DisplayToken
     bool token6;
     bool token7;
     bool token8;
+    bool token9;
+    bool token10;
 };
 
 DisplayToken displaytoken;

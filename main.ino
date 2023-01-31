@@ -78,10 +78,16 @@ using ace_time::clock::SystemClockLoop;
 using ace_routine::CoroutineScheduler;
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 
+// defs
 static char intervals[][9] = {"31536000", "2592000", "604800", "86400", "3600", "60", "1"};
 static char interval_names[][9] = {"years", "months", "weeks", "days", "hours", "minutes", "seconds"};
+static char air_quality[][12] = {"N/A", "Good", "Fair", "Moderate", "Poor", "Very Poor"};
+static char connection_state[][15] = {"Boot", "NotConfigured", "ApMode", "Connecting", "OnLine", "OffLine"};
 static char imperial_units[][7] = {"\u2109", "Mph", "Feet"};
 static char metric_units[][7] = {"\u2103", "Kph", "Meters"};
+static char clock_status[][12] = {"Success", "Timeout", "Waiting"};
+static char yesno[][4] = {"No", "Yes"};
+static char truefalse[][6] = {"False", "True"};
 
 #include "src/structures/structures.h"
 #include "src/colors/colors.h"
@@ -710,7 +716,7 @@ COROUTINE(showWeather) {
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = capString((String)"Currently: " + weather.currentDescription + " Humidity " + weather.currentHumidity + "% Wind " + int(weather.currentWindSpeed) + "/" + int(weather.currentWindGust));
+  scrolltext.message = capString((String)"Currently: " + weather.currentDescription + " Humidity " + weather.currentHumidity + "% Wind " + int(weather.currentWindSpeed) + "/" + int(weather.currentWindGust) + " Air: " + weather.aqi);
   scrolltext.color = hex2rgb(weather_color.value());
   scrolltext.active = true;
   scrolltext.displayicon = true;
@@ -832,14 +838,14 @@ COROUTINE(print_debugData) {
       speedunit = metric_units[1];
     }
     debug_print((String) "Version - Firmware:v" + VERSION + " | Config:v" + CONFIGVER, true);
-    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + iotWebConf.getState() + " | IP:" + lip + " | Uptime:" + uptime, true);
-    debug_print((String) "Clock - Status:" + systemClock.getSyncStatusCode() + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
+    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + connection_state[iotWebConf.getState()] + " | IP:" + lip + " | Uptime:" + uptime, true);
+    debug_print((String) "Clock - Status:" + clock_status[systemClock.getSyncStatusCode()] + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
     debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
-    debug_print((String) "IPGeo - Complete:" + checkipgeo.complete + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
+    debug_print((String) "IPGeo - Complete:" + yesno[checkipgeo.complete] + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
     debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
     debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
-    debug_print((String) "Air Quality - Aqi:" + weather.aqi + " | Co:" + weather.carbon_monoxide + " | No:" + weather.nitrogen_monoxide + " | No2:" + weather.nitrogen_dioxide + " | Ozone:" + weather.ozone + " | So2:" + weather.sulfer_dioxide + " | Pm2.5:" + weather.particulates_small + " | Pm10:" + weather.particulates_medium + " | Ammonia:" + weather.ammonia, true);
-    debug_print((String) "Alerts - Active:" + alerts.active + " | Watch:" + alerts.inWatch + " | Warn:" + alerts.inWarning + " | LastTry:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
+    debug_print((String) "Air Quality - Aqi:" + air_quality[weather.aqi] + " | Co:" + weather.carbon_monoxide + " | No:" + weather.nitrogen_monoxide + " | No2:" + weather.nitrogen_dioxide + " | Ozone:" + weather.ozone + " | So2:" + weather.sulfer_dioxide + " | Pm2.5:" + weather.particulates_small + " | Pm10:" + weather.particulates_medium + " | Ammonia:" + weather.ammonia, true);
+    debug_print((String) "Alerts - Active:" + yesno[alerts.active] + " | Watch:" + yesno[alerts.inWatch] + " | Warn:" + yesno[alerts.inWarning] + " | LastTry:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
     debug_print((String) "Location: " + geocode.city + ", " + geocode.state + ", " + geocode.country, true);
     if (alerts.active)
       debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
@@ -1736,13 +1742,6 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
   return valid;
 }
 
-bool readyToDisplay() {
-  if (scrolltext.active || alertflash.active || cotimer.show_alert_ready || cotimer.show_weather_ready || cotimer.show_date_ready || resetme)
-    return false;
-  else
-    return true;
-}
-
 void wifiConnected() {
   ESP_LOGI(TAG, "WiFi was connected.");
   gpsClock.ntpReady();
@@ -2088,5 +2087,5 @@ void handleRoot()
  //TODO: table titles
  //TODO: remove tables is show is disabled 
  //TODO: weather daily in web
- 
+//TODO: timezone name in web
 

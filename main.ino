@@ -93,9 +93,9 @@ static char truefalse[][6] = {"False", "True"};
 #include "src/bitmaps/bitmaps.h"
 
 // Global Variables & Class Objects
-const char thingName[] = "ledsmartclock";                 // Default SSID used for new setup
+const char thingName[] = "LEDSMARTCLOCK";                 // Default SSID used for new setup
 const char wifiInitialApPassword[] = "ledsmartclock";     // Default AP password for new setup
-static const char* TAG = "LedClock";                // Logging tag
+static const char* TAG = "LEDSC";                // Logging tag
 WireInterface wireInterface(Wire);                  // I2C hardware object
 DS3231Clock<WireInterface> dsClock(wireInterface);  // Hardware DS3231 RTC object
 CRGB leds[NUMMATRIX];           // Led matrix array object
@@ -1032,7 +1032,7 @@ COROUTINE(miscScrollers) {
       alertflash.laps = 5;
       alertflash.active = true;
       COROUTINE_AWAIT(!alertflash.active);
-      scrolltext.message = "Resetting to Defaults, Connect to ledsmartclock wifi to setup";
+      scrolltext.message = "Resetting to Defaults, Connect to LEDSMARTCLOCK wifi to setup";
       scrolltext.color = RED;
       scrolltext.active = true;
       COROUTINE_AWAIT(!scrolltext.active);
@@ -1057,7 +1057,7 @@ COROUTINE(miscScrollers) {
       alertflash.laps = 5;
       alertflash.active = true;
       COROUTINE_AWAIT(!alertflash.active);
-      scrolltext.message = (String)"Connect to ledsmartclock wifi to setup, version:" + VERSION;
+      scrolltext.message = (String)"Connect to LEDSMARTCLOCK wifi to setup, version:" + VERSION;
       scrolltext.color = RED;
       scrolltext.active = true;
       COROUTINE_AWAIT(!scrolltext.active);

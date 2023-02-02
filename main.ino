@@ -35,6 +35,7 @@
 static const char* CONFIGVER = "3";// config version (advance if iotwebconf config additions to reset defaults)
 
 #undef COROUTINE_PROFILER          // Enable the coroutine debug profiler
+#undef COROUTINE_STATES
 #undef DEBUG_LIGHT                 // Show light debug serial messages
 #undef DISABLE_ALERTCHECK          // Disable Weather Alert checks
 #undef DISABLE_IPGEOCHECK          // Disable IPGEO checks
@@ -158,7 +159,7 @@ void setTimeSource(String);
 void resetLastNtpCheck();
 void printSystemZonedTime();
 void display_temperature();
-void display_weatherIcon();
+void display_weatherIcon(char* icon);
 void processTimezone();
 acetime_t Now();
 String capString(String str);
@@ -426,11 +427,19 @@ static GPSClock gpsClock;
 static SystemClockLoop systemClock(&gpsClock /*reference*/, &dsClock /*backup*/, 60, 5, 1000);  // reference & backup clock
 
 // Coroutines
+#ifdef COROUTINE_STATES
+COROUTINE(printStates) {
+  COROUTINE_LOOP() {
+    CoroutineScheduler::list(Serial);
+    COROUTINE_DELAY(PROFILER_DELAY * 1000);
+  }
+}
+#endif
+
 #ifdef COROUTINE_PROFILER
 COROUTINE(printProfiling) {
   COROUTINE_LOOP() {
     LogBinTableRenderer::printTo(Serial, 2 /*startBin*/, 13 /*endBin*/, false /*clear*/);
-    CoroutineScheduler::list(Serial);
     COROUTINE_DELAY(PROFILER_DELAY * 1000);
   }
 }
@@ -583,10 +592,9 @@ COROUTINE(checkAirquality) {
   }
 }
 
-#ifndef DISABLE_WEATHERCHECK
 COROUTINE(checkWeather) {
   COROUTINE_LOOP() {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkweather.lastsuccess) > (weather_check_interval.value() * T1M) && weather_check_interval.value() != 0 && abs(systemClock.getNow() - checkweather.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0));
+    COROUTINE_AWAIT(abs(systemClock.getNow() - checkweather.lastsuccess) > (show_weather_interval.value() * T1M) && abs(systemClock.getNow() - checkweather.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0));
     ESP_LOGI(TAG, "Checking weather forecast...");
     checkweather.retries = 1;
     checkweather.jsonParsed = false;
@@ -640,12 +648,12 @@ COROUTINE(checkWeather) {
     checkweather.lastattempt = systemClock.getNow();
   }
 }
-#endif
+
 
 #ifndef DISABLE_ALERTCHECK
 COROUTINE(checkAlerts) {
   COROUTINE_LOOP() {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkalerts.lastsuccess) > (alert_check_interval.value() * T1M) && alert_check_interval.value() != 0 && (systemClock.getNow() - checkalerts.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && displaytoken.isReady(0));
+    COROUTINE_AWAIT(abs(systemClock.getNow() - checkalerts.lastsuccess) > (5 * T1M) && (systemClock.getNow() - checkalerts.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && displaytoken.isReady(0));
     ESP_LOGI(TAG, "Checking weather alerts...");
     checkalerts.retries = 1;
     checkalerts.jsonParsed = false;
@@ -713,15 +721,17 @@ COROUTINE(showWeather) {
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = capString((String)"Currently: " + weather.currentDescription + " Humidity " + weather.currentHumidity + "% Wind " + int(weather.currentWindSpeed) + "/" + int(weather.currentWindGust) + " Air: " + weather.aqi);
+  scrolltext.message = capString((String)"Currently: " + weather.currentDescription + " Humidity " + weather.currentHumidity + "% Wind " + int(weather.currentWindSpeed) + "/" + int(weather.currentWindGust) + " Air: " + air_quality[weather.currentaqi]);
   scrolltext.color = hex2rgb(weather_color.value());
   scrolltext.active = true;
   scrolltext.displayicon = true;
+  strncpy(scrolltext.icon, weather.currentIcon, 4);
   COROUTINE_AWAIT(!scrolltext.active);
+  scrolltext.displayicon = false;
   cotimer.millis = millis();
   while (millis() - cotimer.millis < 10000) {
     matrix->clear();
-    display_weatherIcon();
+    display_weatherIcon(weather.currentIcon);
     display_temperature();
     display_showStatus();
     matrix->show();
@@ -740,20 +750,15 @@ COROUTINE(showWeatherDaily) {
   alertflash.color = hex2rgb(weather_daily_color.value());
   alertflash.laps = 1;
   alertflash.active = true;
+  strncpy(scrolltext.icon, weather.dayIcon, 4);
   COROUTINE_AWAIT(!alertflash.active);
   scrolltext.message = capString((String)"Today: " + weather.dayDescription + " Humidity " + weather.dayHumidity + "% Wind " + int(weather.dayWindSpeed) + "/" + int(weather.dayWindGust));
   scrolltext.color = hex2rgb(weather_daily_color.value());
   scrolltext.active = true;
   scrolltext.displayicon = true;
   COROUTINE_AWAIT(!scrolltext.active);
+  scrolltext.displayicon = false;
   cotimer.millis = millis();
-  while (millis() - cotimer.millis < 10000) {
-    matrix->clear();
-    display_weatherIcon();
-    display_showStatus();
-    matrix->show();
-    COROUTINE_DELAY(50);
-  }
   weather.lastdailyshown = systemClock.getNow();
   cotimer.show_weather_daily_ready = false;
   displaytoken.resetToken(8);
@@ -764,34 +769,33 @@ COROUTINE(showAirquality) {
   COROUTINE_LOOP() {
   COROUTINE_AWAIT(cotimer.show_airquality_ready && show_airquality.isChecked() && displaytoken.isReady(9));
   displaytoken.setToken(9);
-  uint32_t color;
-  if (airquality_fixed.isChecked())
+  uint16_t color;
+  if (use_fixed_aqicolor.isChecked())
     color = hex2rgb(airquality_color.value());
-  else
-    switch weather.aqi {
-    case 1:
-	color = GREEN;
-	break;
-    case 2:
-	color = YELLOW;
-	break;
-    case 3:
-	color = ORANGE;
-	break;
-    case 4:
-	color = RED;
-	break;
-    case 5:
-	color = PURPLE;
-	break;
+  else {
+    if (weather.currentaqi == 1)
+        color = GREEN;
+    else if (weather.currentaqi == 2)
+        color = YELLOW;
+    else if (weather.currentaqi == 3)
+        color = ORANGE;
+    else if (weather.currentaqi == 4)
+        color = RED;
+    else if (weather.currentaqi == 5)
+        color = PURPLE;
+    else
+        color = WHITE;
+  }
+  Serial.println((String)"Color: " + color);
   alertflash.color = color;
+  scrolltext.color = color;
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = capString((String)"Air Quality: ");
-  scrolltext.color = color;
+  scrolltext.message = (String) "Air Quality: " + air_quality[weather.currentaqi];
+  Serial.println((String)"STcolor: " + scrolltext.color);
+  scrolltext.displayicon = false;
   scrolltext.active = true;
-  scrolltext.displayicon = true;
   COROUTINE_AWAIT(!scrolltext.active);
   cotimer.millis = millis();
   weather.lastaqishown = systemClock.getNow();
@@ -816,6 +820,7 @@ COROUTINE(showAlerts) {
   scrolltext.message = (String)alerts.description1;
   scrolltext.color = RED;
   scrolltext.active = true;
+  scrolltext.displayicon = false;
   COROUTINE_AWAIT(!scrolltext.active);
   alerts.lastshown = systemClock.getNow();
   cotimer.show_alert_ready = false;
@@ -826,7 +831,7 @@ COROUTINE(showAlerts) {
 COROUTINE(print_debugData) {
   COROUTINE_LOOP() {
     COROUTINE_DELAY_SECONDS(15);
-    COROUTINE_AWAIT(serialdebug.isChecked() && displaytoken.isReady(0));
+    COROUTINE_AWAIT(serialdebug.isChecked());
     debug_print("----------------------------------------------------------------", true);
     printSystemZonedTime();
     acetime_t now = systemClock.getNow();
@@ -838,10 +843,12 @@ COROUTINE(print_debugData) {
     String wage = elapsedTime(now - weather.timestamp);
     String wlt = elapsedTime(now - checkweather.lastattempt);
     String alt = elapsedTime(now - checkalerts.lastattempt);
-    String wls = elapsedTime(now - weather.lastshown);
+    String wls = elapsedTime((now - weather.lastshown) - (show_weather_interval.value()*60));
     String als = elapsedTime(now - alerts.lastshown);
     String alg = elapsedTime(now - checkalerts.lastsuccess);
     String wlg = elapsedTime(now - checkweather.lastsuccess);
+    String alq = elapsedTime(now - checkaqi.lastsuccess);
+    String alh = elapsedTime((now - weather.lastaqishown) - (airquality_interval.value() * 60));
     String lst = elapsedTime(now - systemClock.getLastSyncTime());
     String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME * 60);
     String lip = (WiFi.localIP()).toString();
@@ -860,12 +867,13 @@ COROUTINE(print_debugData) {
     debug_print((String) "Loc - SavedLat:" + preferences.getString("lat", "") + " | SavedLon:" + preferences.getString("lon", "") + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
     debug_print((String) "IPGeo - Complete:" + yesno[checkipgeo.complete] + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
     debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
-    debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | LastShown:" + wls + " | Age:" + wage, true);
-    debug_print((String) "Air Quality - Aqi:" + air_quality[weather.aqi] + " | Co:" + weather.carbon_monoxide + " | No:" + weather.nitrogen_monoxide + " | No2:" + weather.nitrogen_dioxide + " | Ozone:" + weather.ozone + " | So2:" + weather.sulfer_dioxide + " | Pm2.5:" + weather.particulates_small + " | Pm10:" + weather.particulates_medium + " | Ammonia:" + weather.ammonia, true);
+    debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | NextShow:" + wage, true);
+    debug_print((String) "Air Quality - Aqi:" + air_quality[weather.currentaqi] + " | Co:" + weather.carbon_monoxide + " | No:" + weather.nitrogen_monoxide + " | No2:" + weather.nitrogen_dioxide + " | Ozone:" + weather.ozone + " | So2:" + weather.sulfer_dioxide + " | Pm2.5:" + weather.particulates_small + " | Pm10:" + weather.particulates_medium + " | Ammonia:" + weather.ammonia + " | LastSuccess:" + alq + " | NextShow:" + alh, true);
     debug_print((String) "Alerts - Active:" + yesno[alerts.active] + " | Watch:" + yesno[alerts.inWatch] + " | Warn:" + yesno[alerts.inWarning] + " | LastTry:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
     debug_print((String) "Location: " + geocode.city + ", " + geocode.state + ", " + geocode.country, true);
     if (alerts.active)
       debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
+    debug_print(displaytoken.showTokens(), true);
   }
 }
 
@@ -1004,6 +1012,16 @@ COROUTINE(miscScrollers) {
   {
     COROUTINE_AWAIT(iotWebConf.getState() == 1 || resetme || scrolltext.showingip);
     COROUTINE_AWAIT((millis() - scrolltext.resetmsgtime) > T1M*1000 && displaytoken.isReady(4));
+    if (scrolltext.showingcfg) 
+    {
+      displaytoken.setToken(4);
+      scrolltext.message = "Settings Updated";
+      scrolltext.color = GREEN;
+      scrolltext.active = true;
+      COROUTINE_AWAIT(!scrolltext.active);
+      scrolltext.showingcfg = false;
+      displaytoken.resetToken(4);
+    }
     if (scrolltext.showingip) 
     {
       displaytoken.setToken(4);
@@ -1018,16 +1036,6 @@ COROUTINE(miscScrollers) {
     {
       displaytoken.setToken(4);
       scrolltext.showingreset = true;
-      showDate.suspend();
-      showWeather.suspend();
-      showAlerts.suspend();
-      showClock.suspend();
-      #ifndef DISABLE_WEATHERCHECK
-      checkWeather.suspend();
-      #endif
-      #ifndef DISABLE_ALERTCHECK
-      checkAlerts.suspend();
-      #endif
       alertflash.color = RED;
       alertflash.laps = 5;
       alertflash.active = true;
@@ -1041,18 +1049,8 @@ COROUTINE(miscScrollers) {
       ESP.restart();
      }
      else if (iotWebConf.getState() == 1 && (millis() - scrolltext.resetmsgtime) > T1M*1000) {
-      displaytoken.setToken(5);
+      displaytoken.setToken(4);
       scrolltext.showingreset = true;
-      showDate.suspend();
-      showWeather.suspend();
-      showAlerts.suspend();
-      showClock.suspend();
-      #ifndef DISABLE_WEATHERCHECK
-      checkWeather.suspend();
-      #endif
-      #ifndef DISABLE_ALERTCHECK
-      checkAlerts.suspend();
-      #endif
       alertflash.color = RED;
       alertflash.laps = 5;
       alertflash.active = true;
@@ -1063,7 +1061,7 @@ COROUTINE(miscScrollers) {
       COROUTINE_AWAIT(!scrolltext.active);
       scrolltext.resetmsgtime = millis();
       scrolltext.showingreset = false;
-      displaytoken.resetToken(5);
+      displaytoken.resetToken(4);
      }
   }
 }
@@ -1092,35 +1090,33 @@ COROUTINE(coroutineManager) {
     showWeatherDaily.resume();
   else if ((!show_weather_daily.isChecked() && !showWeatherDaily.isSuspended()) || iotWebConf.getState() == 1)
     showWeatherDaily.suspend();
-  if (show_airquality.isChecked() && showAirquality.isSuspended() && iotWebConf.getState() != 1 && displaytoken.isReady(0))
-    showAirquality.resume();
-  else if ((!show_airquality.isChecked() && !showAirquality.isSuspended()) || iotWebConf.getState() == 1)
-    showAirquality.suspend();
-  if ((show_weather.isChecked() || show_weather_daily.isChecked()) && showWeather.isSuspended() && iotWebConf.getState() != 1 && iotWebConf.getState() == 4 && displaytoken.isReady(0)) {
+  if (show_airquality.isChecked() && checkAirquality.isSuspended() && iotWebConf.getState() != 1 && displaytoken.isReady(0))
+    checkAirquality.resume();
+  else if ((!show_airquality.isChecked() && !checkAirquality.isSuspended()) || iotWebConf.getState() == 1)
+    checkAirquality.suspend();
+  if ((show_weather.isChecked() || show_weather_daily.isChecked()) && checkWeather.isSuspended() && iotWebConf.getState() != 1 && iotWebConf.getState() == 4 && displaytoken.isReady(0)) {
     checkWeather.reset();
     checkWeather.resume();
   }
-  else if ((!show_weather.isChecked() && !show_weather_daily.isChecked() && !showWeather.isSuspended()) || iotWebConf.getState() == 1 || iotWebConf.getState() != 4)
+  else if ((!show_weather.isChecked() && !show_weather_daily.isChecked() && !checkWeather.isSuspended()) || iotWebConf.getState() == 1 || iotWebConf.getState() != 4)
     checkWeather.suspend();
   #ifndef DISABLE_ALERTCHECK
   if (checkAlerts.isSuspended() && iotWebConf.getState() != 1 && iotWebConf.getState() == 4 && displaytoken.isReady(0)) {
     checkAlerts.reset();
     checkAlerts.resume();
-    showAlerts.resume();
   }
-  else if (!checkAlerts.isSuspended() && (iotWebConf.getState() == 1 || iotWebConf.getState() != 4))
+  else if (!checkAlerts.isSuspended() && iotWebConf.getState() < 4)
     checkAlerts.suspend();
-    showAlerts.suspend();
   #endif
   if ((abs(now - alerts.lastshown) > (show_alert_interval.value()*T1M)) && show_alert_interval.value() != 0 && displaytoken.isReady(0) && alerts.active)
     cotimer.show_alert_ready = true;
-  if ((abs(now - weather.lastshown) > (show_weather_interval.value() * T1M)) && (abs(now - weather.timestamp)) < T2H && displaytoken.isReady(0))
+  if ((abs(now - weather.lastshown) > (show_weather_interval.value() * T1M)) && (abs(now - checkweather.lastsuccess)) < T1H + 60 && displaytoken.isReady(0))
     cotimer.show_weather_ready = true;
   if ((abs(now - showclock.datelastshown) > (show_date_interval.value() * T1H)) && displaytoken.isReady(0))
     cotimer.show_date_ready = true;
-  if ((abs(now - weather.lastdailyshown) > (show_weather_daily_interval.value() * T1H)) && (abs(now - weather.timestamp)) < T2H && displaytoken.isReady(0))
+  if ((abs(now - weather.lastdailyshown) > (show_weather_daily_interval.value() * T1H)) && (abs(now - checkweather.lastsuccess)) < T1D && displaytoken.isReady(0))
     cotimer.show_weather_daily_ready = true;  
-  if ((abs(now - weather.lastaqishown) > (airquality_interval.value() * T1M)) && (abs(now - weather.timestamp)) < T2H && displaytoken.isReady(0))
+  if ((abs(now - weather.lastaqishown) > (airquality_interval.value() * T1M)) && (abs(now - checkaqi.lastsuccess)) < T1H + 60 && displaytoken.isReady(0))
     cotimer.show_airquality_ready = true;  
   COROUTINE_YIELD();
   }
@@ -1165,8 +1161,12 @@ COROUTINE(scrollText) {
   {
       COROUTINE_AWAIT(scrolltext.active && showClock.isSuspended());
       COROUTINE_AWAIT(millis() - scrolltext.millis >= cotimer.scrollspeed-1);
-      if (!displaytoken.getToken(10)) {
+
+      if (!displaytoken.getToken(10)) 
+      {
         displaytoken.setToken(10);
+        ESP_LOGI(TAG, "Scrolltext Message: %s",scrolltext.message);
+        ESP_LOGI(TAG, "Scrolltext Color: %llu",scrolltext.color);
       }
       uint16_t size = (scrolltext.message).length() * 6;
       if (scrolltext.position >= size - size - size) {
@@ -1176,7 +1176,7 @@ COROUTINE(scrollText) {
         matrix->print(scrolltext.message);
         display_showStatus();
         if (scrolltext.displayicon)
-          display_weatherIcon();
+          display_weatherIcon(scrolltext.icon);
         matrix->show();
         scrolltext.position--;
         scrolltext.millis = millis();
@@ -1184,8 +1184,9 @@ COROUTINE(scrollText) {
       scrolltext.active = false;
       scrolltext.position = mw;
       scrolltext.displayicon = false;
+      ESP_LOGD(TAG, "Scrolltext [%s] complete",scrolltext.message);
       displaytoken.resetToken(10);
-      ESP_LOGD(TAG, "Scrolling text end");
+      
       }
   }
 }
@@ -1389,16 +1390,16 @@ void display_showStatus() {
       clr = DARKRED;
     else if (!ds)
       clr = DARKRED;
-    if (weather.aqi == 1)
+    if (weather.currentaqi == 2 && !ds)
+      aclr = DARKYELLOW;
+    else if (weather.currentaqi == 3 && !ds)
+      aclr = DARKORANGE;
+    else if (weather.currentaqi == 4 && !ds)
+      aclr = DARKRED;
+    else if (weather.currentaqi == 5 && !ds)
+      aclr = DARKPURPLE;
+    else 
       aclr = BLACK;
-    else if (weather.aqi == 2)
-      aclr = YELLOW;
-    else if (weather.aqi == 3)
-      aclr = ORANGE;
-    else if (weather.aqi == 4)
-      aclr = RED;
-    else if (weather.aqi == 5)
-      aclr = PURPLE;
     if (alerts.inWarning)
       wclr = RED;
     else if (alerts.inWatch)
@@ -1406,8 +1407,11 @@ void display_showStatus() {
     else
       wclr = BLACK;
     matrix->drawPixel(0, 7, clr);
-    matrix->drawPixel(0, 4, aclr);
-    matrix->drawPixel(0, 0, wclr);
+    matrix->drawPixel(0, 0, aclr);
+    matrix->drawPixel(0, 3, wclr);
+    matrix->drawPixel(0, 4, wclr);
+    matrix->drawPixel(mw, 3, wclr);
+    matrix->drawPixel(mw, 4, wclr);
     if (current.oldaqiclr != aclr || current.oldstatusclr != clr || current.oldstatuswclr != wclr) {
       matrix->show();
       current.oldstatusclr = clr;
@@ -1416,18 +1420,18 @@ void display_showStatus() {
     }
 }
 
-void display_weatherIcon() {
+void display_weatherIcon(char* icon) {
     bool night;
     char dn;
     char code1;
     char code2;
-    dn = weather.currentIcon[2];
+    dn = icon[2];
     if ((String)dn == "n")
       night = true;
     else
       night = false;
-    code1 = weather.currentIcon[0];
-    code2 = weather.currentIcon[1];
+    code1 = icon[0];
+    code2 = icon[1];
     if (code1 == '0' && code2 == '1')
     { // clear
       if (night)
@@ -1598,9 +1602,11 @@ void setup () {
   AlertFlash.setName("alertflash");
   showWeather.setName("show_weather");
   showAlerts.setName("show_alerts");
-  #ifndef DISABLE_WEATHERCHECK
   checkWeather.setName("check_weather");
-  #endif
+  showAirquality.setName("show_air");
+  showWeatherDaily.setName("show_weatherday");
+  checkAirquality.setName("check_air");
+  checkGeocode.setName("check_geocode");
   #ifndef DISABLE_ALERTCHECK
   checkAlerts.setName("check_alerts");
   #endif
@@ -1646,9 +1652,7 @@ void setup () {
   group3.addItem(&use_fixed_aqicolor);
   group3.addItem(&airquality_color);
   group3.addItem(&airquality_interval);  
-  group3.addItem(&weather_check_interval);
   group3.addItem(&show_alert_interval);
-  group3.addItem(&alert_check_interval);
   group3.addItem(&weatherapi);
   group4.addItem(&use_fixed_loc);
   group4.addItem(&fixedLat);
@@ -1702,15 +1706,14 @@ void setup () {
   checkalerts.lastsuccess = bootTime - T1Y + 60;
   weather.timestamp = bootTime - T1Y + 60;
   checkweather.lastattempt = bootTime - T1Y + 60;
-  weather.lastshown = bootTime - T1Y + 60;
+  weather.lastshown = bootTime;
   checkweather.lastsuccess = bootTime - T1Y + 60;
   gps.lat = "0";
   gps.lon = "0";
   scrolltext.position = mw;
   ESP_EARLY_LOGD(TAG, "Generating random numbers for show delays..");
-  weather.lastshown = bootTime + random(STARTSHOWDELAY_LOW,STARTSHOWDELAY_HIGH);
-  weather.lastdailyshown = bootTime + random(STARTSHOWDELAY_LOW,STARTSHOWDELAY_HIGH);
-  weather.lastaqishown = bootTime + random(STARTSHOWDELAY_LOW,STARTSHOWDELAY_HIGH);
+  weather.lastdailyshown = bootTime;//  +random(60 * 10, 60 * 60 * show_weather_daily_interval.value());
+  weather.lastaqishown = bootTime - T1Y + 60;//  +random(60 * 1, 60 * airquality_interval.value());
   if (use_fixed_loc.isChecked())
     ESP_EARLY_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
   processLoc();
@@ -1746,9 +1749,7 @@ void configSaved()
     resetme = true;
   if (!serialdebug.isChecked())
     Serial.println("Serial debug info has been disabled.");
-  scrolltext.message = "Settings Saved";
-  scrolltext.color = GREEN;
-  scrolltext.active = true;
+  scrolltext.showingcfg = true;
 }
 
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
@@ -1789,7 +1790,7 @@ uint8_t calculateAqi() {
   int16_t aqi;
 }
 
-uint16_t calcaqi(double i_hi, double i_low, double c_hi, double c_low) {
+uint16_t calcaqi(double c, double i_hi, double i_low, double c_hi, double c_low) {
   return (i_hi - i_low)/(c_hi - c_low)*(c - c_low) + i_low;
 }
 
@@ -1865,7 +1866,7 @@ void fillGeocodeFromJson(Geocode* geocode) {
 }
 
 void fillAqiFromJson(Weather* weather) {
-  weather->aqi = aqiJson["list"][0]["main"]["aqi"];
+  weather->currentaqi = aqiJson["list"][0]["main"]["aqi"];
   weather->carbon_monoxide = aqiJson["list"][0]["components"]["co"];
   weather->nitrogen_monoxide = aqiJson["list"][0]["components"]["no"];
   weather->nitrogen_dioxide = aqiJson["list"][0]["components"]["no2"];

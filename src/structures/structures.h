@@ -43,7 +43,7 @@ struct Weather {
   double dayMoonPhase;
   int dayWindSpeed;
   int dayWindGust;
-  uint8_t aqi;
+  uint8_t currentaqi;
   double carbon_monoxide;
   double nitrogen_monoxide;
   double nitrogen_dioxide;
@@ -151,6 +151,8 @@ struct ScrollText {
   bool tempshown;
   bool showingreset;
   bool showingip;
+  bool showingcfg;
+  char icon[5];
   String message;
   uint16_t color;
   int16_t position;
@@ -205,28 +207,29 @@ struct Current {
 class DisplayToken
 {
   public:
+  
     String showTokens() {
       String buf;
       if (token1)
-        buf = buf + "1,";
+        buf = buf + "Date(1),";
       if (token2)
-        buf = buf + "2,";
+        buf = buf + "CurWeather(2),";
       if (token3)
-        buf = buf + "3,";
+        buf = buf + "Alerts(3),";
       if (token4)
-        buf = buf + "4,";
+        buf = buf + "Misc(4),";
       if (token5)
         buf = buf + "5,";
       if (token6)
-        buf = buf + "6,";
+        buf = buf + "AlertFlash(6),";
       if (token7)
         buf = buf + "7,";
       if (token8)
-        buf = buf + "8,";
+        buf = buf + "DayWeather(8),";
       if (token9)
-        buf = buf + "9,";
+        buf = buf + "AirQual(9),";
       if (token10)
-        buf = buf + "10";
+        buf = buf + "Scrolltext(10)";
       if (buf.length() == 0)
         buf = "0";
       return buf;
@@ -271,7 +274,7 @@ class DisplayToken
 
     void setToken(uint8_t position)
     {
-      ESP_LOGD(TAG, "Setting display token: %d", position);
+      ESP_LOGD(TAG, "Setting display token: %s(%d)", name[position], position);
       switch (position) {
         case 1:
           token1 = true;
@@ -308,7 +311,7 @@ class DisplayToken
 
     void resetToken(uint8_t position)
     {
-      ESP_LOGD(TAG, "Releasing display token: %d", position);
+      ESP_LOGD(TAG, "Releasing display token: %s(%d)", name[position],  position);
       switch (position) {
         case 1:
           token1 = false;
@@ -422,6 +425,7 @@ class DisplayToken
         }
     }
   private:
+    char name[11][32] = {"", "Date", "CurWeather", "Alerts", "Misc", "N/A", "AlertFlash", "", "DayWeather", "AirQual", "ScrollText"};
     bool token1;
     bool token2;
     bool token3;

@@ -89,9 +89,9 @@ static char clock_status[][12] = {"Success", "Timeout", "Waiting"};
 static char yesno[][4] = {"No", "Yes"};
 static char truefalse[][6] = {"False", "True"};
 
-#include "src/structures/structures.h"
-#include "src/colors/colors.h"
-#include "src/bitmaps/bitmaps.h"
+#include "structures.h"
+#include "colors.h"
+#include "bitmaps.h"
 
 // Global Variables & Class Objects
 const char thingName[] = "LEDSMARTCLOCK";                 // Default SSID used for new setup

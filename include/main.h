@@ -67,6 +67,9 @@ static const char* CONFIGVER = "4";// config version (advance if iotwebconf conf
 #define T1D 24*60*60L  // 1 day
 #define T1Y 365*24*60*60L  // 1 year
 
+
+#include "bitmaps.h"
+
 // AceTime refs
 using namespace ace_routine;
 using namespace ace_time;
@@ -75,6 +78,8 @@ using ace_time::clock::DS3231Clock;
 using ace_time::clock::SystemClockLoop;
 using ace_routine::CoroutineScheduler;
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
+
+#include "structures.h"
 
 // defs
 static char intervals[][9] = {"31536000", "2592000", "604800", "86400", "3600", "60", "1"};
@@ -86,10 +91,6 @@ static char metric_units[][7] = {"\u2103", "Kph", "Meters"};
 static char clock_status[][12] = {"Success", "Timeout", "Waiting"};
 static char yesno[][4] = {"No", "Yes"};
 static char truefalse[][6] = {"False", "True"};
-
-#include "structures.h"
-#include "colors.h"
-#include "bitmaps.h"
 
 // Global Variables & Class Objects
 const char thingName[] = "LEDSMARTCLOCK";                 // Default SSID used for new setup
@@ -138,6 +139,8 @@ uint8_t userbrightness;         // Current saved brightness setting (from iotweb
 bool firsttimefailsafe;
 bool httpbusy;
 
+#include "colors.h"
+
 // Function Declarations
 void processLoc();
 void wifiConnected();
@@ -170,3 +173,8 @@ String getSystemZonedDateTimeString();
 bool readyToDisplay();
 const char *ordinal_suffix(int n);
 char *cleanString(const char *p);
+
+#include "iowebconf.h"
+#include "gpsclock.h"
+#include "coroutines.h"
+#include "html.h"

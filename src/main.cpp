@@ -4,10 +4,7 @@
 // https://github.com/cosmicc/led_clock         // firmware version
 
 #include "main.h"
-#include "iowebconf.h"
-#include "gpsclock.h"
-#include "coroutines.h"
-#include "html.h"
+
 
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock (Everything is coroutines now)
 

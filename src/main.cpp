@@ -26,7 +26,7 @@
 #include <Adafruit_GFX.h>
 #include <FastLED_NeoMatrix.h>
 #include <FastLED.h>
-#include <HTTPClient.h>  //TODO: Replace with async
+#include <HTTPClient.h>
 #include <Arduino_JSON.h>
 
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock (Everything is coroutines now)
@@ -35,13 +35,16 @@
 static const char* CONFIGVER = "3";// config version (advance if iotwebconf config additions to reset defaults)
 
 #undef COROUTINE_PROFILER          // Enable the coroutine debug profiler
-#undef COROUTINE_STATES
+#define COROUTINE_STATES
 #undef DEBUG_LIGHT                 // Show light debug serial messages
+#undef DISABLE_WEATHERCHECK
+#undef DISABLE_AIRCHECK
 #undef DISABLE_ALERTCHECK          // Disable Weather Alert checks
 #undef DISABLE_IPGEOCHECK          // Disable IPGEO checks
-
 #define PROFILER_DELAY 10          // Coroutine profiler delay in seconds
 #define WDT_TIMEOUT 30             // Watchdog Timeout seconds
+#define CONFIG_PIN 19              // Config reset button pin
+#define STATUS_PIN LED_BUILTIN
 #define GPS_BAUD 9600              // GPS UART gpsSpeed
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
@@ -137,6 +140,7 @@ bool resetme;                   // reset to factory defaults
 acetime_t bootTime;             // boot time
 String timesource = "none";     // Primary timeclock source gps/ntp
 uint8_t userbrightness;         // Current saved brightness setting (from iotwebconf)
+bool firsttimefailsafe;
 
 // Function Declarations
 void processLoc();
@@ -167,6 +171,8 @@ ace_time::ZonedDateTime getSystemZonedTime();
 uint16_t calcbright(uint16_t bl);
 String getSystemZonedDateString();
 bool readyToDisplay();
+const char *ordinal_suffix(int n);
+char *cleanString(const char *p);
 
 // IotWebConf User custom settings reference
 // bool debugserial
@@ -204,7 +210,6 @@ bool readyToDisplay();
 // bool show_airquality
 // color airquality_color              // Weather text color
 // uint8_t airquality_show_interval;   // Time between current weather displays
-// uint8_t weather_check_interval;     // Time between current weather checks
 
 // uint8_t alert_check_interval;       // Time between alert checks
 // uint8_t alert_show_interval;        // Time between alert displays
@@ -212,6 +217,7 @@ bool readyToDisplay();
 
 // Group 4 (Location)
 // bool used_fixed_loc;                // Use fixed GPS coordinates
+// bool scoll_location;                // Scroll location on change
 // String fixedLat;                    // Fixed GPS latitude
 // String fixedLon;                    // Fixed GPS Longitude
 // String ipgeoapi                     // IP Geolocation API
@@ -399,7 +405,7 @@ class GPSClock: public Clock {
       setTimeSource("ntp");
       return epochSeconds;
     } else {
-        ESP_LOGE("0 Ntp second recieved");
+        ESP_LOGE(TAG, "0 Ntp second recieved");
         return kInvalidSeconds;
     }
   }
@@ -537,8 +543,9 @@ COROUTINE(showClock) {
 
 COROUTINE(checkAirquality) {
   COROUTINE_LOOP() {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkaqi.lastsuccess) > (airquality_interval.value() * T1M) && abs(systemClock.getNow() - checkaqi.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0));
+    COROUTINE_AWAIT(abs(systemClock.getNow() - checkaqi.lastsuccess) > (airquality_interval.value() * T1M) && abs(systemClock.getNow() - checkaqi.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0) && !firsttimefailsafe);
     ESP_LOGI(TAG, "Checking air quality conditions...");
+    checkaqi.active = true;
     checkaqi.retries = 1;
     checkaqi.jsonParsed = false;
     while (!checkaqi.jsonParsed && (checkaqi.retries <= 2))
@@ -589,15 +596,17 @@ COROUTINE(checkAirquality) {
       checkaqi.lastsuccess = systemClock.getNow();
     }
     checkaqi.lastattempt = systemClock.getNow();
+    checkaqi.active = false;
   }
 }
 
 COROUTINE(checkWeather) {
   COROUTINE_LOOP() {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkweather.lastsuccess) > (show_weather_interval.value() * T1M) && abs(systemClock.getNow() - checkweather.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0));
+    COROUTINE_AWAIT(abs(systemClock.getNow() - checkweather.lastsuccess) > (show_weather_interval.value() * T1M) && abs(systemClock.getNow() - checkweather.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0) && !firsttimefailsafe);
     ESP_LOGI(TAG, "Checking weather forecast...");
     checkweather.retries = 1;
     checkweather.jsonParsed = false;
+    checkweather.active = true;
     while (!checkweather.jsonParsed && (checkweather.retries <= 2))
     {
       COROUTINE_DELAY(1000);
@@ -646,6 +655,7 @@ COROUTINE(checkWeather) {
       checkweather.lastsuccess = systemClock.getNow();
     }
     checkweather.lastattempt = systemClock.getNow();
+    checkweather.active = false;
   }
 }
 
@@ -655,6 +665,7 @@ COROUTINE(checkAlerts) {
   COROUTINE_LOOP() {
     COROUTINE_AWAIT(abs(systemClock.getNow() - checkalerts.lastsuccess) > (5 * T1M) && (systemClock.getNow() - checkalerts.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && displaytoken.isReady(0));
     ESP_LOGI(TAG, "Checking weather alerts...");
+    checkalerts.active;
     checkalerts.retries = 1;
     checkalerts.jsonParsed = false;
     while (!checkalerts.jsonParsed && (checkalerts.retries <= 2))
@@ -695,13 +706,14 @@ COROUTINE(checkAlerts) {
       checkalerts.lastsuccess = systemClock.getNow();
     }
     checkalerts.lastattempt = systemClock.getNow();
+    checkipgeo.active = false;
   }
 }
 #endif
 
 COROUTINE(showDate) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(cotimer.show_date_ready && show_date.isChecked() && displaytoken.isReady(1));
+  COROUTINE_AWAIT(cotimer.show_date_ready && show_date.isChecked() && iotWebConf.getState() != 1 && displaytoken.isReady(1));
   displaytoken.setToken(1);
   scrolltext.message = getSystemZonedDateString();
   scrolltext.color = hex2rgb(datecolor.value());
@@ -731,9 +743,9 @@ COROUTINE(showWeather) {
   cotimer.millis = millis();
   while (millis() - cotimer.millis < 10000) {
     matrix->clear();
-    display_weatherIcon(weather.currentIcon);
     display_temperature();
     display_showStatus();
+    display_weatherIcon(weather.currentIcon);
     matrix->show();
     COROUTINE_DELAY(50);
   }
@@ -786,14 +798,12 @@ COROUTINE(showAirquality) {
     else
         color = WHITE;
   }
-  Serial.println((String)"Color: " + color);
   alertflash.color = color;
   scrolltext.color = color;
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
   scrolltext.message = (String) "Air Quality: " + air_quality[weather.currentaqi];
-  Serial.println((String)"STcolor: " + scrolltext.color);
   scrolltext.displayicon = false;
   scrolltext.active = true;
   COROUTINE_AWAIT(!scrolltext.active);
@@ -878,8 +888,8 @@ COROUTINE(print_debugData) {
 }
 
 COROUTINE(checkGeocode) {
-  COROUTINE_BEGIN();
-  COROUTINE_AWAIT(checkgeocode.active && checkipgeo.complete && abs(systemClock.getNow() - checkgeocode.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0));
+  COROUTINE_LOOP() {
+  COROUTINE_AWAIT(checkgeocode.active && checkipgeo.complete && abs(systemClock.getNow() - checkgeocode.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0) && !firsttimefailsafe);
   ESP_LOGI(TAG, "Checking Geocode Location...");
   checkgeocode.retries = 1;
   checkgeocode.jsonParsed = false;
@@ -935,17 +945,18 @@ COROUTINE(checkGeocode) {
   }
   checkgeocode.lastattempt = systemClock.getNow();
   checkgeocode.active = false;
-  COROUTINE_YIELD();
+  }
 }
 
 #ifndef DISABLE_IPGEOCHECK
 COROUTINE(checkIpgeo) {
   COROUTINE_BEGIN();
-  COROUTINE_AWAIT(iotWebConf.getState() == 4 && (ipgeoapi.value())[0] != '\0' && displaytoken.isReady(0));
+  COROUTINE_AWAIT(iotWebConf.getState() == 4 && (ipgeoapi.value())[0] != '\0' && displaytoken.isReady(0) && !firsttimefailsafe);
   while (!checkipgeo.complete)
   {
     COROUTINE_AWAIT(abs(systemClock.getNow() - checkipgeo.lastattempt) > T1M);
     ESP_LOGI(TAG, "Checking IP Geolocation...");
+    checkipgeo.active = true;
     checkipgeo.retries = 1;
     checkipgeo.jsonParsed = false;
     while (!checkipgeo.jsonParsed && (checkipgeo.retries <= 1))
@@ -998,6 +1009,7 @@ COROUTINE(checkIpgeo) {
       fillIpgeoFromJson(&ipgeo);
       checkipgeo.lastsuccess = systemClock.getNow();
       checkipgeo.complete = true;
+      checkipgeo.active = false;
       processLoc();
       processTimezone();
     }
@@ -1070,8 +1082,10 @@ COROUTINE(coroutineManager) {
   COROUTINE_LOOP() 
   { 
   acetime_t now = systemClock.getNow();
+  if (iotWebConf.getState() == 1)
+      firsttimefailsafe = true;
   if (!displaytoken.isReady(0))
-    showClock.suspend();
+      showClock.suspend();
   if (showClock.isSuspended() && displaytoken.isReady(0))
     showClock.resume();
   if (serialdebug.isChecked() && print_debugData.isSuspended() && displaytoken.isReady(0))
@@ -1117,7 +1131,7 @@ COROUTINE(coroutineManager) {
   if ((abs(now - weather.lastdailyshown) > (show_weather_daily_interval.value() * T1H)) && (abs(now - checkweather.lastsuccess)) < T1D && displaytoken.isReady(0))
     cotimer.show_weather_daily_ready = true;  
   if ((abs(now - weather.lastaqishown) > (airquality_interval.value() * T1M)) && (abs(now - checkaqi.lastsuccess)) < T1H + 60 && displaytoken.isReady(0))
-    cotimer.show_airquality_ready = true;  
+    cotimer.show_airquality_ready = true;
   COROUTINE_YIELD();
   }
 }
@@ -1125,7 +1139,7 @@ COROUTINE(coroutineManager) {
 COROUTINE(IotWebConf) {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(displaytoken.isReady(0) && millis() - cotimer.iotloop > 5);
+    COROUTINE_AWAIT(millis() - cotimer.iotloop > 5);
     iotWebConf.doLoop();
     cotimer.iotloop = millis();
   }
@@ -1174,7 +1188,7 @@ COROUTINE(scrollText) {
         matrix->setCursor(scrolltext.position, 0);
         matrix->setTextColor(scrolltext.color);
         matrix->print(scrolltext.message);
-        display_showStatus();
+        //display_showStatus();
         if (scrolltext.displayicon)
           display_weatherIcon(scrolltext.icon);
         matrix->show();
@@ -1361,42 +1375,42 @@ void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) {
 }
 
 void display_showStatus() {
-    uint16_t clr;
+    uint16_t sclr;
     uint16_t wclr;
     uint16_t aclr;
     bool ds = disable_status.isChecked();
     if (ds)
-      clr = BLACK;
+      sclr = BLACK;
     acetime_t now = systemClock.getNow();
     if (now - systemClock.getLastSyncTime() > (NTPCHECKTIME*60) + 60)
-        clr = DARKRED;
+        sclr = DARKRED;
     else if (timesource == "gps" && gps.fix && (now - systemClock.getLastSyncTime()) <= 600)
-        clr = BLACK;
-    else if (timesource == "gps" && !gps.fix && (now - systemClock.getLastSyncTime()) <= 600 && !ds)
-        clr = DARKBLUE;
-    else if (timesource == "gps" && !gps.fix && (now - systemClock.getLastSyncTime()) > 600 && !ds)
-        clr = DARKPURPLE;
-    else if (gps.fix && timesource == "ntp" && !ds)
-        clr = DARKPURPLE;
+        sclr = BLACK;
+    else if (timesource == "gps" && !gps.fix && (now - systemClock.getLastSyncTime()) <= 600)
+        sclr = DARKBLUE;
+    else if (timesource == "gps" && !gps.fix && (now - systemClock.getLastSyncTime()) > 600)
+        sclr = DARKPURPLE;
+    else if (gps.fix && timesource == "ntp")
+        sclr = DARKPURPLE;
     else if (timesource == "ntp" && iotWebConf.getState() == 4 && !ds)
-      clr = DARKGREEN;
-    else if (iotWebConf.getState() == 3 && !ds)  // connecting
-      clr = DARKYELLOW; 
-    else if (iotWebConf.getState() <= 2 && !ds)  // boot, apmode, notconfigured
-      clr = DARKMAGENTA;
-    else if (iotWebConf.getState() == 4 && !ds)  // online
-      clr = DARKCYAN;
-    else if (iotWebConf.getState() == 5 && !ds) // offline
-      clr = DARKRED;
+      sclr = DARKGREEN;
+    else if (iotWebConf.getState() == 3)  // connecting
+      sclr = DARKYELLOW; 
+    else if (iotWebConf.getState() <= 2)  // boot, apmode, notconfigured
+      sclr = DARKMAGENTA;
+    else if (iotWebConf.getState() == 4)  // online
+      sclr = DARKCYAN;
+    else if (iotWebConf.getState() == 5) // offline
+      sclr = DARKRED;
     else if (!ds)
-      clr = DARKRED;
-    if (weather.currentaqi == 2 && !ds)
+      sclr = DARKRED;
+    if (weather.currentaqi == 2)
       aclr = DARKYELLOW;
-    else if (weather.currentaqi == 3 && !ds)
+    else if (weather.currentaqi == 3)
       aclr = DARKORANGE;
-    else if (weather.currentaqi == 4 && !ds)
+    else if (weather.currentaqi == 4)
       aclr = DARKRED;
-    else if (weather.currentaqi == 5 && !ds)
+    else if (weather.currentaqi == 5)
       aclr = DARKPURPLE;
     else 
       aclr = BLACK;
@@ -1406,15 +1420,19 @@ void display_showStatus() {
       wclr = YELLOW;
     else
       wclr = BLACK;
-    matrix->drawPixel(0, 7, clr);
-    matrix->drawPixel(0, 0, aclr);
-    matrix->drawPixel(0, 3, wclr);
-    matrix->drawPixel(0, 4, wclr);
-    matrix->drawPixel(mw, 3, wclr);
-    matrix->drawPixel(mw, 4, wclr);
-    if (current.oldaqiclr != aclr || current.oldstatusclr != clr || current.oldstatuswclr != wclr) {
+    if (!disable_status.isChecked())
+      matrix->drawPixel(0, 7, sclr);
+    if (show_airquality.isChecked())
+      matrix->drawPixel(0, 0, aclr);
+    if (!scrolltext.active) {
+      matrix->drawPixel(0, 3, wclr);
+      matrix->drawPixel(0, 4, wclr);
+      matrix->drawPixel(mw-1, 3, wclr);
+      matrix->drawPixel(mw-1, 4, wclr);
+    }
+    if (current.oldaqiclr != aclr || current.oldstatusclr != sclr || current.oldstatuswclr != wclr) {
       matrix->show();
-      current.oldstatusclr = clr;
+      current.oldstatusclr = sclr;
       current.oldstatuswclr = wclr;
       current.oldaqiclr = aclr;
     }
@@ -1571,7 +1589,6 @@ String getSystemZonedDateTimeString() {
 // System Loop
 void loop() {
   esp_task_wdt_reset();
-  //Serial.println(displaytoken.showTokens());
 #ifdef COROUTINE_PROFILER
   CoroutineScheduler::loopWithProfiler();
   #else
@@ -1668,6 +1685,8 @@ void setup () {
   iotWebConf.setConfigSavedCallback(&configSaved);
   iotWebConf.setFormValidator(&formValidator);
   iotWebConf.getApTimeoutParameter()->visible = true;
+  iotWebConf.setStatusPin(STATUS_PIN);
+  iotWebConf.setConfigPin(CONFIG_PIN);
   iotWebConf.init();
   gurl = (String)"https://api.ipgeolocation.io/ipgeo?apiKey=" + ipgeoapi.value();
   ipgeo.tzoffset = 127;
@@ -1686,7 +1705,7 @@ void setup () {
       systemClock.loop();
       debug_print("Waiting for Light Sensor...", true);
   }
-  ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
+  //ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
   Tsl.on();
   Tsl.setSensitivity(true, Tsl2561::EXP_14);
   ESP_EARLY_LOGD(TAG, "Initializing GPS Module...");
@@ -1750,6 +1769,7 @@ void configSaved()
   if (!serialdebug.isChecked())
     Serial.println("Serial debug info has been disabled.");
   scrolltext.showingcfg = true;
+  firsttimefailsafe = false;
 }
 
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
@@ -1776,18 +1796,6 @@ void wifiConnected() {
   systemClock.forceSync();
   scrolltext.showingip = true;
   checkgeocode.active = true;
-}
-	
-uint8_t calculateAqi() {
-  char pm25_clow[][8] = {0, 12.1, 35.5, 55.5, 150.5, 250.5, 350.5};
-  char pm25_chi[][8] = {12.0, 35.4, 55.4, 150.4, 250.4, 350.4, 500.4};
-  int32_t highestaqi;
-  double c;
-  double c_low;
-  double c_hi;
-  double i_low;
-  double i_hi;
-  int16_t aqi;
 }
 
 uint16_t calcaqi(double c, double i_hi, double i_low, double c_hi, double c_low) {
@@ -1985,6 +1993,8 @@ acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds) {
     return 20;
   else if (bl == 5)
     return 30;
+  else
+    return 0;
   }
 
 const char* ordinal_suffix(int n)
@@ -1996,7 +2006,6 @@ const char* ordinal_suffix(int n)
         if (ord > 3) { ord = 0; }
         return suffixes[ord];
 }
-
 
 char* cleanString(const char* p) {        //char *buf;
     char* q = (char *)p;
@@ -2018,101 +2027,110 @@ void handleRoot()
   if (iotWebConf.handleCaptivePortal())
     return;
   acetime_t now = systemClock.getNow();
-  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/><body style=\"background-color:#222222; font-family: Verdana, sans-serif;\">";
-  s += "<style>a:link {color: #11ffff;background-color: transparent;text-decoration: none;} a:visited {color: #11ffff;background-color: transparent;text-decoration: none;} a:hover {color: #11ffff;background-color: transparent;text-decoration: underline;} a:active {color: #11ffff;background-color: transparent;text-decoration: underline;}</style>";
-  s += "<span style=\"color: #ffffff; background-color: #222222;\"><table style=\"font-size: 14px; width: 500px; margin-left: auto; margin-right: auto; height: 22px;\"><tbody><tr><td style=\"width: 500px;\"><blockquote><h2 style=\"text-align: center;\"><span style=\"color: #aa11ff;\">LED Smart Clock</span><p style=\"text-align: center;\"></h2><span style=\"color: #ffff99;\"><h3><em><strong>";
-  s += getSystemZonedDateTimeString();
-  s += "</strong></h3></em></span></p></blockquote><p style=\"text-align: center;\"><a title=\"Configure Settings\" href=\"config\">->[ Configure Settings ]<-</a></p></td></tr></tbody></table><table style=\"width: 518px; height: 869px; margin-left: auto; margin-right: auto;\" border=\"0\"><tbody><tr style=\"height: 20px;\"><td style=\"height: 20px; text-align: right; width: 247px;\">Firmware Version:</td><td style=\"height: 20px; width: 255px;\">";
-  s += (String)VERSION;
-  s += "</td></tr><tr style=\"height: 20px;\"><td style=\"height: 20px; text-align: right; width: 247px;\">Uptime:</td><td style=\"height: 20px; width: 255px;\">";
-  s += elapsedTime(now - bootTime);
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Time Source:</td><td style=\"height: 2px; width: 255px;\">";
-  timesource.toUpperCase();
-  s += timesource;
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current LED Brightness:</td><td style=\"height: 2px; width: 255px;\">";
-  s += map(current.brightness, (5+userbrightness), (LUXMAX + userbrightness), 1, 100);
-  s += "/100</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Timezone Offset:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)current.tzoffset;
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Time Sync:</td><td style=\"height: 2px; width: 255px;\">";
-  s += elapsedTime(now - systemClock.getLastSyncTime());
-  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Latitude:</td><td style=\"height: 2px; width: 255px;\">";
-  s += current.lat;
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Longitude:</td><td style=\"height: 2px; width: 255px;\">";
-  s += current.lon;
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Location Source:</td><td style=\"height: 2px; width: 255px;\">";
-  s += current.locsource;
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Location:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)geocode.city + ", " + geocode.state + ", " + geocode.country;
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix:</td><td style=\"height: 2px; width: 255px;\">";
-  if (gps.fix)
-    s += "Yes";
-  else
-    s += "No";
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Aquired Sattelites:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)gps.sats;
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix Age:</td><td style=\"height: 2px; width: 255px;\">";
-  s += elapsedTime(now - gps.timestamp);
-  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Location Age:</td><td style=\"height: 2px; width: 255px;\">";
-  s += elapsedTime(now - gps.lockage);
-  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Precision:</td><td style=\"height: 2px; width: 255px;\">";
-  s += gps.hdop;
-  s += " meters</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Elevation:</td><td style=\"height: 2px; width: 255px;\">";
-  s += gps.elevation;
-  s += " meters</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Total Events:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)GPS.charsProcessed();
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Passed Events:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)GPS.passedChecksum();
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Failed Events:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)GPS.failedChecksum();
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix Events:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)GPS.sentencesWithFix();
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Temp:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)weather.currentTemp;
-  if (imperial.isChecked())
-    s += "&#8457;";
-  else
-    s += "&#8451;";
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Feels Like Temp:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)weather.currentFeelsLike;
+  String s;
+  if (iotWebConf.getState() == 1) {
+    s += "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/><body>";
+    s += "<p style=\"text-align: center;\"><a title=\"Configure Settings\" href=\"config\">->[ Setup Smart Clock ]<-</a></p>";
+    s += "</body></html>\n";
+  }
+  else 
+  {
+    s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/><body style=\"background-color:#222222; font-family: Verdana, sans-serif;\">";
+    s += "<style>a:link {color: #11ffff;background-color: transparent;text-decoration: none;} a:visited {color: #11ffff;background-color: transparent;text-decoration: none;} a:hover {color: #11ffff;background-color: transparent;text-decoration: underline;} a:active {color: #11ffff;background-color: transparent;text-decoration: underline;}</style>";
+    s += "<span style=\"color: #ffffff; background-color: #222222;\"><table style=\"font-size: 14px; width: 500px; margin-left: auto; margin-right: auto; height: 22px;\"><tbody><tr><td style=\"width: 500px;\"><blockquote><h2 style=\"text-align: center;\"><span style=\"color: #aa11ff;\">LED Smart Clock</span><p style=\"text-align: center;\"></h2><span style=\"color: #ffff99;\"><h3><em><strong>";
+    s += getSystemZonedDateTimeString();
+    s += "</strong></h3></em></span></p></blockquote><p style=\"text-align: center;\"><a title=\"Configure Settings\" href=\"config\">->[ Configure Settings ]<-</a></p></td></tr></tbody></table><table style=\"width: 518px; height: 869px; margin-left: auto; margin-right: auto;\" border=\"0\"><tbody><tr style=\"height: 20px;\"><td style=\"height: 20px; text-align: right; width: 247px;\">Firmware Version:</td><td style=\"height: 20px; width: 255px;\">";
+    s += (String)VERSION;
+    s += "</td></tr><tr style=\"height: 20px;\"><td style=\"height: 20px; text-align: right; width: 247px;\">Uptime:</td><td style=\"height: 20px; width: 255px;\">";
+    s += elapsedTime(now - bootTime);
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Time Source:</td><td style=\"height: 2px; width: 255px;\">";
+    timesource.toUpperCase();
+    s += timesource;
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current LED Brightness:</td><td style=\"height: 2px; width: 255px;\">";
+    s += map(current.brightness, (5+userbrightness), (LUXMAX + userbrightness), 1, 100);
+    s += "/100</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Timezone Offset:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)current.tzoffset;
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Time Sync:</td><td style=\"height: 2px; width: 255px;\">";
+    s += elapsedTime(now - systemClock.getLastSyncTime());
+    s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Latitude:</td><td style=\"height: 2px; width: 255px;\">";
+    s += current.lat;
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Longitude:</td><td style=\"height: 2px; width: 255px;\">";
+    s += current.lon;
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Location Source:</td><td style=\"height: 2px; width: 255px;\">";
+    s += current.locsource;
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Location:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)geocode.city + ", " + geocode.state + ", " + geocode.country;
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix:</td><td style=\"height: 2px; width: 255px;\">";
+    if (gps.fix)
+      s += "Yes";
+    else
+      s += "No";
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Aquired Sattelites:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)gps.sats;
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix Age:</td><td style=\"height: 2px; width: 255px;\">";
+    s += elapsedTime(now - gps.timestamp);
+    s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Location Age:</td><td style=\"height: 2px; width: 255px;\">";
+    s += elapsedTime(now - gps.lockage);
+    s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Precision:</td><td style=\"height: 2px; width: 255px;\">";
+    s += gps.hdop;
+    s += " meters</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Elevation:</td><td style=\"height: 2px; width: 255px;\">";
+    s += gps.elevation;
+    s += " meters</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Total Events:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)GPS.charsProcessed();
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Passed Events:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)GPS.passedChecksum();
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Failed Events:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)GPS.failedChecksum();
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">GPS Fix Events:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)GPS.sentencesWithFix();
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Temp:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)weather.currentTemp;
     if (imperial.isChecked())
-    s += "&#8457;";
-  else
-    s += "&#8451;";
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Humidity:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)weather.currentHumidity;
-  s += "%</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Wind Speed:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)weather.currentWindSpeed;
-  s += "&nbsp;";
-  if (imperial.isChecked())
-    s += imperial_units[1];
-  else
-    s += metric_units[1];
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Conditions:</td><td style=\"height: 2px; width: 255px;\">";
-  s += capString(weather.currentDescription);
-	
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Forcast Check Attempt:</td><td style=\"height: 2px; width: 255px;\">";
-  s += elapsedTime(now - checkweather.lastattempt);
-  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Forcast Check Success:</td><td style=\"height: 2px; width: 255px;\">";
-  s += elapsedTime(now - checkweather.lastsuccess);
-  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Next Forecast Display: in </td><td style=\"height: 2px; width: 255px;\">";
-  s += elapsedTime((now - weather.lastshown) - (show_weather_interval.value() * 60));
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Alert Active:</td><td style=\"height: 2px; width: 255px;\">";
-  if (alerts.active)
-    s += "Yes";
-  else
-    s += "No";
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Warnings:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)alerts.inWarning;
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Watches:</td><td style=\"height: 2px; width: 255px;\">";
-  s += (String)alerts.inWatch;
-  s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Alerts Last Attempt:</td><td style=\"height: 2px; width: 255px;\">";
-  s += elapsedTime(now - checkalerts.lastattempt);
-  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Alerts Last Success:</td><td style=\"height: 2px; width: 255px;\">";
-  s += elapsedTime(now - checkalerts.lastsuccess);
-  s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Weather Alert Shown:</td><td style=\"height: 2px; width: 255px;\">";
-  s += elapsedTime(now - alerts.lastshown);
-  s += " ago</td></tr></tbody></table>";
-  s += "</span></body></html>\n";
+      s += "&#8457;";
+    else
+      s += "&#8451;";
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Feels Like Temp:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)weather.currentFeelsLike;
+      if (imperial.isChecked())
+      s += "&#8457;";
+    else
+      s += "&#8451;";
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Humidity:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)weather.currentHumidity;
+    s += "%</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Wind Speed:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)weather.currentWindSpeed;
+    s += "&nbsp;";
+    if (imperial.isChecked())
+      s += imperial_units[1];
+    else
+      s += metric_units[1];
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Current Conditions:</td><td style=\"height: 2px; width: 255px;\">";
+    s += capString(weather.currentDescription);
+    
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Forcast Check Attempt:</td><td style=\"height: 2px; width: 255px;\">";
+    s += elapsedTime(now - checkweather.lastattempt);
+    s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Forcast Check Success:</td><td style=\"height: 2px; width: 255px;\">";
+    s += elapsedTime(now - checkweather.lastsuccess);
+    s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Next Forecast Display: in </td><td style=\"height: 2px; width: 255px;\">";
+    s += elapsedTime((now - weather.lastshown) - (show_weather_interval.value() * 60));
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">&nbsp;</td><td style=\"height: 2px; width: 255px;\">&nbsp;</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Alert Active:</td><td style=\"height: 2px; width: 255px;\">";
+    if (alerts.active)
+      s += "Yes";
+    else
+      s += "No";
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Warnings:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)alerts.inWarning;
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Watches:</td><td style=\"height: 2px; width: 255px;\">";
+    s += (String)alerts.inWatch;
+    s += "</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Alerts Last Attempt:</td><td style=\"height: 2px; width: 255px;\">";
+    s += elapsedTime(now - checkalerts.lastattempt);
+    s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Weather Alerts Last Success:</td><td style=\"height: 2px; width: 255px;\">";
+    s += elapsedTime(now - checkalerts.lastsuccess);
+    s += " ago</td></tr><tr style=\"height: 2px;\"><td style=\"height: 2px; text-align: right; width: 247px;\">Last Weather Alert Shown:</td><td style=\"height: 2px; width: 255px;\">";
+    s += elapsedTime(now - alerts.lastshown);
+    s += " ago</td></tr></tbody></table>";
+    s += "</span></body></html>\n";
+  }
   server.send(200, "text/html", s);
 }
 

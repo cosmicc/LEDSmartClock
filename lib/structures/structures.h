@@ -102,6 +102,7 @@ struct Geocode {
 };
 
 struct Checkalerts {
+  bool active;
   uint8_t retries;
   bool jsonParsed;
   acetime_t lastattempt;
@@ -109,6 +110,7 @@ struct Checkalerts {
 };
 
 struct Checkweather {
+  bool active;
   uint8_t retries;
   bool jsonParsed;
   acetime_t lastattempt;
@@ -116,6 +118,7 @@ struct Checkweather {
 };
 
 struct Checkaqi {
+  bool active;
   uint8_t retries;
   bool jsonParsed;
   acetime_t lastattempt;
@@ -123,6 +126,7 @@ struct Checkaqi {
 };
 
 struct Checkipgeo {
+  bool active;
   uint8_t retries;
   boolean jsonParsed;
   acetime_t lastattempt;
@@ -269,8 +273,8 @@ class DisplayToken
           return token10;
           break;
         }
+        return 0;
     }
-
 
     void setToken(uint8_t position)
     {
@@ -423,7 +427,9 @@ class DisplayToken
             return true;
           break;
         }
+        return false;
     }
+
   private:
     char name[11][32] = {"", "Date", "CurWeather", "Alerts", "Misc", "N/A", "AlertFlash", "", "DayWeather", "AirQual", "ScrollText"};
     bool token1;

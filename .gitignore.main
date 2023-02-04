@@ -37,4 +37,6 @@ build/
 icons/
 trace/
 platformio.ini
-
+.gitignore.main
+.gitignore.dev
+.gitignore

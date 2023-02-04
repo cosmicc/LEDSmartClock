@@ -39,7 +39,7 @@ static const char* CONFIGVER = "4";// config version (advance if iotwebconf conf
 #define PROFILER_DELAY 10          // Coroutine profiler delay in seconds
 #define WDT_TIMEOUT 30             // Watchdog Timeout seconds
 #define CONFIG_PIN 19              // Config reset button pin
-#define STATUS_PIN LED_BUILTIN
+#define STATUS_PIN 2               // Use built-in ESP32 led for iotwebconf status
 #define GPS_BAUD 9600              // GPS UART gpsSpeed
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
@@ -79,6 +79,7 @@ using ace_time::clock::SystemClockLoop;
 using ace_routine::CoroutineScheduler;
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 
+static const char* TAG = "LEDSC";                // Logging tag
 #include "structures.h"
 
 // defs
@@ -95,7 +96,6 @@ static char truefalse[][6] = {"False", "True"};
 // Global Variables & Class Objects
 const char thingName[] = "LEDSMARTCLOCK";                 // Default SSID used for new setup
 const char wifiInitialApPassword[] = "ledsmartclock";     // Default AP password for new setup
-static const char* TAG = "LEDSC";                // Logging tag
 WireInterface wireInterface(Wire);                  // I2C hardware object
 DS3231Clock<WireInterface> dsClock(wireInterface);  // Hardware DS3231 RTC object
 CRGB leds[NUMMATRIX];           // Led matrix array object

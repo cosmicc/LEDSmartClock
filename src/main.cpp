@@ -9,9 +9,10 @@
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock (Everything is coroutines now)
 
 // System Loop
-void loop() {
+void loop() 
+{
   esp_task_wdt_reset();
-#ifdef COROUTINE_PROFILER
+  #ifdef COROUTINE_PROFILER
   CoroutineScheduler::loopWithProfiler();
   #else
   CoroutineScheduler::loop();
@@ -19,7 +20,8 @@ void loop() {
 }
 
 // System Setup
-void setup () {
+void setup () 
+{
   Serial.begin(115200);
   uint32_t timer = millis();
   ESP_EARLY_LOGD(TAG, "Initializing Hardware Watchdog...");
@@ -74,7 +76,6 @@ void setup () {
   iotWebConf.addHiddenParameter(&savedcity);
   iotWebConf.addHiddenParameter(&savedstate);
   iotWebConf.addHiddenParameter(&savedcountry);
-  
   iotWebConf.addParameterGroup(&group1);
   iotWebConf.addParameterGroup(&group2);
   iotWebConf.addParameterGroup(&group3);
@@ -132,7 +133,6 @@ void setup () {
   printProfiling.setName("profiler");
   LogBinProfiler::createProfilers();
   #endif
-  
   ipgeo.tzoffset = 127;
   processTimezone();
   server.on("/", handleRoot);
@@ -213,7 +213,8 @@ void wifiConnected() {
 }
 
 // Regular Functions
-void debug_print(String message, bool cr = false) {
+void debug_print(String message, bool cr = false)
+{
   if (serialdebug.isChecked())
     if (cr)
       Serial.println(message);
@@ -251,7 +252,8 @@ void processTimezone()
   ESP_LOGV(TAG, "Process timezone complete: %d ms", (millis()-timer));
 }
 
-void processLoc(){
+void processLoc()
+{
   if (use_fixed_loc.isChecked())
   {
     gps.lat = fixedLat.value();
@@ -310,7 +312,8 @@ void processLoc(){
   buildURLs();
 }
 
-void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) { 
+void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) 
+{ 
     if (position == 0) position = 0;
     else if (position == 1) position = 7;
     else if (position == 2) position = 16;
@@ -321,7 +324,8 @@ void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) {
       matrix->drawBitmap(position, 0, num[bmp_num], 8, 8, color); 
 }
 
-void display_showStatus() {
+void display_showStatus() 
+{
     uint16_t sclr;
     uint16_t wclr;
     uint16_t aclr;
@@ -385,7 +389,8 @@ void display_showStatus() {
     }
 }
 
-void display_weatherIcon(char* icon) {
+void display_weatherIcon(char* icon) 
+{
     bool night;
     char dn;
     char code1;
@@ -434,7 +439,8 @@ void display_weatherIcon(char* icon) {
     }
 }
 
-void display_temperature() {
+void display_temperature() 
+{
     int temp;
     temp = weather.currentFeelsLike;
     int xpos;
@@ -486,27 +492,31 @@ void display_temperature() {
     matrix->drawBitmap(xpos+(digits*7)+7, 0, sym[0], 8, 8, tc);
 }
 
-void printSystemZonedTime() {
+void printSystemZonedTime() 
+{
   acetime_t now = systemClock.getNow();
   auto TimeWZ = ZonedDateTime::forEpochSeconds(now, current.timezone);
   TimeWZ.printTo(SERIAL_PORT_MONITOR);
   SERIAL_PORT_MONITOR.println();
 }
 
-ace_time::ZonedDateTime getSystemZonedTime() {
+ace_time::ZonedDateTime getSystemZonedTime() 
+{
   acetime_t now = systemClock.getNow();
   ace_time::ZonedDateTime TimeWZ = ZonedDateTime::forEpochSeconds(now, current.timezone);
   return TimeWZ;
 }
 
-String getSystemZonedTimeString() {
+String getSystemZonedTimeString() 
+{
   ace_time::ZonedDateTime now = getSystemZonedTime();
   char *string;
   sprintf(string, "%d/%d/%d %d:%d:%d [%d]", now.month(), now.day(), now.year(), now.hour(), now.minute(), now.second(), now.timeOffset());
   return (String)string;
 }
 
-String getSystemZonedDateString() {
+String getSystemZonedDateString() 
+{
   ace_time::ZonedDateTime ldt = getSystemZonedTime();
   uint8_t day = ldt.day();
   char buf[100];
@@ -514,7 +524,8 @@ String getSystemZonedDateString() {
   return (String)buf;
 }
 
-String getSystemZonedDateTimeString() {
+String getSystemZonedDateTimeString() 
+{
   ace_time::ZonedDateTime ldt = getSystemZonedTime();
   uint8_t day = ldt.day();
   uint8_t hour = ldt.day();
@@ -533,11 +544,13 @@ String getSystemZonedDateTimeString() {
   return (String)buf;
 }
 
-uint16_t calcaqi(double c, double i_hi, double i_low, double c_hi, double c_low) {
+uint16_t calcaqi(double c, double i_hi, double i_low, double c_hi, double c_low) 
+{
   return (i_hi - i_low)/(c_hi - c_low)*(c - c_low) + i_low;
 }
 
-void fillAlertsFromJson(Alerts* alerts) {
+void fillAlertsFromJson(Alerts* alerts) 
+{
   if (alertsJson["features"].length() != 0)
   {
     sprintf(alerts->status1, "%s", (const char *)alertsJson["features"][0]["properties"]["status"]);
@@ -573,7 +586,8 @@ void fillAlertsFromJson(Alerts* alerts) {
   }
 }
 
-void fillWeatherFromJson(Weather* weather) {
+void fillWeatherFromJson(Weather* weather) 
+{
   sprintf(weather->currentIcon, "%s", (const char*) weatherJson["current"]["weather"][0]["icon"]);
   weather->currentTemp = weatherJson["current"]["temp"];
   weather->currentFeelsLike = weatherJson["current"]["feels_like"];
@@ -627,7 +641,8 @@ bool isApiKeyValid(char *apikey) {
     return true;
 }
 
-void buildURLs() {
+void buildURLs() 
+{
   String units;
   if (imperial.isChecked())
     units = "imperial";
@@ -640,7 +655,8 @@ void buildURLs() {
   gurl = (String)"https://api.ipgeolocation.io/ipgeo?apiKey=" + ipgeoapi.value();
 }
 
-String elapsedTime(int32_t seconds) {
+String elapsedTime(int32_t seconds) 
+{
   String result;
   uint8_t granularity;
   seconds = abs(seconds);
@@ -671,7 +687,8 @@ String elapsedTime(int32_t seconds) {
   return result;
 }
 
-String capString (String str) {
+String capString (String str) 
+{
   	for(uint16_t i=0; str[i]!='\0'; i++)
 	{
 		if(i==0)
@@ -698,7 +715,8 @@ String capString (String str) {
   return str;
 }
 
-acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds) {
+acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds) 
+{
     static const int32_t kDaysToConverterEpochFromNtpEpoch = 36524;
     int32_t daysToCurrentEpochFromNtpEpoch = Epoch::daysToCurrentEpochFromConverterEpoch() + kDaysToConverterEpochFromNtpEpoch;
     uint32_t secondsToCurrentEpochFromNtpEpoch = (uint32_t) 86400 * (uint32_t) daysToCurrentEpochFromNtpEpoch;
@@ -706,19 +724,23 @@ acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds) {
     return (int32_t) epochSeconds;
  }
 
-  void setTimeSource(String source) {
+  void setTimeSource(String source) 
+  {
     timesource = source;
   }
 
-  acetime_t Now() {
+  acetime_t Now() 
+  {
     return systemClock.getNow();
   }
 
-  void resetLastNtpCheck() {
+  void resetLastNtpCheck() 
+  {
     lastntpcheck = systemClock.getNow();
   }
 
-  uint16_t calcbright(uint16_t bl) {
+  uint16_t calcbright(uint16_t bl) 
+  {
   if (bl == 1)
     return 0;
   else if (bl == 2)
@@ -743,7 +765,8 @@ const char* ordinal_suffix(int n)
         return suffixes[ord];
 }
 
-char* cleanString(const char* p) {        //char *buf;
+char* cleanString(const char* p) 
+{        //char *buf;
     char* q = (char *)p;
     while (p != 0 && *p != '\0') {
         if (*p == '\n') {
@@ -771,5 +794,5 @@ char* cleanString(const char* p) {        //char *buf;
  //TODO: table titles
  //TODO: remove tables is show is disabled 
  //TODO: weather daily in web
-//TODO: timezone name in web
+ //TODO: timezone name in web
 

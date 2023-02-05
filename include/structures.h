@@ -102,17 +102,22 @@ struct Geocode {
 };
 
 struct Checkalerts {
-  bool active;
-  uint8_t retries;
+  bool send;
+  bool complete;
+  bool success;
   bool jsonParsed;
+  uint8_t retries;
   acetime_t lastattempt;
   acetime_t lastsuccess;
+  
 };
 
 struct Checkweather {
-  bool active;
-  uint8_t retries;
+  bool send;
+  bool complete;
+  bool success;
   bool jsonParsed;
+  uint8_t retries;
   acetime_t lastattempt;
   acetime_t lastsuccess;
 };
@@ -123,6 +128,7 @@ struct Checkaqi {
   bool jsonParsed;
   acetime_t lastattempt;
   acetime_t lastsuccess;
+  bool complete;
 };
 
 struct Checkipgeo {
@@ -136,6 +142,7 @@ struct Checkipgeo {
 
 struct Checkgeocode {
   bool active;
+  bool complete;
   uint8_t retries;
   boolean jsonParsed;
   acetime_t lastattempt;

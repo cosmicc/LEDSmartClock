@@ -26,6 +26,8 @@
 #include <FastLED_NeoMatrix.h>
 #include <FastLED.h>
 #include <HTTPClient.h>
+//#include <AsyncHTTPRequest_Generic.h>
+#include <AsyncHTTPSRequest_Generic.h>
 #include <Arduino_JSON.h>
 
 static const char* CONFIGVER = "4";// config version (advance if iotwebconf config additions to reset defaults)
@@ -78,7 +80,7 @@ using ace_time::clock::SystemClockLoop;
 using ace_routine::CoroutineScheduler;
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 
-static const char* TAG = "LEDSC";                // Logging tag
+static const char* TAG = "CLOCK";                // Logging tag
 #include "structures.h"
 
 // defs
@@ -133,9 +135,18 @@ acetime_t bootTime;             // boot time
 String timesource = "none";     // Primary timeclock source gps/ntp
 uint8_t userbrightness;         // Current saved brightness setting (from iotwebconf)
 bool firsttimefailsafe;
-bool httpbusy;
 
 #include "colors.h"
+
+AsyncHTTPSRequest request[5];
+void requestWEATHER(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState);
+void requestALERTS(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState);
+void requestGEOCODE(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState);
+void requestAIR(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState);
+void requestIPGEO(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState);
+void httpRequest(uint16_t index);
+typedef void (*requestCallback)(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState);
+requestCallback requestCB[5] = { requestWEATHER, requestALERTS, requestGEOCODE, requestAIR, requestIPGEO };
 
 // Function Declarations
 void print_debugData();

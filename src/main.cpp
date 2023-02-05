@@ -3,10 +3,9 @@
 // Created by: Ian Perry (ianperry99@gmail.com)
 // https://github.com/cosmicc/led_clock         // firmware version
 
-#include "main.h"
-
-
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock (Everything is coroutines now)
+
+#include "main.h"
 
 // System Loop
 void loop() 
@@ -143,6 +142,8 @@ void setup ()
   server.onNotFound([](){ iotWebConf.handleNotFound(); });
   cotimer.scrollspeed = map(text_scroll_speed.value(), 1, 10, 100, 10);
   ESP_EARLY_LOGD(TAG, "IotWebConf initilization is complete. Web server is ready.");
+  for (int index = 0; index < 5; index++)
+    request[index].onReadyStateChange(requestCB[index]);
   ESP_EARLY_LOGD(TAG, "Setting class timestamps...");
   bootTime = systemClock.getNow();
   lastntpcheck= systemClock.getNow() - 3601;
@@ -216,6 +217,149 @@ void wifiConnected() {
 }
 
 // Regular Functions
+void httpRequest(uint16_t index)
+{
+  static bool requestOpenResult;
+  requestOpenResult = request[index].open("GET", urls[index]);
+  if (requestOpenResult)
+  {
+    ESP_LOGD(TAG, "Sending request: %s", urls[index]);
+    request[index].send();
+  }
+  else
+  {
+    ESP_LOGD(TAG, "Request send failed: %s", urls[index]);
+  }
+}
+
+void requestWEATHER(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState)
+{
+  (void) optParm;
+  if (readyState == readyStateDone)
+  {
+    if (thisRequest->responseHTTPcode() == 200)
+    {
+      ESP_LOGD(TAG, "Weather response code: %s [%d]", thisRequest->responseHTTPString(), thisRequest->responseHTTPcode());
+      weatherJson = JSON.parse(thisRequest->responseText());
+      if (JSON.typeof(weatherJson) == "undefined")
+        ESP_LOGE(TAG, "Parsing WeatherJson input failed!");
+      else 
+      {
+          checkweather.jsonParsed = true;
+          fillWeatherFromJson(&weather);
+          checkweather.lastsuccess = systemClock.getNow();
+          checkweather.success = true;
+          checkweather.complete = true;
+      }
+    }
+    else
+      ESP_LOGE(TAG, "Weather response error: %s [%d]", thisRequest->responseHTTPString(), thisRequest->responseHTTPcode());
+    thisRequest->setDebug(false);
+  }
+}
+
+void requestALERTS(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState)
+{
+  (void) optParm;
+  if (readyState == readyStateDone)
+  {
+    if (thisRequest->responseHTTPcode() == 200)
+    {
+      ESP_LOGD(TAG, "Alerts response code: %s [%d]", thisRequest->responseHTTPString(), thisRequest->responseHTTPcode());
+      alertsJson = JSON.parse(thisRequest->responseText());
+      if (JSON.typeof(alertsJson) == "undefined")
+        ESP_LOGE(TAG, "Parsing AlertsJson input failed!");
+      else 
+      {
+          checkalerts.jsonParsed = true;
+          fillAlertsFromJson(&alerts);
+          checkalerts.lastsuccess = systemClock.getNow();
+          checkalerts.complete = true;
+      }
+    }
+    else
+      ESP_LOGE(TAG, "Alerts response error: %s [%d]", thisRequest->responseHTTPString(), thisRequest->responseHTTPcode());
+    thisRequest->setDebug(false);
+  }
+}
+
+void requestGEOCODE(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState)
+{
+  (void) optParm;
+  if (readyState == readyStateDone)
+  {
+    if (thisRequest->responseHTTPcode() == 200)
+    {
+      ESP_LOGD(TAG, "GEOCode response code: %s [%d]", thisRequest->responseHTTPString(), thisRequest->responseHTTPcode());
+      geocodeJson = JSON.parse(thisRequest->responseText());
+      if (JSON.typeof(geocodeJson) == "undefined")
+        ESP_LOGE(TAG, "Parsing GEOCodeJson input failed!");
+      else 
+      {
+          checkgeocode.jsonParsed = true;
+          fillGeocodeFromJson(&geocode);
+          checkgeocode.lastsuccess = systemClock.getNow();
+          checkgeocode.complete = true;
+      }
+    }
+    else
+      ESP_LOGE(TAG, "GEOCode response error: %s [%d]", thisRequest->responseHTTPString(), thisRequest->responseHTTPcode());
+    thisRequest->setDebug(false);
+  }
+}
+
+void requestAIR(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState)
+{
+  (void) optParm;
+  if (readyState == readyStateDone)
+  {
+    if (thisRequest->responseHTTPcode() == 200)
+    {
+      ESP_LOGD(TAG, "AQI response code: %s [%d]", thisRequest->responseHTTPString(), thisRequest->responseHTTPcode());
+      aqiJson = JSON.parse(thisRequest->responseText());
+      if (JSON.typeof(aqiJson) == "undefined")
+        ESP_LOGE(TAG, "Parsing AQIJson input failed!");
+      else 
+      {
+          checkaqi.jsonParsed = true;
+          fillAqiFromJson(&weather);
+          checkaqi.lastsuccess = systemClock.getNow();
+          checkaqi.complete = true;
+      }
+    }
+    else
+      ESP_LOGE(TAG, "AQI response error: %s [%d]", thisRequest->responseHTTPString(), thisRequest->responseHTTPcode());
+    thisRequest->setDebug(false);
+  }
+}
+
+void requestIPGEO(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState)
+{
+  (void) optParm;
+  if (readyState == readyStateDone)
+  {
+    if (thisRequest->responseHTTPcode() == 200)
+    {
+      ESP_LOGD(TAG, "IPGeo response code: %s [%d]", thisRequest->responseHTTPString(), thisRequest->responseHTTPcode());
+      ipgeoJson = JSON.parse(thisRequest->responseText());
+      if (JSON.typeof(ipgeoJson) == "undefined")
+        ESP_LOGE(TAG, "Parsing IPGeoJson input failed!");
+      else 
+      {
+          checkipgeo.jsonParsed = true;
+          fillIpgeoFromJson(&ipgeo);
+          checkipgeo.lastsuccess = systemClock.getNow();
+          checkipgeo.complete = true;
+          processLoc();
+          processTimezone();
+      }
+    }
+    else
+      ESP_LOGE(TAG, "IPGeo response error: %s [%d]", thisRequest->responseHTTPString(), thisRequest->responseHTTPcode());
+    thisRequest->setDebug(false);
+  }
+}
+
 void print_debugData() {
     debug_print("----------------------------------------------------------------", true);
     printSystemZonedTime();
@@ -247,7 +391,7 @@ void print_debugData() {
       speedunit = metric_units[1];
     }
     debug_print((String) "Version - Firmware:v" + VERSION_MAJOR + "." + VERSION_MINOR + "." + VERSION_PATCH + " | Config:v" + CONFIGVER, true);
-    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + connection_state[iotWebConf.getState()] + " | IP:" + lip + " | HTTPBusy: " + yesno[httpbusy] + " | Uptime:" + uptime, true);
+    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + connection_state[iotWebConf.getState()] + " | IP:" + lip + " | Uptime:" + uptime, true);
     debug_print((String) "Clock - Status:" + clock_status[systemClock.getSyncStatusCode()] + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
     debug_print((String) "Loc - SavedLat:" + savedlat.value() + " | SavedLon:" + savedlon.value() + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
     debug_print((String) "IPGeo - Complete:" + yesno[checkipgeo.complete] + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
@@ -696,15 +840,15 @@ void buildURLs()
     units = "imperial";
   else
     units = "metric";
-  String wurl = (String) "http://api.openweathermap.org/data/2.5/onecall?units=" + units + "&exclude=minutely,hourly&appid=" + weatherapi.value() + "&lat=" + current.lat + "&lon=" + current.lon + "&lang=en";  // weather forecast url
+  String wurl = (String) "https://api.openweathermap.org/data/2.5/onecall?units=" + units + "&exclude=minutely,hourly&appid=" + weatherapi.value() + "&lat=" + current.lat + "&lon=" + current.lon + "&lang=en";  // weather forecast url
   wurl.toCharArray(urls[0], 254);
-  String aurl = (String) "http://api.weather.gov/alerts?active=true&status=actual&point=" + current.lat + "%2C" + current.lon + "&limit=3";                                                                     // Weather alert url
+  String aurl = (String) "https://api.weather.gov/alerts?active=true&status=actual&point=" + current.lat + "%2C" + current.lon + "&limit=3";                                                                     // Weather alert url
   aurl.toCharArray(urls[1], 254);
-  String curl = (String) "http://api.openweathermap.org/geo/1.0/reverse?lat=" + current.lat + "&lon=" + current.lon + "&limit=5&appid=" + weatherapi.value();                                                    // Geocoding url
+  String curl = (String) "https://api.openweathermap.org/geo/1.0/reverse?lat=" + current.lat + "&lon=" + current.lon + "&limit=5&appid=" + weatherapi.value();                                                    // Geocoding url
   curl.toCharArray(urls[2], 254);
-  String qurl = (String) "http://api.openweathermap.org/data/2.5/air_pollution?lat=" + current.lat + "&lon=" + current.lon + "&appid=" + weatherapi.value();                                                                                 //air pollution url
+  String qurl = (String) "https://api.openweathermap.org/data/2.5/air_pollution?lat=" + current.lat + "&lon=" + current.lon + "&appid=" + weatherapi.value();                                                                                 //air pollution url
   qurl.toCharArray(urls[3], 254);
-  String gurl = (String) "http://api.ipgeolocation.io/ipgeo?apiKey=" + ipgeoapi.value();
+  String gurl = (String) "https://api.ipgeolocation.io/ipgeo?apiKey=" + ipgeoapi.value();
   gurl.toCharArray(urls[4], 254);
 }
 

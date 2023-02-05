@@ -24,17 +24,17 @@ void setup ()
 {
   Serial.begin(115200);
   uint32_t timer = millis();
-  ESP_EARLY_LOGD(TAG, "Initializing Hardware Watchdog...");
+  //ESP_EARLY_LOGD(TAG, "Initializing Hardware Watchdog...");
   esp_task_wdt_init(WDT_TIMEOUT, true);                //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);                              //add current thread to WDT watch
-  ESP_EARLY_LOGD(TAG, "Initializing the system clock...");
+  //ESP_EARLY_LOGD(TAG, "Initializing the system clock...");
   Wire.begin();
   wireInterface.begin();
   systemClock.setup();
   dsClock.setup();
   gpsClock.setup();
   printSystemZonedTime();
-  ESP_EARLY_LOGD(TAG, "Initializing IotWebConf...");
+  //ESP_EARLY_LOGD(TAG, "Initializing IotWebConf...");
   group1.addItem(&brightness_level);
   group1.addItem(&text_scroll_speed);
   group1.addItem(&show_date);
@@ -90,6 +90,9 @@ void setup ()
     [](const char* updatePath) { httpUpdater.setup(&server, updatePath); },
     [](const char* userName, char* password) { httpUpdater.updateCredentials(userName, password); });
   iotWebConf.init();
+  if (serialdebug.isChecked()) {
+    
+  }
   ESP_EARLY_LOGD(TAG, "Initializing Light Sensor...");
   userbrightness = calcbright(brightness_level.value());
   current.brightness = userbrightness;
@@ -97,7 +100,7 @@ void setup ()
   Tsl.begin();
   while (!Tsl.available()) {
       systemClock.loop();
-      debug_print("Waiting for Light Sensor...", true);
+       ESP_EARLY_LOGD(TAG, "Waiting for Light Sensor...");
   }
   //ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
   Tsl.on();
@@ -109,10 +112,10 @@ void setup ()
   coroutineManager.setName("manager");
   showClock.setName("show_clock");
   showDate.setName("show_date");
-  miscScrollers.setName("miscscrollers");
+  systemMessages.setName("systemMessages");
   setBrightness.setName("brightness");
   gps_checkData.setName("gpsdata");
-  print_debugData.setName("debug_print");
+  serialInput.setName("serialInput");
   IotWebConf.setName("iotwebconf");
   scrollText.setName("scrolltext");
   AlertFlash.setName("alertflash");
@@ -213,6 +216,51 @@ void wifiConnected() {
 }
 
 // Regular Functions
+void print_debugData() {
+    debug_print("----------------------------------------------------------------", true);
+    printSystemZonedTime();
+    acetime_t now = systemClock.getNow();
+    String gage = elapsedTime(now - gps.timestamp);
+    String loca = elapsedTime(now - gps.lockage);
+    String uptime = elapsedTime(now - bootTime);
+    String igt = elapsedTime(now - checkipgeo.lastattempt);
+    String igp = elapsedTime(now - checkipgeo.lastsuccess);
+    String wage = elapsedTime(now - weather.timestamp);
+    String wlt = elapsedTime(now - checkweather.lastattempt);
+    String alt = elapsedTime(now - checkalerts.lastattempt);
+    String wls = elapsedTime((now - weather.lastshown) - (show_weather_interval.value()*60));
+    String als = elapsedTime(now - alerts.lastshown);
+    String alg = elapsedTime(now - checkalerts.lastsuccess);
+    String wlg = elapsedTime(now - checkweather.lastsuccess);
+    String alq = elapsedTime(now - checkaqi.lastsuccess);
+    String alh = elapsedTime((now - weather.lastaqishown) - (airquality_interval.value() * 60));
+    String lst = elapsedTime(now - systemClock.getLastSyncTime());
+    String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME * 60);
+    String lip = (WiFi.localIP()).toString();
+    String tempunit;
+    String speedunit;
+    if (imperial.isChecked()) {
+      tempunit = imperial_units[0];
+      speedunit = imperial_units[1];
+    } else {
+      tempunit = metric_units[0];
+      speedunit = metric_units[1];
+    }
+    debug_print((String) "Version - Firmware:v" + VERSION_MAJOR + "." + VERSION_MINOR + "." + VERSION_PATCH + " | Config:v" + CONFIGVER, true);
+    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + connection_state[iotWebConf.getState()] + " | IP:" + lip + " | HTTPBusy: " + yesno[httpbusy] + " | Uptime:" + uptime, true);
+    debug_print((String) "Clock - Status:" + clock_status[systemClock.getSyncStatusCode()] + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
+    debug_print((String) "Loc - SavedLat:" + savedlat.value() + " | SavedLon:" + savedlon.value() + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
+    debug_print((String) "IPGeo - Complete:" + yesno[checkipgeo.complete] + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
+    debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
+    debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | NextShow:" + wage, true);
+    debug_print((String) "Air Quality - Aqi:" + air_quality[weather.currentaqi] + " | Co:" + weather.carbon_monoxide + " | No:" + weather.nitrogen_monoxide + " | No2:" + weather.nitrogen_dioxide + " | Ozone:" + weather.ozone + " | So2:" + weather.sulfer_dioxide + " | Pm2.5:" + weather.particulates_small + " | Pm10:" + weather.particulates_medium + " | Ammonia:" + weather.ammonia + " | LastSuccess:" + alq + " | NextShow:" + alh, true);
+    debug_print((String) "Alerts - Active:" + yesno[alerts.active] + " | Watch:" + yesno[alerts.inWatch] + " | Warn:" + yesno[alerts.inWarning] + " | LastTry:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
+    debug_print((String) "Location: " + geocode.city + ", " + geocode.state + ", " + geocode.country, true);
+    if (alerts.active)
+      debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
+    debug_print((String)"Display Tokens: " + displaytoken.showTokens(), true);
+}
+
 void debug_print(String message, bool cr = false)
 {
   if (serialdebug.isChecked())
@@ -241,7 +289,7 @@ void processTimezone()
     {
       ESP_LOGI(TAG, "IP Geo timezone [%d] (%s) is different then saved timezone [%d], saving new timezone", ipgeo.tzoffset, ipgeo.timezone, savedoffset);
       savedtzoffset.value() = ipgeo.tzoffset;
-      //iotWebConf.saveConfig();
+      iotWebConf.saveConfig();
     }
   }
   else {
@@ -300,15 +348,15 @@ void processLoc()
     iotWebConf.saveConfig();
     checkgeocode.active = true;
   }
-  if (olat == 0 || nlat == 0) {
-    char sla[12];
-    char slo[12];
-    (current.lat).toCharArray(sla, 12);
-    (current.lon).toCharArray(slo, 12);
-    memcpy(savedlat.value(), sla, sizeof(sla));
-    memcpy(savedlon.value(), slo, sizeof(slo));
-    //iotWebConf.saveConfig();
-  }
+  //if (nlat != 0 && nlon != 0 && ) {
+  //  char sla[12];
+  //  char slo[12];
+  //  (current.lat).toCharArray(sla, 12);
+  //  (current.lon).toCharArray(slo, 12);
+  //  memcpy(savedlat.value(), sla, sizeof(sla));
+  //  memcpy(savedlon.value(), slo, sizeof(slo));
+  //  iotWebConf.saveConfig();
+  // }
   buildURLs();
 }
 
@@ -473,7 +521,7 @@ void display_temperature()
         if (imperial.isChecked() && weather.currentFeelsLike + abs(weather.currentFeelsLike) == 0)
           current.temphue = NIGHTHUE + tl;
         else
-          current.temphue = NIGHTHUE + abs(weather.currentFeelsLike);
+          current.temphue = NIGHTHUE + (abs(weather.currentFeelsLike)/2);
       tc = hsv2rgb(current.temphue);
     }
     else
@@ -648,11 +696,16 @@ void buildURLs()
     units = "imperial";
   else
     units = "metric";
-  wurl = (String) "http://api.openweathermap.org/data/2.5/onecall?units=" + units + "&exclude=minutely,hourly&appid=" + weatherapi.value() + "&lat=" + current.lat + "&lon=" + current.lon + "&lang=en";  // weather forecast url
-  aurl = (String) "https://api.weather.gov/alerts?active=true&status=actual&point=" + current.lat + "%2C" + current.lon + "&limit=3";                                                                     // Weather alert url
-  curl = (String) "http://api.openweathermap.org/geo/1.0/reverse?lat=" + current.lat + "&lon=" + current.lon + "&limit=5&appid=" + weatherapi.value();                                                    // Geocoding url
-  qurl = (String) "http://api.openweathermap.org/data/2.5/air_pollution?lat=" + current.lat + "&lon=" + current.lon + "&appid=" + weatherapi.value();                                                                                 //air pollution url
-  gurl = (String)"https://api.ipgeolocation.io/ipgeo?apiKey=" + ipgeoapi.value();
+  String wurl = (String) "http://api.openweathermap.org/data/2.5/onecall?units=" + units + "&exclude=minutely,hourly&appid=" + weatherapi.value() + "&lat=" + current.lat + "&lon=" + current.lon + "&lang=en";  // weather forecast url
+  wurl.toCharArray(urls[0], 254);
+  String aurl = (String) "http://api.weather.gov/alerts?active=true&status=actual&point=" + current.lat + "%2C" + current.lon + "&limit=3";                                                                     // Weather alert url
+  aurl.toCharArray(urls[1], 254);
+  String curl = (String) "http://api.openweathermap.org/geo/1.0/reverse?lat=" + current.lat + "&lon=" + current.lon + "&limit=5&appid=" + weatherapi.value();                                                    // Geocoding url
+  curl.toCharArray(urls[2], 254);
+  String qurl = (String) "http://api.openweathermap.org/data/2.5/air_pollution?lat=" + current.lat + "&lon=" + current.lon + "&appid=" + weatherapi.value();                                                                                 //air pollution url
+  qurl.toCharArray(urls[3], 254);
+  String gurl = (String) "http://api.ipgeolocation.io/ipgeo?apiKey=" + ipgeoapi.value();
+  gurl.toCharArray(urls[4], 254);
 }
 
 String elapsedTime(int32_t seconds) 

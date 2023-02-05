@@ -30,7 +30,6 @@
 
 static const char* CONFIGVER = "4";// config version (advance if iotwebconf config additions to reset defaults)
 #undef COROUTINE_PROFILER          // Enable the coroutine debug profiler
-#define COROUTINE_STATES
 #undef DEBUG_LIGHT                 // Show light debug serial messages
 #undef DISABLE_WEATHERCHECK
 #undef DISABLE_AIRCHECK
@@ -96,6 +95,7 @@ static char truefalse[][6] = {"False", "True"};
 // Global Variables & Class Objects
 const char thingName[] = "LEDSMARTCLOCK";                 // Default SSID used for new setup
 const char wifiInitialApPassword[] = "ledsmartclock";     // Default AP password for new setup
+char urls[5][254];
 WireInterface wireInterface(Wire);                  // I2C hardware object
 DS3231Clock<WireInterface> dsClock(wireInterface);  // Hardware DS3231 RTC object
 CRGB leds[NUMMATRIX];           // Led matrix array object
@@ -126,11 +126,7 @@ ScrollText scrolltext;
 Alertflash alertflash;
 Current current;
 acetime_t lastntpcheck;
-String wurl;                    // Built Openweather API URL
-String aurl;                    // Built AWS API URL
-String gurl;                    // Built IPGeolocation.io API URL
-String curl;                    // Built geocoding url
-String qurl;                    // Built air quality url
+
 bool clock_display_offset;      // Clock display offset for single digit hour
 bool resetme;                   // reset to factory defaults
 acetime_t bootTime;             // boot time
@@ -142,6 +138,7 @@ bool httpbusy;
 #include "colors.h"
 
 // Function Declarations
+void print_debugData();
 void processLoc();
 void wifiConnected();
 void handleRoot();

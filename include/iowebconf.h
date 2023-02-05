@@ -56,7 +56,7 @@ IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CON
 iotwebconf::CheckboxTParameter resetdefaults =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("resetdefaults").label("Reset to Defaults (AP mode)").defaultValue(false).build();
 iotwebconf::CheckboxTParameter serialdebug =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("serialdebug").label("Debug to Serial").defaultValue(false).build();
+    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("serialdebug").label("Serial Debug").defaultValue(false).build();
 iotwebconf::ParameterGroup group1 = iotwebconf::ParameterGroup("Display", "Display Settings");
   iotwebconf::IntTParameter<int8_t> brightness_level =
     iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("brightness_level").label("Brightness Level (1-5)").defaultValue(2).min(1).max(5).step(1).placeholder("1(low)..5(high)").build();

@@ -1,12 +1,4 @@
 // Coroutines
-#ifdef COROUTINE_STATES
-COROUTINE(printStates) {
-  COROUTINE_LOOP() {
-    CoroutineScheduler::list(Serial);
-    COROUTINE_DELAY(PROFILER_DELAY * 1000);
-  }
-}
-#endif
 
 #ifdef COROUTINE_PROFILER
 COROUTINE(printProfiling) {
@@ -117,9 +109,9 @@ COROUTINE(checkAirquality) {
     while (!checkaqi.jsonParsed && (checkaqi.retries <= 2))
     {
       COROUTINE_DELAY(1000);
-      ESP_LOGD(TAG, "Connecting to %s", qurl);
+      ESP_LOGD(TAG, "Connecting to %s", urls[3]);
       HTTPClient http;
-      http.begin(qurl);
+      http.begin(urls[3]);
       int httpCode = http.GET();
       ESP_LOGD(TAG, "HTTP code : %d", httpCode);
       if (httpCode == 200)
@@ -176,9 +168,9 @@ COROUTINE(checkWeather) {
     while (!checkweather.jsonParsed && (checkweather.retries <= 2))
     {
       COROUTINE_DELAY(1000);
-      ESP_LOGD(TAG, "Connecting to %s", wurl);
+      ESP_LOGD(TAG, "Connecting to %s", urls[0]);
       HTTPClient http;
-      http.begin(wurl);
+      http.begin(urls[0]);
       int httpCode = http.GET();
       ESP_LOGD(TAG, "HTTP code : %d", httpCode);
       if (httpCode == 200)
@@ -238,9 +230,9 @@ COROUTINE(checkAlerts) {
     while (!checkalerts.jsonParsed && (checkalerts.retries <= 2))
     {
       COROUTINE_DELAY(1000);
-      ESP_LOGD(TAG, "Connecting to %s", aurl);
+      ESP_LOGD(TAG, "Connecting to %s", urls[1]);
       HTTPClient http;
-      http.begin(aurl);
+      http.begin(urls[1]);
       int httpCode = http.GET();
       ESP_LOGD(TAG, "HTTP code : %d", httpCode);
       if (httpCode == 200)
@@ -406,69 +398,39 @@ COROUTINE(showAlerts) {
   }
 }
 
-COROUTINE(print_debugData) {
+COROUTINE(serialInput) {
   COROUTINE_LOOP() {
-    COROUTINE_DELAY_SECONDS(15);
     COROUTINE_AWAIT(serialdebug.isChecked());
-    debug_print("----------------------------------------------------------------", true);
-    printSystemZonedTime();
-    acetime_t now = systemClock.getNow();
-    String gage = elapsedTime(now - gps.timestamp);
-    String loca = elapsedTime(now - gps.lockage);
-    String uptime = elapsedTime(now - bootTime);
-    String igt = elapsedTime(now - checkipgeo.lastattempt);
-    String igp = elapsedTime(now - checkipgeo.lastsuccess);
-    String wage = elapsedTime(now - weather.timestamp);
-    String wlt = elapsedTime(now - checkweather.lastattempt);
-    String alt = elapsedTime(now - checkalerts.lastattempt);
-    String wls = elapsedTime((now - weather.lastshown) - (show_weather_interval.value()*60));
-    String als = elapsedTime(now - alerts.lastshown);
-    String alg = elapsedTime(now - checkalerts.lastsuccess);
-    String wlg = elapsedTime(now - checkweather.lastsuccess);
-    String alq = elapsedTime(now - checkaqi.lastsuccess);
-    String alh = elapsedTime((now - weather.lastaqishown) - (airquality_interval.value() * 60));
-    String lst = elapsedTime(now - systemClock.getLastSyncTime());
-    String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME * 60);
-    String lip = (WiFi.localIP()).toString();
-    String tempunit;
-    String speedunit;
-    if (imperial.isChecked()) {
-      tempunit = imperial_units[0];
-      speedunit = imperial_units[1];
-    } else {
-      tempunit = metric_units[0];
-      speedunit = metric_units[1];
+    if(Serial.available())
+    {
+      char input;
+      input = Serial.read();
+      switch (input)
+      {
+        case 'd':
+          print_debugData();
+          break;
+        case 's':
+          CoroutineScheduler::list(Serial);
+          break;
+      }
     }
-    debug_print((String) "Version - Firmware:v" + VERSION_MAJOR + "." + VERSION_MINOR + "." + VERSION_PATCH + " | Config:v" + CONFIGVER, true);
-    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + connection_state[iotWebConf.getState()] + " | IP:" + lip + " | HTTPBusy: " + yesno[httpbusy] + " | Uptime:" + uptime, true);
-    debug_print((String) "Clock - Status:" + clock_status[systemClock.getSyncStatusCode()] + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
-    debug_print((String) "Loc - SavedLat:" + savedlat.value() + " | SavedLon:" + savedlon.value() + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
-    debug_print((String) "IPGeo - Complete:" + yesno[checkipgeo.complete] + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
-    debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
-    debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | NextShow:" + wage, true);
-    debug_print((String) "Air Quality - Aqi:" + air_quality[weather.currentaqi] + " | Co:" + weather.carbon_monoxide + " | No:" + weather.nitrogen_monoxide + " | No2:" + weather.nitrogen_dioxide + " | Ozone:" + weather.ozone + " | So2:" + weather.sulfer_dioxide + " | Pm2.5:" + weather.particulates_small + " | Pm10:" + weather.particulates_medium + " | Ammonia:" + weather.ammonia + " | LastSuccess:" + alq + " | NextShow:" + alh, true);
-    debug_print((String) "Alerts - Active:" + yesno[alerts.active] + " | Watch:" + yesno[alerts.inWatch] + " | Warn:" + yesno[alerts.inWarning] + " | LastTry:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
-    debug_print((String) "Location: " + geocode.city + ", " + geocode.state + ", " + geocode.country, true);
-    if (alerts.active)
-      debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
-    debug_print(displaytoken.showTokens(), true);
   }
 }
 
 COROUTINE(checkGeocode) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(!httpbusy && checkgeocode.active && checkipgeo.complete && abs(systemClock.getNow() - checkgeocode.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0) && !firsttimefailsafe && curl.length() > 7);
+  COROUTINE_AWAIT(!httpbusy && checkgeocode.active && checkipgeo.complete && abs(systemClock.getNow() - checkgeocode.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0) && !firsttimefailsafe && urls[3][0] != '\0');
   ESP_LOGI(TAG, "Checking Geocode Location...");
   httpbusy = true;
-  Serial.println((String) "CURL: " + curl);
   checkgeocode.retries = 1;
   checkgeocode.jsonParsed = false;
   while (!checkgeocode.jsonParsed && (checkgeocode.retries <= 1))
   {
     COROUTINE_DELAY(1000);
-    ESP_LOGD(TAG, "Connecting to %s", curl);
+    ESP_LOGD(TAG, "Connecting to %s", urls[2]);
     HTTPClient http;
-    http.begin(curl);
+    http.begin(urls[2]);
     int httpCode = http.GET();
     ESP_LOGD(TAG, "HTTP code : %d", httpCode);
     if (httpCode == 200)
@@ -522,36 +484,41 @@ COROUTINE(checkGeocode) {
 #ifndef DISABLE_IPGEOCHECK
 COROUTINE(checkIpgeo) {
   COROUTINE_BEGIN();
-  COROUTINE_AWAIT(!httpbusy && iotWebConf.getState() == 4 && (ipgeoapi.value())[0] != '\0' && displaytoken.isReady(0) && !firsttimefailsafe && gurl.length() > 7);
+  COROUTINE_AWAIT(!httpbusy && iotWebConf.getState() == 4 && (ipgeoapi.value())[0] != '\0' && displaytoken.isReady(0) && !firsttimefailsafe && urls[4][0] != '\0');
   while (!checkipgeo.complete)
   {
     COROUTINE_AWAIT(abs(systemClock.getNow() - checkipgeo.lastattempt) > T1M);
     ESP_LOGI(TAG, "Checking IP Geolocation...");
     httpbusy = true;
-    Serial.println((String) "GURL: " + gurl);
     checkipgeo.active = true;
     checkipgeo.retries = 1;
     checkipgeo.jsonParsed = false;
     while (!checkipgeo.jsonParsed && (checkipgeo.retries <= 1))
     {
       COROUTINE_DELAY(1000);
-      ESP_LOGD(TAG, "Connecting to %s", gurl);
+      ESP_LOGD(TAG, "Connecting to %s", urls[4]);
       HTTPClient http;
-      http.begin(gurl);
+      http.begin(urls[4]);
       int httpCode = http.GET();
       ESP_LOGD(TAG, "HTTP code : %d", httpCode);
       if (httpCode == 200)
       {
         ipgeoJson = JSON.parse(http.getString());
-        Serial.println(ipgeoJson);
-        Serial.flush();
+        http.end();
         if (JSON.typeof(ipgeoJson) == "undefined")
         ESP_LOGE(TAG, "Parsing weatherJson input failed!");
         else
           checkipgeo.jsonParsed = true;
+          fillIpgeoFromJson(&ipgeo);
+          checkipgeo.lastsuccess = systemClock.getNow();
+          checkipgeo.complete = true;
+          checkipgeo.active = false;
+          processLoc();
+          processTimezone();
       }
       else if (httpCode == 401)
       {
+        http.end();
         alertflash.color = RED;
         alertflash.laps = 1;
         alertflash.active = true;
@@ -564,29 +531,18 @@ COROUTINE(checkIpgeo) {
       }
       else
       {
+        http.end();
         alertflash.color = RED;
         alertflash.laps = 1;
-        alertflash.active = true;
-        COROUTINE_AWAIT(!alertflash.active);
+        //alertflash.active = true;
+        //COROUTINE_AWAIT(!alertflash.active);
         scrolltext.message = (String) "Error getting ip geolocation: " + httpCode;
         scrolltext.color = RED;
         scrolltext.active = true;
         scrolltext.displayicon = false;
         COROUTINE_AWAIT(!scrolltext.active);
       }
-      http.end();
       checkipgeo.retries++;
-    }
-    if (!checkipgeo.jsonParsed)
-      ESP_LOGE(TAG, "Error: JSON");
-    else
-    {
-      fillIpgeoFromJson(&ipgeo);
-      checkipgeo.lastsuccess = systemClock.getNow();
-      checkipgeo.complete = true;
-      checkipgeo.active = false;
-      processLoc();
-      processTimezone();
     }
     checkipgeo.lastattempt = systemClock.getNow();
     httpbusy = false;
@@ -595,11 +551,21 @@ COROUTINE(checkIpgeo) {
 }
 #endif
 
-COROUTINE(miscScrollers) {
+COROUTINE(systemMessages) {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(iotWebConf.getState() == 1 || resetme || scrolltext.showingip);
+    COROUTINE_AWAIT(iotWebConf.getState() == 1 || resetme || scrolltext.showingip || scrolltext.showingloc);
     COROUTINE_AWAIT((millis() - scrolltext.resetmsgtime) > T1M*1000 && displaytoken.isReady(4));
+    if (scrolltext.showingloc) 
+    {
+      displaytoken.setToken(4);
+      scrolltext.message = (String)"";
+      scrolltext.color = GREEN;
+      scrolltext.active = true;
+      COROUTINE_AWAIT(!scrolltext.active);
+      scrolltext.showingcfg = false;
+      displaytoken.resetToken(4);
+    }
     if (scrolltext.showingcfg) 
     {
       displaytoken.setToken(4);
@@ -664,10 +630,10 @@ COROUTINE(coroutineManager) {
       showClock.suspend();
   if (showClock.isSuspended() && displaytoken.isReady(0))
     showClock.resume();
-  if (serialdebug.isChecked() && print_debugData.isSuspended() && displaytoken.isReady(0))
-    print_debugData.resume();
-  else if (!serialdebug.isChecked() && !print_debugData.isSuspended())
-    print_debugData.suspend();
+  if (serialdebug.isChecked() && serialInput.isSuspended() && displaytoken.isReady(0))
+    serialInput.resume();
+  else if (!serialdebug.isChecked() && !serialInput.isSuspended())
+    serialInput.suspend();
   if (show_date.isChecked() && showDate.isSuspended() && iotWebConf.getState() != 1)
     showDate.resume();
   else if ((!show_date.isChecked() && !showDate.isSuspended()) || iotWebConf.getState() == 1)

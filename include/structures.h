@@ -154,6 +154,7 @@ struct ScrollText {
   bool displayicon;
   bool tempshown;
   bool showingreset;
+  bool showingloc;
   bool showingip;
   bool showingcfg;
   char icon[5];

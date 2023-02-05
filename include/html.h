@@ -114,14 +114,11 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
 {
   ESP_LOGD(TAG, "Validating web form...");
   bool valid = true;
-
-/*
-  int l = webRequestWrapper->arg(stringParam.getId()).length();
-  if (l < 3)
+  int l = webRequestWrapper->arg(ipgeoapi.getId()).length();
+  if (l != 32 || l != 0)
   {
-    stringParam.errorMessage = "Please provide at least 3 characters for this test!";
+    ipgeoapi.errorMessage = "IPGeo API needs to be 32 characters long";
     valid = false;
   }
-*/
   return valid;
 }

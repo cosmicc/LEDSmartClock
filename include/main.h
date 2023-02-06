@@ -1,3 +1,4 @@
+
 // Emable SPI for FastLED
 #define HSPI_MOSI   23
 #define FASTLED_ALL_PINS_HARDWARE_SPI
@@ -31,11 +32,12 @@
 #include <Arduino_JSON.h>
 
 static const char* CONFIGVER = "4";// config version (advance if iotwebconf config additions to reset defaults)
+
 #undef COROUTINE_PROFILER          // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages
 #undef DISABLE_WEATHERCHECK
 #undef DISABLE_AIRCHECK
-#undef DISABLE_ALERTCHECK          // Disable Weather Alert checks
+#define DISABLE_ALERTCHECK          // Disable Weather Alert checks
 #undef DISABLE_IPGEOCHECK          // Disable IPGEO checks
 #define PROFILER_DELAY 10          // Coroutine profiler delay in seconds
 #define WDT_TIMEOUT 30             // Watchdog Timeout seconds
@@ -57,6 +59,11 @@ static const char* CONFIGVER = "4";// config version (advance if iotwebconf conf
 #define STARTSHOWDELAY_LOW 60       // min seconds for startup show delay
 #define STARTSHOWDELAY_HIGH 600      // max seconds for startup show delay
 #define NUMMATRIX (mw*mh)
+
+#define ASYNC_HTTP_DEBUG_PORT           Serial
+// Use from 0 to 4. Higher number, more debugging messages and memory usage.
+#define _ASYNC_TCP_SSL_LOGLEVEL_        4
+#define _ASYNC_HTTPS_LOGLEVEL_          4
 
 // second time aliases
 #define T1S 1*1L  // 1 second
@@ -97,7 +104,7 @@ static char truefalse[][6] = {"False", "True"};
 // Global Variables & Class Objects
 const char thingName[] = "LEDSMARTCLOCK";                 // Default SSID used for new setup
 const char wifiInitialApPassword[] = "ledsmartclock";     // Default AP password for new setup
-char urls[5][254];
+char urls[5][256];
 WireInterface wireInterface(Wire);                  // I2C hardware object
 DS3231Clock<WireInterface> dsClock(wireInterface);  // Hardware DS3231 RTC object
 CRGB leds[NUMMATRIX];           // Led matrix array object
@@ -107,11 +114,7 @@ Tsl2561 Tsl(Wire);              // Hardware Lux sensor object
 DNSServer dnsServer;            // DNS Server object
 WebServer server(80);           // Web server object for IotWebConf and OTA
 HTTPUpdateServer httpUpdater;
-JSONVar weatherJson;            // JSON object for weather
-JSONVar alertsJson;             // JSON object for alerts
-JSONVar ipgeoJson;              // JSON object for ip geolocation
-JSONVar geocodeJson;    
-JSONVar aqiJson;    
+JSONVar Json;                   // JSON object for apis  
 Weather weather;                // weather info data class
 Alerts alerts;                  // wweather alerts data class
 Ipgeo ipgeo;                    // ip geolocation data class
@@ -135,18 +138,11 @@ acetime_t bootTime;             // boot time
 String timesource = "none";     // Primary timeclock source gps/ntp
 uint8_t userbrightness;         // Current saved brightness setting (from iotwebconf)
 bool firsttimefailsafe;
+bool httpbusy;
 
 #include "colors.h"
 
-AsyncHTTPSRequest request[5];
-void requestWEATHER(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState);
-void requestALERTS(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState);
-void requestGEOCODE(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState);
-void requestAIR(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState);
-void requestIPGEO(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState);
-void httpRequest(uint16_t index);
-typedef void (*requestCallback)(void* optParm, AsyncHTTPSRequest* thisRequest, int readyState);
-requestCallback requestCB[5] = { requestWEATHER, requestALERTS, requestGEOCODE, requestAIR, requestIPGEO };
+AsyncHTTPSRequest request;
 
 // Function Declarations
 void print_debugData();
@@ -181,6 +177,8 @@ String getSystemZonedDateTimeString();
 bool readyToDisplay();
 const char *ordinal_suffix(int n);
 char *cleanString(const char *p);
+bool httpRequest(uint16_t index);
+bool httpIsReady();
 
 #include "iowebconf.h"
 #include "gpsclock.h"

@@ -36,11 +36,11 @@ struct Weather {
   char dayIcon[5];
   int16_t dayTempMin;
   int16_t dayTempMax;
-  acetime_t daySunrise;
-  acetime_t daySunset;
+  //acetime_t daySunrise;
+  //acetime_t daySunset;
   int dayHumidity;
   char dayDescription[20];
-  double dayMoonPhase;
+  //double dayMoonPhase;
   int dayWindSpeed;
   int dayWindGust;
   uint8_t currentaqi;
@@ -71,18 +71,6 @@ struct Alerts {
   char urgency1[15];
   char event1[50];
   char description1[256];
-  char status2[15];
-  char severity2[15];
-  char certainty2[15];
-  char urgency2[15];
-  char event2[50];
-  char description2[256];
-  char status3[15];
-  char severity3[15];
-  char certainty3[15];
-  char urgency3[15];
-  char event3[50];
-  char description3[256];
   acetime_t timestamp;
   acetime_t lastshown;
   
@@ -102,9 +90,8 @@ struct Geocode {
 };
 
 struct Checkalerts {
-  bool send;
+  bool active;
   bool complete;
-  bool success;
   bool jsonParsed;
   uint8_t retries;
   acetime_t lastattempt;
@@ -113,9 +100,8 @@ struct Checkalerts {
 };
 
 struct Checkweather {
-  bool send;
+  bool active;
   bool complete;
-  bool success;
   bool jsonParsed;
   uint8_t retries;
   acetime_t lastattempt;
@@ -124,27 +110,28 @@ struct Checkweather {
 
 struct Checkaqi {
   bool active;
-  uint8_t retries;
+  bool complete;
   bool jsonParsed;
+  uint8_t retries;
   acetime_t lastattempt;
   acetime_t lastsuccess;
-  bool complete;
 };
 
 struct Checkipgeo {
   bool active;
+  bool complete;
+  bool jsonParsed;
   uint8_t retries;
-  boolean jsonParsed;
   acetime_t lastattempt;
   acetime_t lastsuccess;
-  bool complete;
 };
 
 struct Checkgeocode {
   bool active;
+  bool ready;
   bool complete;
+  bool jsonParsed;
   uint8_t retries;
-  boolean jsonParsed;
   acetime_t lastattempt;
   acetime_t lastsuccess;
 };
@@ -197,6 +184,7 @@ struct CoTimers {
   uint8_t iconcycle;
   uint32_t icontimer;
   uint32_t iotloop;
+  acetime_t lasthttprequest;
 };
 
 struct Current {

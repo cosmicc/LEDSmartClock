@@ -1,4 +1,3 @@
-
 // Emable SPI for FastLED
 #define HSPI_MOSI   23
 #define FASTLED_ALL_PINS_HARDWARE_SPI
@@ -27,8 +26,6 @@
 #include <FastLED_NeoMatrix.h>
 #include <FastLED.h>
 #include <HTTPClient.h>
-//#include <AsyncHTTPRequest_Generic.h>
-#include <AsyncHTTPSRequest_Generic.h>
 #include <Arduino_JSON.h>
 
 static const char* CONFIGVER = "4";// config version (advance if iotwebconf config additions to reset defaults)
@@ -37,7 +34,7 @@ static const char* CONFIGVER = "4";// config version (advance if iotwebconf conf
 #undef DEBUG_LIGHT                 // Show light debug serial messages
 #undef DISABLE_WEATHERCHECK
 #undef DISABLE_AIRCHECK
-#define DISABLE_ALERTCHECK          // Disable Weather Alert checks
+#undef DISABLE_ALERTCHECK          // Disable Weather Alert checks
 #undef DISABLE_IPGEOCHECK          // Disable IPGEO checks
 #define PROFILER_DELAY 10          // Coroutine profiler delay in seconds
 #define WDT_TIMEOUT 30             // Watchdog Timeout seconds
@@ -60,10 +57,6 @@ static const char* CONFIGVER = "4";// config version (advance if iotwebconf conf
 #define STARTSHOWDELAY_HIGH 600      // max seconds for startup show delay
 #define NUMMATRIX (mw*mh)
 
-#define ASYNC_HTTP_DEBUG_PORT           Serial
-// Use from 0 to 4. Higher number, more debugging messages and memory usage.
-#define _ASYNC_TCP_SSL_LOGLEVEL_        4
-#define _ASYNC_HTTPS_LOGLEVEL_          4
 
 // second time aliases
 #define T1S 1*1L  // 1 second
@@ -104,6 +97,8 @@ static char truefalse[][6] = {"False", "True"};
 // Global Variables & Class Objects
 const char thingName[] = "LEDSMARTCLOCK";                 // Default SSID used for new setup
 const char wifiInitialApPassword[] = "ledsmartclock";     // Default AP password for new setup
+const char *reqagentname = "User-Agent";
+const char *reqagentvalue = "Mozilla/5.0";
 char urls[5][256];
 WireInterface wireInterface(Wire);                  // I2C hardware object
 DS3231Clock<WireInterface> dsClock(wireInterface);  // Hardware DS3231 RTC object
@@ -113,6 +108,7 @@ TinyGPSPlus GPS;                // Hardware GPS object
 Tsl2561 Tsl(Wire);              // Hardware Lux sensor object
 DNSServer dnsServer;            // DNS Server object
 WebServer server(80);           // Web server object for IotWebConf and OTA
+HTTPClient request;
 HTTPUpdateServer httpUpdater;
 JSONVar Json;                   // JSON object for apis  
 Weather weather;                // weather info data class
@@ -141,8 +137,6 @@ bool firsttimefailsafe;
 bool httpbusy;
 
 #include "colors.h"
-
-AsyncHTTPSRequest request;
 
 // Function Declarations
 void print_debugData();
@@ -179,6 +173,8 @@ const char *ordinal_suffix(int n);
 char *cleanString(const char *p);
 bool httpRequest(uint16_t index);
 bool httpIsReady();
+bool connectAp(const char *apName, const char *password);
+void connectWifi(const char *ssid, const char *password);
 
 #include "iowebconf.h"
 #include "gpsclock.h"

@@ -85,9 +85,11 @@ void setup ()
   iotWebConf.getApTimeoutParameter()->visible = true;
   iotWebConf.setStatusPin(STATUS_PIN);
   iotWebConf.setConfigPin(CONFIG_PIN);
-  iotWebConf.setupUpdateServer(
-    [](const char* updatePath) { httpUpdater.setup(&server, updatePath); },
-    [](const char* userName, char* password) { httpUpdater.updateCredentials(userName, password); });
+  iotWebConf.setApConnectionHandler(&connectAp);
+  iotWebConf.setWifiConnectionHandler(&connectWifi);
+  //iotWebConf.setupUpdateServer(
+  //  [](const char* updatePath) { httpUpdater.setup(&server, updatePath); },
+  //  [](const char* userName, char* password) { httpUpdater.updateCredentials(userName, password); });
   iotWebConf.init();
   if (serialdebug.isChecked()) {
     
@@ -164,9 +166,10 @@ void setup ()
   scrolltext.position = mw;
   ESP_EARLY_LOGD(TAG, "Generating random numbers for show delays..");
   weather.lastdailyshown = bootTime;//  +random(60 * 10, 60 * 60 * show_weather_daily_interval.value());
-  weather.lastaqishown = bootTime - T1Y + 60;//  +random(60 * 1, 60 * airquality_interval.value());
+  weather.lastaqishown = bootTime;//  +random(60 * 1, 60 * airquality_interval.value());
+  showclock.datelastshown = bootTime;
   if (use_fixed_loc.isChecked())
-    ESP_EARLY_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
+       ESP_EARLY_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
   processLoc();
   showclock.fstop = 250;
   if (flickerfast.isChecked())
@@ -182,6 +185,9 @@ void setup ()
   cotimer.iotloop = millis();
   displaytoken.resetAllTokens();
   CoroutineScheduler::setup();
+  //char *ssid = "GH";
+  //char *password = "8j6H%tF3m^84t*5@";
+  //WiFi.begin(ssid, password);
 }
 
 //callbacks 
@@ -200,7 +206,6 @@ void configSaved()
     resetme = true;
   if (!serialdebug.isChecked())
     Serial.println("Serial debug info has been disabled.");
-  scrolltext.showingcfg = true;
   firsttimefailsafe = false;
 }
 
@@ -214,9 +219,18 @@ void wifiConnected() {
   checkgeocode.ready = true;
 }
 
+bool connectAp(const char* apName, const char* password)
+{
+  return WiFi.softAP(apName, password, 4);
+}
+void connectWifi(const char* ssid, const char* password)
+{
+  WiFi.begin(ssid, password);
+}
+
 // Regular Functions
 bool httpIsReady() {
-  if (!httpbusy && abs(systemClock.getNow() - cotimer.lasthttprequest) > 60 && iotWebConf.getState() == 4)
+  if (!httpbusy && WiFi.isConnected())
     return true;
   else
     return false;
@@ -224,22 +238,9 @@ bool httpIsReady() {
 
 bool httpRequest(uint16_t index)
 {
-  request.setDebug(true);
-  static bool requestOpenResult;
-  requestOpenResult = request.open("GET", urls[index]);
-  if (requestOpenResult)
-  {
     ESP_LOGD(TAG, "Sending request [%d]: %s", index, urls[index]);
-    request.send();
+    request.begin(urls[index]);
     return true;
-  }
-  else
-  {
-    ESP_LOGD(TAG, "Request send failed [%d]: %s", index, urls[index]);
-    request.abort();
-    return false;
-  }
-  
 }
 
 void print_debugData() {
@@ -273,12 +274,13 @@ void print_debugData() {
       speedunit = metric_units[1];
     }
     debug_print((String) "Version - Firmware:v" + VERSION_MAJOR + "." + VERSION_MINOR + "." + VERSION_PATCH + " | Config:v" + CONFIGVER, true);
-    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + connection_state[iotWebConf.getState()] + " | HttpBusy:" + yesno[httpbusy] + " | HttpState:" + request.readyState() + " | IP:" + lip + " | Uptime:" + uptime, true);
+    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + connection_state[iotWebConf.getState()] + " | HttpBusy:" + yesno[httpbusy] + " | IP:" + lip + " | Uptime:" + uptime, true);
     debug_print((String) "Clock - Status:" + clock_status[systemClock.getSyncStatusCode()] + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
     debug_print((String) "Loc - SavedLat:" + savedlat.value() + " | SavedLon:" + savedlon.value() + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
     debug_print((String) "IPGeo - Complete:" + yesno[checkipgeo.complete] + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
     debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
-    debug_print((String) "Weather - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | NextShow:" + wage, true);
+    debug_print((String) "Weather Current - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | NextShow:" + wage, true);
+    debug_print((String) "Weather Day - Icon:" + weather.dayIcon + " | LoTemp:" + weather.dayTempMin + tempunit + " | HiTemp:" + weather.dayTempMax + tempunit + " | Humidity:" + weather.dayHumidity + "% | Wind:" + weather.dayWindSpeed + "/" + weather.dayWindGust + speedunit + " | Desc:" + weather.currentDescription + " | NextShow:" + wage, true);
     debug_print((String) "Air Quality - Aqi:" + air_quality[weather.currentaqi] + " | Co:" + weather.carbon_monoxide + " | No:" + weather.nitrogen_monoxide + " | No2:" + weather.nitrogen_dioxide + " | Ozone:" + weather.ozone + " | So2:" + weather.sulfer_dioxide + " | Pm2.5:" + weather.particulates_small + " | Pm10:" + weather.particulates_medium + " | Ammonia:" + weather.ammonia + " | LastSuccess:" + alq + " | NextShow:" + alh, true);
     debug_print((String) "Alerts - Active:" + yesno[alerts.active] + " | Watch:" + yesno[alerts.inWatch] + " | Warn:" + yesno[alerts.inWarning] + " | LastTry:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
     debug_print((String) "Location: " + geocode.city + ", " + geocode.state + ", " + geocode.country, true);
@@ -372,7 +374,7 @@ void processLoc()
     memcpy(savedlat.value(), sla, sizeof(sla));
     memcpy(savedlon.value(), slo, sizeof(slo));
     iotWebConf.saveConfig();
-    checkgeocode.active = true;
+    checkgeocode.ready = true;
   }
   //if (nlat != 0 && nlon != 0 && ) {
   //  char sla[12];

@@ -90,8 +90,6 @@ struct Geocode {
 };
 
 struct Checkalerts {
-  bool active;
-  bool complete;
   bool jsonParsed;
   uint8_t retries;
   acetime_t lastattempt;
@@ -100,8 +98,6 @@ struct Checkalerts {
 };
 
 struct Checkweather {
-  bool active;
-  bool complete;
   bool jsonParsed;
   uint8_t retries;
   acetime_t lastattempt;
@@ -109,8 +105,6 @@ struct Checkweather {
 };
 
 struct Checkaqi {
-  bool active;
-  bool complete;
   bool jsonParsed;
   uint8_t retries;
   acetime_t lastattempt;
@@ -118,7 +112,6 @@ struct Checkaqi {
 };
 
 struct Checkipgeo {
-  bool active;
   bool complete;
   bool jsonParsed;
   uint8_t retries;
@@ -127,9 +120,7 @@ struct Checkipgeo {
 };
 
 struct Checkgeocode {
-  bool active;
   bool ready;
-  bool complete;
   bool jsonParsed;
   uint8_t retries;
   acetime_t lastattempt;
@@ -184,7 +175,7 @@ struct CoTimers {
   uint8_t iconcycle;
   uint32_t icontimer;
   uint32_t iotloop;
-  acetime_t lasthttprequest;
+  acetime_t lasthttptime;
 };
 
 struct Current {

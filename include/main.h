@@ -172,8 +172,10 @@ String getSystemZonedDateTimeString();
 bool readyToDisplay();
 const char *ordinal_suffix(int n);
 char *cleanString(const char *p);
-bool httpRequest(uint16_t index);
-bool httpIsReady();
+bool httpRequest(uint8_t index);
+bool isHttpReady();
+bool isNextAttemptReady();
+bool isValidApi();
 bool connectAp(const char *apName, const char *password);
 void connectWifi(const char *ssid, const char *password);
 

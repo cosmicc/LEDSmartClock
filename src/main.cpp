@@ -185,9 +185,6 @@ void setup ()
   cotimer.iotloop = millis();
   displaytoken.resetAllTokens();
   CoroutineScheduler::setup();
-  //char *ssid = "GH";
-  //char *password = "8j6H%tF3m^84t*5@";
-  //WiFi.begin(ssid, password);
 }
 
 //callbacks 
@@ -229,7 +226,7 @@ void connectWifi(const char* ssid, const char* password)
 }
 
 // Regular Functions
-bool httpIsReady() {
+bool isHttpReady() {
   if (!httpbusy && WiFi.isConnected() && displaytoken.isReady(0))
     return true;
   else
@@ -240,6 +237,27 @@ bool httpRequest(uint16_t index)
 {
     ESP_LOGD(TAG, "Sending request [%d]: %s", index, urls[index]);
     request.begin(urls[index]);
+    return true;
+}
+
+bool isNextAttemptReady(acetime_t lastattempt) {
+  if (abs(systemClock.getNow() - lastattempt) > T1M)
+    return true;
+  else
+    return false;
+}
+
+bool isLocValid() {
+  if (current.lat).length() > 1 && (current.lon).length() > 1)
+    return true;
+  else
+    return false;
+}
+
+bool isValidApi(char *apikey) {
+  if (apikey[0] == '\0' || strlen(apikey) != 32)
+    return false;
+  else
     return true;
 }
 
@@ -708,13 +726,6 @@ void fillAqiFromJson(Weather* weather) {
   weather->particulates_small = Json["list"][0]["components"]["pm2_5"];
   weather->particulates_medium = Json["list"][0]["components"]["pm10"];
   weather->ammonia = Json["list"][0]["components"]["nh3"];
-}
-
-bool isValidApi(char *apikey) {
-  if (apikey[0] == '\0' || strlen(apikey) != 32)
-    return false;
-  else
-    return true;
 }
 
 void buildURLs() 

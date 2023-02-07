@@ -70,7 +70,6 @@
 #define T1D 24*60*60L  // 1 day
 #define T1Y 365*24*60*60L  // 1 year
 
-
 #include "bitmaps.h"
 
 // AceTime refs
@@ -96,15 +95,15 @@ static char yesno[][4] = {"No", "Yes"};
 static char truefalse[][6] = {"False", "True"};
 
 // Global Variables & Class Objects
-const char* TAG = "CLOCK";                // Logging tag
-const char thingName[] = "LEDSMARTCLOCK";                 // Default SSID used for new setup
-const char wifiInitialApPassword[] = "ledsmartclock";     // Default AP password for new setup
+const char* TAG = "CLOCK";                             // ESP Logging tag
+const char thingName[] = "LEDSMARTCLOCK";              // Default SSID used for new setup
+const char wifiInitialApPassword[] = "ledsmartclock";  // Default AP password for new setup
 char urls[5][256];
-WireInterface wireInterface(Wire);                  // I2C hardware object
-DS3231Clock<WireInterface> dsClock(wireInterface);  // Hardware DS3231 RTC object
-CRGB leds[NUMMATRIX];           // Led matrix array object
+WireInterface wireInterface(Wire);                     // I2C hardware object
+DS3231Clock<WireInterface> dsClock(wireInterface);     // Hardware DS3231 RTC object
+CRGB leds[NUMMATRIX];                                  // Led matrix array object
 FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(leds, mw, mh, NEO_MATRIX_BOTTOM+NEO_MATRIX_RIGHT+NEO_MATRIX_COLUMNS+NEO_MATRIX_ZIGZAG); // FastLED matrix object
-TinyGPSPlus GPS;                // Hardware GPS object
+TinyGPSPlus GPS;                                       // Hardware GPS object
 Tsl2561 Tsl(Wire);              // Hardware Lux sensor object
 DNSServer dnsServer;            // DNS Server object
 WebServer server(80);           // Web server object for IotWebConf and OTA
@@ -116,6 +115,8 @@ Alerts alerts;                  // wweather alerts data class
 Ipgeo ipgeo;                    // ip geolocation data class
 Geocode geocode;
 GPSData gps;                    // gps data class
+LastShown lastshown;
+ShowReady showready;
 CheckClass checkalerts;
 CheckClass checkweather;
 CheckClass checkipgeo;

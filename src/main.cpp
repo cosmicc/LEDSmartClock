@@ -226,6 +226,21 @@ void connectWifi(const char* ssid, const char* password)
 }
 
 // Regular Functions
+bool nextShowReady(acetime_t lastshown, uint8_t interval, uint32_t multiplier)
+{
+  if (abs(systemClock.getNow() - lastshown) > (interval * multiplier))
+    return true;
+  else
+    return false;
+}
+
+bool isNextAttemptReady(acetime_t lastattempt) {
+  if (abs(systemClock.getNow() - lastattempt) > T1M)
+    return true;
+  else
+    return false;
+}
+
 bool isHttpReady() {
   if (!httpbusy && WiFi.isConnected() && displaytoken.isReady(0))
     return true;
@@ -240,12 +255,6 @@ bool httpRequest(uint16_t index)
     return true;
 }
 
-bool isNextAttemptReady(acetime_t lastattempt) {
-  if (abs(systemClock.getNow() - lastattempt) > T1M)
-    return true;
-  else
-    return false;
-}
 
 bool isLocValid() {
   if (current.lat).length() > 1 && (current.lon).length() > 1)

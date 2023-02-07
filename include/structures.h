@@ -1,4 +1,4 @@
-typedef struct GPSData
+struct GPSData
 {
   bool fix;
   uint8_t sats;
@@ -9,21 +9,21 @@ typedef struct GPSData
   acetime_t timestamp;
   acetime_t lastcheck;
   acetime_t lockage;
-} GPSData;
+};
 
-typedef struct RgbColor
+struct RgbColor
 {
     unsigned char r;
     unsigned char g;
     unsigned char b;
-} RgbColor;
+};
 
-typedef struct HsvColor
+struct HsvColor
 {
     unsigned char h;
     unsigned char s;
     unsigned char v;
-} HsvColor;
+};
 
 struct Weather {
   char currentIcon[5];
@@ -43,6 +43,7 @@ struct Weather {
   //double dayMoonPhase;
   int dayWindSpeed;
   int dayWindGust;
+  
   uint8_t currentaqi;
   double carbon_monoxide;
   double nitrogen_monoxide;
@@ -53,12 +54,8 @@ struct Weather {
   double particulates_medium;
   double ammonia;
 
-  acetime_t timestamp;
   acetime_t lastattempt;
-  acetime_t lastshown;
   acetime_t lastsuccess;
-  acetime_t lastdailyshown;
-  acetime_t lastaqishown;
 };
 
 struct Alerts {
@@ -71,9 +68,8 @@ struct Alerts {
   char urgency1[15];
   char event1[50];
   char description1[256];
-  acetime_t timestamp;
-  acetime_t lastshown;
-  
+  acetime_t lastsuccess;
+  acetime_t lastattempt;
 };
 
 struct Ipgeo {
@@ -89,37 +85,7 @@ struct Geocode {
   char country[32];
 };
 
-struct Checkalerts {
-  bool jsonParsed;
-  uint8_t retries;
-  acetime_t lastattempt;
-  acetime_t lastsuccess;
-  
-};
-
-struct Checkweather {
-  bool jsonParsed;
-  uint8_t retries;
-  acetime_t lastattempt;
-  acetime_t lastsuccess;
-};
-
-struct Checkaqi {
-  bool jsonParsed;
-  uint8_t retries;
-  acetime_t lastattempt;
-  acetime_t lastsuccess;
-};
-
-struct Checkipgeo {
-  bool complete;
-  bool jsonParsed;
-  uint8_t retries;
-  acetime_t lastattempt;
-  acetime_t lastsuccess;
-};
-
-struct Checkgeocode {
+struct CheckClass {
   bool ready;
   bool jsonParsed;
   uint8_t retries;
@@ -150,14 +116,29 @@ struct ScrollText {
   uint32_t resetmsgtime;
 };
 
+struct ShowReady {
+  bool alert;
+  bool current_weather
+  bool date;
+  bool daily_weather;
+  bool aqi;
+};
+
+struct LastShown {
+  acetime_t date;
+  acetime_t alerts;
+  acetime_t weather;
+  acetime_t daily;
+  acetime_t aqi;
+};
+
 struct ShowClock {
-  uint8_t fstop;
-  uint32_t millis;
-  uint8_t seconds;
   bool colonflicker;
   bool colonoff;
-  acetime_t datelastshown;
+  uint8_t fstop;
+  uint8_t seconds;
   uint16_t color;
+  uint32_t millis;
 };
 
 struct CoTimers {
@@ -167,11 +148,6 @@ struct CoTimers {
   uint8_t scrollspeed;
   uint32_t scrollsize;
   int16_t scrolliters;
-  bool show_alert_ready;
-  bool show_weather_ready;
-  bool show_date_ready;
-  bool show_weather_daily_ready;
-  bool show_airquality_ready;
   uint8_t iconcycle;
   uint32_t icontimer;
   uint32_t iotloop;
@@ -198,7 +174,6 @@ struct Current {
 class DisplayToken
 {
   public:
-  
     String showTokens() {
       String buf;
       if (token1)

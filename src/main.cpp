@@ -230,7 +230,7 @@ void connectWifi(const char* ssid, const char* password)
 
 // Regular Functions
 bool httpIsReady() {
-  if (!httpbusy && WiFi.isConnected())
+  if (!httpbusy && WiFi.isConnected() && displaytoken.isReady(0))
     return true;
   else
     return false;

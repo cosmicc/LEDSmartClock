@@ -3,9 +3,11 @@
 #define FASTLED_ALL_PINS_HARDWARE_SPI
 #define FASTLED_ESP32_SPI_BUS HSPI
 
+#define VERSION "LED SmartClock v1.0.0"
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 0
-#define VERSION_PATCH 0   
+#define VERSION_PATCH 0
+#define VERSION_CONFIG 4
 
 #include <nvs_flash.h>
 #include <esp_task_wdt.h>
@@ -28,7 +30,7 @@
 #include <HTTPClient.h>
 #include <Arduino_JSON.h>
 
-static const char* CONFIGVER = "4";// config version (advance if iotwebconf config additions to reset defaults)
+//static const char* CONFIGVER = "4";// config version (advance if iotwebconf config additions to reset defaults)
 
 #undef COROUTINE_PROFILER          // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages
@@ -80,7 +82,6 @@ using ace_time::clock::SystemClockLoop;
 using ace_routine::CoroutineScheduler;
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 
-static const char* TAG = "CLOCK";                // Logging tag
 #include "structures.h"
 
 // defs
@@ -95,10 +96,9 @@ static char yesno[][4] = {"No", "Yes"};
 static char truefalse[][6] = {"False", "True"};
 
 // Global Variables & Class Objects
+const char* TAG = "CLOCK";                // Logging tag
 const char thingName[] = "LEDSMARTCLOCK";                 // Default SSID used for new setup
 const char wifiInitialApPassword[] = "ledsmartclock";     // Default AP password for new setup
-const char *reqagentname = "User-Agent";
-const char *reqagentvalue = "Mozilla/5.0";
 char urls[5][256];
 WireInterface wireInterface(Wire);                  // I2C hardware object
 DS3231Clock<WireInterface> dsClock(wireInterface);  // Hardware DS3231 RTC object
@@ -115,19 +115,19 @@ Weather weather;                // weather info data class
 Alerts alerts;                  // wweather alerts data class
 Ipgeo ipgeo;                    // ip geolocation data class
 Geocode geocode;
-GPSData gps; // gps data class
-Checkalerts checkalerts;
-Checkweather checkweather;
-Checkipgeo checkipgeo;
-Checkgeocode checkgeocode;
-Checkaqi checkaqi;
+GPSData gps;                    // gps data class
+CheckClass checkalerts;
+CheckClass checkweather;
+CheckClass checkipgeo;
+CheckClass checkgeocode;
+CheckClass checkaqi;
 ShowClock showclock;
 CoTimers cotimer;
 ScrollText scrolltext;
 Alertflash alertflash;
 Current current;
-acetime_t lastntpcheck;
 
+acetime_t lastntpcheck;
 bool clock_display_offset;      // Clock display offset for single digit hour
 bool resetme;                   // reset to factory defaults
 acetime_t bootTime;             // boot time

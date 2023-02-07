@@ -1,5 +1,4 @@
 // Coroutines
-
 #ifdef COROUTINE_PROFILER
 COROUTINE(printProfiling) {
   COROUTINE_LOOP() {
@@ -110,7 +109,7 @@ COROUTINE(showClock) {
 
 COROUTINE(checkAirquality) {
   COROUTINE_LOOP() {
-    COROUTINE_AWAIT(httpIsReady() && abs(systemClock.getNow() - checkaqi.lastsuccess) > (airquality_interval.value() * T1M) && abs(systemClock.getNow() - checkaqi.lastattempt) > T1M && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && !firsttimefailsafe);
+    COROUTINE_AWAIT(httpIsReady() && abs(systemClock.getNow() - checkaqi.lastsuccess) > (airquality_interval.value() * T1M) && abs(systemClock.getNow() - checkaqi.lastattempt) > T1M && (current.lat).length() > 1 && isValidApi(weatherapi.value()) && !firsttimefailsafe);
     ESP_LOGI(TAG, "Checking air quality conditions...");
     httpbusy = true;
     checkaqi.retries = 1;

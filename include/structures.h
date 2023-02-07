@@ -104,10 +104,6 @@ struct ScrollText {
   bool active;
   bool displayicon;
   bool tempshown;
-  bool showingreset;
-  bool showingloc;
-  bool showingip;
-  bool showingcfg;
   char icon[5];
   String message;
   uint16_t color;
@@ -122,6 +118,10 @@ struct ShowReady {
   bool date;
   bool daily_weather;
   bool aqi;
+  bool reset;
+  bool loc;
+  bool ip;
+  bool cfgupdate;
 };
 
 struct LastShown {

@@ -710,8 +710,8 @@ void fillAqiFromJson(Weather* weather) {
   weather->ammonia = Json["list"][0]["components"]["nh3"];
 }
 
-bool isApiKeyValid(char *apikey) {
-  if (apikey[0] == '\0')
+bool isValidApi(char *apikey) {
+  if (apikey[0] == '\0' || strlen(apikey) != 32)
     return false;
   else
     return true;

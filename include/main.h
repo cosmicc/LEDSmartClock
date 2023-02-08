@@ -32,13 +32,12 @@
 
 //static const char* CONFIGVER = "4";// config version (advance if iotwebconf config additions to reset defaults)
 
-#undef COROUTINE_PROFILER          // Enable the coroutine debug profiler
+#define COROUTINE_PROFILER          // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages
 #undef DISABLE_WEATHERCHECK
 #undef DISABLE_AIRCHECK
 #undef DISABLE_ALERTCHECK          // Disable Weather Alert checks
 #undef DISABLE_IPGEOCHECK          // Disable IPGEO checks
-#define PROFILER_DELAY 10          // Coroutine profiler delay in seconds
 #define WDT_TIMEOUT 30             // Watchdog Timeout seconds
 #define CONFIG_PIN 19              // Config reset button pin
 #define STATUS_PIN 2               // Use built-in ESP32 led for iotwebconf status
@@ -81,6 +80,7 @@ using ace_time::clock::SystemClockLoop;
 using ace_routine::CoroutineScheduler;
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 
+const char* TAG = "CLOCK";                             // ESP Logging tag
 #include "structures.h"
 
 // defs
@@ -95,7 +95,6 @@ static char yesno[][4] = {"No", "Yes"};
 static char truefalse[][6] = {"False", "True"};
 
 // Global Variables & Class Objects
-const char* TAG = "CLOCK";                             // ESP Logging tag
 const char thingName[] = "LEDSMARTCLOCK";              // Default SSID used for new setup
 const char wifiInitialApPassword[] = "ledsmartclock";  // Default AP password for new setup
 char urls[5][256];
@@ -141,7 +140,8 @@ bool httpbusy;
 
 // Function Declarations
 void print_debugData();
-void processLoc();
+void updateCoords();
+void updateLocation();
 void wifiConnected();
 void handleRoot();
 void configSaved();
@@ -169,13 +169,16 @@ ace_time::ZonedDateTime getSystemZonedTime();
 uint16_t calcbright(uint16_t bl);
 String getSystemZonedDateString();
 String getSystemZonedDateTimeString();
-bool readyToDisplay();
 const char *ordinal_suffix(int n);
 char *cleanString(const char *p);
 bool httpRequest(uint8_t index);
 bool isHttpReady();
 bool isNextAttemptReady();
-bool isValidApi();
+bool isLocValid(String source);
+bool isCoordsValid();
+bool isNextShowReady(acetime_t lastshown, uint8_t interval, uint32_t multiplier);
+bool isNextAttemptReady(acetime_t lastattempt);
+bool isApiValid(char *apikey);
 bool connectAp(const char *apName, const char *password);
 void connectWifi(const char *ssid, const char *password);
 

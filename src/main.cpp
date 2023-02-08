@@ -134,7 +134,6 @@ void setup ()
   checkIpgeo.setName("check_ipgeo");
   #endif
   #ifdef COROUTINE_PROFILER 
-  printProfiling.setName("profiler");
   LogBinProfiler::createProfilers();
   #endif
   ipgeo.tzoffset = 127;
@@ -148,29 +147,31 @@ void setup ()
   bootTime = systemClock.getNow();
   lastntpcheck= systemClock.getNow() - 3601;
   cotimer.icontimer = millis(); // reset all delay timers
-  checkipgeo.lastattempt = bootTime - T1Y + 60;
-  checkipgeo.lastsuccess = bootTime - T1Y + 60;
   gps.timestamp = bootTime - T1Y + 60;
   gps.lastcheck = bootTime - T1Y + 60;
   gps.lockage = bootTime - T1Y + 60;
-  alerts.timestamp = bootTime - T1Y + 60;
+  checkweather.lastsuccess = bootTime;
+  checkalerts.lastsuccess = bootTime + (60*3);
+  checkipgeo.lastsuccess = bootTime - T1Y + 60;
+  checkaqi.lastsuccess = bootTime;
+  checkgeocode.lastsuccess = bootTime - T1Y + 60;
   checkalerts.lastattempt = bootTime - T1Y + 60;
-  alerts.lastshown = bootTime - T1Y + 60;
-  checkalerts.lastsuccess = bootTime - T1Y + 60;
-  weather.timestamp = bootTime - T1Y + 60;
   checkweather.lastattempt = bootTime - T1Y + 60;
-  weather.lastshown = bootTime;
-  checkweather.lastsuccess = bootTime - T1Y + 60;
+  checkipgeo.lastattempt = bootTime - T1Y + 60;
+  checkaqi.lastattempt = bootTime - T1Y + 60;
+  checkgeocode.lastattempt = bootTime - T1Y + 60;
+  lastshown.alerts = bootTime - T1Y + 60;
+  lastshown.dayweather = bootTime;
+  lastshown.date = bootTime;
+  lastshown.currentweather = bootTime;
+  lastshown.aqi = bootTime;
   gps.lat = "0";
   gps.lon = "0";
   scrolltext.position = mw;
-  ESP_EARLY_LOGD(TAG, "Generating random numbers for show delays..");
-  weather.lastdailyshown = bootTime;//  +random(60 * 10, 60 * 60 * show_weather_daily_interval.value());
-  weather.lastaqishown = bootTime;//  +random(60 * 1, 60 * airquality_interval.value());
-  showclock.datelastshown = bootTime;
   if (use_fixed_loc.isChecked())
        ESP_EARLY_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
-  processLoc();
+  updateCoords();
+  updateLocation();
   showclock.fstop = 250;
   if (flickerfast.isChecked())
     showclock.fstop = 20;
@@ -190,7 +191,7 @@ void setup ()
 //callbacks 
 void configSaved()
 {
-  processLoc();
+  updateCoords();
   processTimezone();
   buildURLs();
   showclock.fstop = 250;
@@ -212,8 +213,7 @@ void wifiConnected() {
   display_showStatus();
   matrix->show();
   systemClock.forceSync();
-  scrolltext.showingip = true;
-  checkgeocode.ready = true;
+  showready.ip = true;
 }
 
 bool connectAp(const char* apName, const char* password)
@@ -226,7 +226,7 @@ void connectWifi(const char* ssid, const char* password)
 }
 
 // Regular Functions
-bool nextShowReady(acetime_t lastshown, uint8_t interval, uint32_t multiplier)
+bool isNextShowReady(acetime_t lastshown, uint8_t interval, uint32_t multiplier)
 {
   if (abs(systemClock.getNow() - lastshown) > (interval * multiplier))
     return true;
@@ -242,13 +242,13 @@ bool isNextAttemptReady(acetime_t lastattempt) {
 }
 
 bool isHttpReady() {
-  if (!httpbusy && WiFi.isConnected() && displaytoken.isReady(0))
+  if (!httpbusy && iotWebConf.getState() == 4 && displaytoken.isReady(0))
     return true;
   else
     return false;
 }
 
-bool httpRequest(uint16_t index)
+bool httpRequest(uint8_t index)
 {
     ESP_LOGD(TAG, "Sending request [%d]: %s", index, urls[index]);
     request.begin(urls[index]);
@@ -256,18 +256,46 @@ bool httpRequest(uint16_t index)
 }
 
 
-bool isLocValid() {
-  if (current.lat).length() > 1 && (current.lon).length() > 1)
+bool isCoordsValid() {
+  if ((current.lat).length() > 1 && (current.lon).length() > 1) 
+  {
     return true;
+  }
   else
+  {
     return false;
+  }
 }
 
-bool isValidApi(char *apikey) {
-  if (apikey[0] == '\0' || strlen(apikey) != 32)
-    return false;
-  else
+bool isLocationValid(String source) {
+  bool result = false;
+  if (source == "geocode")
+  {
+    if (geocode.city[0] != '\0')
+      result = true;
+  }
+  else if (source == "current")
+  {
+    if (current.city[0] != '\0')
+      result = true;
+  }
+  else if (source == "saved")
+  {
+    if (savedcity.value()[0] != '\0')
+      result = true;
+  }
+  return result;
+}
+
+bool isApiValid(char *apikey) {
+  if (apikey[0] != '\0' && strlen(apikey) == 32)
+  {
     return true;
+  }
+  else
+  {
+    return false;
+  }
 }
 
 void print_debugData() {
@@ -277,17 +305,24 @@ void print_debugData() {
     String gage = elapsedTime(now - gps.timestamp);
     String loca = elapsedTime(now - gps.lockage);
     String uptime = elapsedTime(now - bootTime);
-    String igt = elapsedTime(now - checkipgeo.lastattempt);
-    String igp = elapsedTime(now - checkipgeo.lastsuccess);
-    String wage = elapsedTime(now - weather.timestamp);
-    String wlt = elapsedTime(now - checkweather.lastattempt);
-    String alt = elapsedTime(now - checkalerts.lastattempt);
-    String wls = elapsedTime((now - weather.lastshown) - (show_weather_interval.value()*60));
-    String als = elapsedTime(now - alerts.lastshown);
-    String alg = elapsedTime(now - checkalerts.lastsuccess);
-    String wlg = elapsedTime(now - checkweather.lastsuccess);
-    String alq = elapsedTime(now - checkaqi.lastsuccess);
-    String alh = elapsedTime((now - weather.lastaqishown) - (airquality_interval.value() * 60));
+    String iga = elapsedTime(now - checkipgeo.lastattempt);
+    String igs = elapsedTime(now - checkipgeo.lastsuccess);
+
+    String wls = elapsedTime(now - checkweather.lastsuccess);
+    String wla = elapsedTime(now - checkweather.lastattempt);
+    String cwns = elapsedTime((now - lastshown.currentweather) - (show_weather_interval.value()*60));
+    String dwns = elapsedTime((now - lastshown.dayweather) - (show_weather_daily_interval.value()*60*60));
+    
+    String alla = elapsedTime(now - checkalerts.lastattempt);
+    String alls = elapsedTime(now - checkalerts.lastsuccess);
+    String alns = elapsedTime(now - lastshown.alerts);
+
+    String aqla = elapsedTime(now - checkaqi.lastattempt);
+    String aqls = elapsedTime(now - checkaqi.lastsuccess);
+    String aqns = elapsedTime((now - lastshown.aqi) - (airquality_interval.value()*60));
+    
+    String dtns = elapsedTime((now - lastshown.date) - (show_date_interval.value()*60*60));
+    
     String lst = elapsedTime(now - systemClock.getLastSyncTime());
     String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME * 60);
     String lip = (WiFi.localIP()).toString();
@@ -300,17 +335,21 @@ void print_debugData() {
       tempunit = metric_units[0];
       speedunit = metric_units[1];
     }
-    debug_print((String) "Version - Firmware:v" + VERSION_MAJOR + "." + VERSION_MINOR + "." + VERSION_PATCH + " | Config:v" + CONFIGVER, true);
-    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + connection_state[iotWebConf.getState()] + " | HttpBusy:" + yesno[httpbusy] + " | IP:" + lip + " | Uptime:" + uptime, true);
-    debug_print((String) "Clock - Status:" + clock_status[systemClock.getSyncStatusCode()] + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastTry:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextTry:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " sec | NextNtp:" + npt + " | LastSync:" + lst, true);
-    debug_print((String) "Loc - SavedLat:" + savedlat.value() + " | SavedLon:" + savedlon.value() + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon, true);
-    debug_print((String) "IPGeo - Complete:" + yesno[checkipgeo.complete] + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | LastAttempt:" + igt + " | LastSuccess:" + igp, true);
+    debug_print((String) "Version - Firmware:v" + VERSION_MAJOR + "." + VERSION_MINOR + "." + VERSION_PATCH + " | Config:v" + VERSION_CONFIG, true);
+    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + connection_state[iotWebConf.getState()] + " | HttpReady:" + yesno[isHttpReady()] + " | IP:" + lip + " | Uptime:" + uptime, true);
+    debug_print((String) "Clock - Status:" + clock_status[systemClock.getSyncStatusCode()] + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastAttempt:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextAttempt:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " Seconds | NextNtp:" + npt + " | LastSync:" + lst, true);
+    debug_print((String) "Loc - SavedLat:" + savedlat.value() + " | SavedLon:" + savedlon.value() + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon + " | LocValid:" + yesno[isCoordsValid()], true);
+    debug_print((String) "IPGeo - Complete:" + yesno[checkipgeo.complete] + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | ValidApi:" + yesno[isApiValid(ipgeoapi.value())] + " | LastAttempt:" + iga + " | LastSuccess:" + igs, true);
     debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
-    debug_print((String) "Weather Current - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | LastTry:" + wlt + " | LastSuccess:" + wlg + " | NextShow:" + wage, true);
-    debug_print((String) "Weather Day - Icon:" + weather.dayIcon + " | LoTemp:" + weather.dayTempMin + tempunit + " | HiTemp:" + weather.dayTempMax + tempunit + " | Humidity:" + weather.dayHumidity + "% | Wind:" + weather.dayWindSpeed + "/" + weather.dayWindGust + speedunit + " | Desc:" + weather.currentDescription + " | NextShow:" + wage, true);
-    debug_print((String) "Air Quality - Aqi:" + air_quality[weather.currentaqi] + " | Co:" + weather.carbon_monoxide + " | No:" + weather.nitrogen_monoxide + " | No2:" + weather.nitrogen_dioxide + " | Ozone:" + weather.ozone + " | So2:" + weather.sulfer_dioxide + " | Pm2.5:" + weather.particulates_small + " | Pm10:" + weather.particulates_medium + " | Ammonia:" + weather.ammonia + " | LastSuccess:" + alq + " | NextShow:" + alh, true);
-    debug_print((String) "Alerts - Active:" + yesno[alerts.active] + " | Watch:" + yesno[alerts.inWatch] + " | Warn:" + yesno[alerts.inWarning] + " | LastTry:" + alt + " | LastSuccess:" + alg + " | LastShown:" + als, true);
-    debug_print((String) "Location: " + geocode.city + ", " + geocode.state + ", " + geocode.country, true);
+    debug_print((String) "Weather Current - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | ValidApi:" + yesno[isApiValid(weatherapi.value())] + " | LastAttempt:" + wla + " | LastSuccess:" + wls + " | NextShow:" + cwns, true);
+    debug_print((String) "Weather Day - Icon:" + weather.dayIcon + " | LoTemp:" + weather.dayTempMin + tempunit + " | HiTemp:" + weather.dayTempMax + tempunit + " | Humidity:" + weather.dayHumidity + "% | Wind:" + weather.dayWindSpeed + "/" + weather.dayWindGust + speedunit + " | Desc:" + weather.currentDescription + " | NextShow:" + dwns, true);
+    debug_print((String) "Air Quality - Aqi:" + air_quality[weather.currentaqi] + " | Co:" + weather.carbon_monoxide + " | No:" + weather.nitrogen_monoxide + " | No2:" + weather.nitrogen_dioxide + " | Ozone:" + weather.ozone + " | So2:" + weather.sulfer_dioxide + " | Pm2.5:" + weather.particulates_small + " | Pm10:" + weather.particulates_medium + " | Ammonia:" + weather.ammonia + " | LastAttempt:" + aqla + " | LastSuccess:" + aqls + " | NextShow:" + aqns, true);
+    debug_print((String) "Alerts - Active:" + yesno[alerts.active] + " | Watch:" + yesno[alerts.inWatch] + " | Warn:" + yesno[alerts.inWarning] + " | LastAttempt:" + alla + " | LastSuccess:" + alls + " | LastShown:" + alns, true);
+    debug_print((String) "Location: ", false);
+    if (isLocationValid("current"))
+      debug_print((String) current.city + ", " + current.state + ", " + current.country, true);
+    else
+      debug_print("Currently not known", true);
     if (alerts.active)
       debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1, true);
     debug_print((String)"Display Tokens: " + displaytoken.showTokens(), true);
@@ -355,7 +394,51 @@ void processTimezone()
   ESP_LOGV(TAG, "Process timezone complete: %d ms", (millis()-timer));
 }
 
-void processLoc()
+bool cmpLocs(char a1[32], char a2[32])
+{
+  if (memcmp((const void *)a1, (const void *)a2, sizeof(a1)) == 0)
+    return true;
+  else
+    return false;
+}
+
+void updateLocation()
+{
+  if (isLocationValid("geocode"))
+  {
+    if (!cmpLocs(geocode.city, current.city))
+      showready.loc = true;
+    memcpy(current.city, geocode.city, 32);
+    memcpy(current.state, geocode.state, 32);
+    memcpy(current.country, geocode.country, 32);
+    ESP_LOGD(TAG, "Using Geocode location: %s, %s, %s", current.city, current.state, current.country);
+  }
+  else if (isLocationValid("saved"))
+  {
+    memcpy(current.city, savedcity.value(), 32);
+    memcpy(current.state, savedstate.value(), 32);
+    memcpy(current.country, savedcountry.value(), 32);
+    ESP_LOGD(TAG, "Using saved location: %s, %s, %s", current.city, current.state, current.country);
+  }
+  else if (isLocationValid("current"))
+  {
+    ESP_LOGD(TAG, "No new location update, using current location: %s, %s, %s", current.city, current.state, current.country);
+  }
+  else
+  {
+    ESP_LOGD(TAG, "No valid locations found");
+  }
+  if (!cmpLocs(savedcity.value(), current.city))
+  {
+    ESP_LOGI(TAG, "Location not saved, saving new location: %s, %s, %s", current.city, current.state, current.country);
+    memcpy(savedcity.value(), current.city, 32);
+    memcpy(savedstate.value(), current.state, 32);
+    memcpy(savedcountry.value(), current.country, 32);
+    iotWebConf.saveConfig();
+  }
+}
+
+void updateCoords()
 {
   if (use_fixed_loc.isChecked())
   {
@@ -377,7 +460,6 @@ void processLoc()
     current.lon = (String)ipgeo.lon;
     current.locsource = "IP Geolocation";
     ESP_LOGI(TAG, "Using IPGeo location information: Lat: %s Lon: %s", (ipgeo.lat), (ipgeo.lon));
-    checkgeocode.ready = true;
   }
   else if (gps.lon != "0")
   {
@@ -662,17 +744,18 @@ void fillAlertsFromJson(Alerts* alerts)
     sprintf(alerts->urgency1, "%s", (const char *)Json["features"][0]["properties"]["urgency"]);
     sprintf(alerts->event1, "%s", (const char *)Json["features"][0]["properties"]["event"]);
     sprintf(alerts->description1, "%s", (char*)cleanString((const char *)Json["features"][0]["properties"]["description"]));
-    alerts->timestamp = systemClock.getNow();
     if ((String)alerts->certainty1 == "Observed" || (String)alerts->certainty1 == "Likely")
     {
       alerts->inWarning = true;
       alerts->active = true;
-      cotimer.show_alert_ready = true;
+      showready.alerts = true;
+      alerts->timestamp = systemClock.getNow();
     }
     else if ((String)alerts->certainty1 == "Possible") {
       alerts->inWatch= true;
       alerts->active = true;
-      cotimer.show_alert_ready = true;
+      showready.alerts = true;
+      alerts->timestamp = systemClock.getNow();
     } 
     else {
       alerts->active = false;
@@ -708,8 +791,6 @@ void fillWeatherFromJson(Weather* weather)
   //weather->dayMoonPhase = weatherJson["daily"][0]["moon_phase"];
   //weather->daySunrise = weatherJson["daily"][0]["sunrise"];
   //weather->daySunset = weatherJson["daily"][0]["sunset"];
-
-  weather->timestamp = systemClock.getNow();
 }
 
 void fillIpgeoFromJson(Ipgeo* ipgeo) {

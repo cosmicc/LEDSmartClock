@@ -70,6 +70,7 @@ struct Alerts {
   char description1[256];
   acetime_t lastsuccess;
   acetime_t lastattempt;
+  acetime_t timestamp;
 };
 
 struct Ipgeo {
@@ -88,6 +89,7 @@ struct Geocode {
 struct CheckClass {
   bool ready;
   bool jsonParsed;
+  bool complete;
   uint8_t retries;
   acetime_t lastattempt;
   acetime_t lastsuccess;
@@ -113,10 +115,10 @@ struct ScrollText {
 };
 
 struct ShowReady {
-  bool alert;
-  bool current_weather
+  bool alerts;
+  bool currentweather;
   bool date;
-  bool daily_weather;
+  bool dayweather;
   bool aqi;
   bool reset;
   bool loc;
@@ -127,8 +129,8 @@ struct ShowReady {
 struct LastShown {
   acetime_t date;
   acetime_t alerts;
-  acetime_t weather;
-  acetime_t daily;
+  acetime_t currentweather;
+  acetime_t dayweather;
   acetime_t aqi;
 };
 
@@ -169,6 +171,9 @@ struct Current {
   uint16_t oldstatuswclr;
   uint16_t oldaqiclr;
   String locsource;
+  char city[32];
+  char state[32];
+  char country[32];
 };
 
 class DisplayToken

@@ -100,7 +100,7 @@ COROUTINE(showClock) {
 
 COROUTINE(checkAirquality) {
   COROUTINE_LOOP() {
-    COROUTINE_AWAIT(isHttpReady() && nextShowReady(checkaqi.lastsuccess, airquality_interval.value(), T1M) && isNextAttemptReady(checkaqi.lastattempt) && !firsttimefailsafe);
+    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkaqi.lastsuccess, airquality_interval.value(), T1M) && isNextAttemptReady(checkaqi.lastattempt) && isApiValid(weatherapi.value()) && isCoordsValid() && !firsttimefailsafe);
     ESP_LOGI(TAG, "Checking air quality conditions...");
     httpbusy = true;
     checkaqi.retries++;
@@ -138,7 +138,7 @@ COROUTINE(checkAirquality) {
 
 COROUTINE(checkWeather) {
   COROUTINE_LOOP() {
-    COROUTINE_AWAIT(isHttpReady() && nextShowReady(checkweather.lastsuccess, show_weather_interval.value(), T1M) && isNextAttemptReady(checkweather.lastattempt) && isLocValid() && isValidApi(weatherapi.value()) && !firsttimefailsafe);
+    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkweather.lastsuccess, show_weather_interval.value(), T1M) && isNextAttemptReady(checkweather.lastattempt)  && isApiValid(weatherapi.value()) && isCoordsValid() && !firsttimefailsafe);
     ESP_LOGI(TAG, "Checking weather forecast...");
     httpbusy = true;
     checkweather.retries++;
@@ -179,7 +179,7 @@ COROUTINE(checkWeather) {
 #ifndef DISABLE_ALERTCHECK
 COROUTINE(checkAlerts) {
   COROUTINE_LOOP() {
-    COROUTINE_AWAIT(isHttpReady() && nextShowReady(checkalerts.lastsuccess, 5, T1M) && isNextAttemptReady(checkalerts.lastattempt) && isLocValid());
+    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkalerts.lastsuccess, 5, T1M) && isNextAttemptReady(checkalerts.lastattempt) && isCoordsValid());
     ESP_LOGI(TAG, "Checking weather alerts...");
     httpbusy = true;
     checkalerts.retries++;
@@ -217,13 +217,13 @@ COROUTINE(checkAlerts) {
 
 COROUTINE(showDate) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(nextshowReady(showclock.datelastshown, show_date_interval.value(), T1H) && show_date.isChecked() && iotWebConf.getState() != 1 && displaytoken.isReady(1));
+  COROUTINE_AWAIT(isNextShowReady(lastshown.date, show_date_interval.value(), T1H) && show_date.isChecked() && iotWebConf.getState() != 1 && displaytoken.isReady(1));
   displaytoken.setToken(1);
   scrolltext.message = getSystemZonedDateString();
   scrolltext.color = hex2rgb(datecolor.value());
   scrolltext.active = true;
   COROUTINE_AWAIT(!scrolltext.active);
-  showclock.datelastshown = systemClock.getNow();
+  lastshown.date = systemClock.getNow();
   showready.date = false;
   displaytoken.resetToken(1);
   }
@@ -237,7 +237,7 @@ COROUTINE(showWeather) {
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = capString((String)"Currently: " + weather.currentDescription + " Humidity " + weather.currentHumidity + "% Wind " + int(weather.currentWindSpeed) + "/" + int(weather.currentWindGust) + " Air: " + air_quality[weather.currentaqi]);
+  scrolltext.message = capString((String)"Current " + weather.currentDescription + " Humidity " + weather.currentHumidity + "% Wind " + int(weather.currentWindSpeed) + "/" + int(weather.currentWindGust) + " Air: " + air_quality[weather.currentaqi]);
   scrolltext.color = hex2rgb(weather_color.value());
   scrolltext.active = true;
   scrolltext.displayicon = true;
@@ -253,7 +253,7 @@ COROUTINE(showWeather) {
     matrix->show();
     COROUTINE_DELAY(50);
   }
-  weather.lastshown = systemClock.getNow();
+  lastshown.currentweather = systemClock.getNow();
   showready.currentweather = false;
   displaytoken.resetToken(2);
   }
@@ -268,14 +268,14 @@ COROUTINE(showWeatherDaily) {
   alertflash.active = true;
   strncpy(scrolltext.icon, weather.dayIcon, 4);
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = capString((String)"Today: " + weather.dayDescription + " Humidity " + weather.dayHumidity + "% Wind " + int(weather.dayWindSpeed) + "/" + int(weather.dayWindGust));
+  scrolltext.message = capString((String)"Today " + weather.dayDescription + " Humidity " + weather.dayHumidity + "% Wind " + int(weather.dayWindSpeed) + "/" + int(weather.dayWindGust));
   scrolltext.color = hex2rgb(weather_daily_color.value());
   scrolltext.active = true;
   scrolltext.displayicon = true;
   COROUTINE_AWAIT(!scrolltext.active);
   scrolltext.displayicon = false;
   cotimer.millis = millis();
-  weather.lastdailyshown = systemClock.getNow();
+  lastshown.dayweather = systemClock.getNow();
   showready.dayweather = false;
   displaytoken.resetToken(8);
   }
@@ -307,12 +307,12 @@ COROUTINE(showAirquality) {
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = (String) "Air Quality: " + air_quality[weather.currentaqi];
+  scrolltext.message = (String) "AQI: " + air_quality[weather.currentaqi];
   scrolltext.displayicon = false;
   scrolltext.active = true;
   COROUTINE_AWAIT(!scrolltext.active);
   cotimer.millis = millis();
-  weather.lastaqishown = systemClock.getNow();
+  lastshown.aqi = systemClock.getNow();
   showready.aqi = false;
   displaytoken.resetToken(9);
   }
@@ -337,7 +337,7 @@ COROUTINE(showAlerts) {
     scrolltext.active = true;
     scrolltext.displayicon = false;
     COROUTINE_AWAIT(!scrolltext.active);
-    alerts.lastshown = systemClock.getNow();
+    lastshown.alerts = systemClock.getNow();
     displaytoken.resetToken(3);
   }
   showready.alerts = false;
@@ -360,16 +360,16 @@ COROUTINE(serialInput) {
         CoroutineScheduler::list(Serial);
         break;
     case 'r':
-        cotimer.show_airquality_ready = true;
+        showready.aqi = true;
         break;
     case 'w':
-        cotimer.show_weather_ready = true;
+        showready.currentweather = true;
         break;
     case 'e':
-        cotimer.show_date_ready = true;
+        showready.date = true;
         break;
     case 'q':
-        cotimer.show_weather_daily_ready = true;
+        showready.dayweather = true;
         break;
     case 'c':
         //iotWebConf._allParameters.debugTo(&Serial);
@@ -387,7 +387,7 @@ COROUTINE(serialInput) {
 
 COROUTINE(checkGeocode) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(checkgeocode.ready && isHttpReady() && checkipgeo.complete && isNextAttemptReady(checkgeocode.lastattempt) && isLocValid() && isValidApi(weatherapi.value()) && !firsttimefailsafe);
+  COROUTINE_AWAIT(isHttpReady() && isNextAttemptReady(checkgeocode.lastattempt) && isCoordsValid() && isApiValid(weatherapi.value()) && checkgeocode.ready && checkipgeo.complete && !firsttimefailsafe);
   ESP_LOGI(TAG, "Checking Geocode Location...");
   httpbusy = true;
   checkgeocode.jsonParsed = false;
@@ -410,6 +410,8 @@ COROUTINE(checkGeocode) {
           fillGeocodeFromJson(&geocode);
           checkgeocode.lastsuccess = systemClock.getNow();
           checkgeocode.retries = 0;
+          checkgeocode.ready = false;
+          updateLocation();
       }
     }
     else if (httpCode == 401)
@@ -429,7 +431,7 @@ COROUTINE(checkGeocode) {
 #ifndef DISABLE_IPGEOCHECK
 COROUTINE(checkIpgeo) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(isHttpReady() && checkipgo.ready && isValidApi(ipgeoapi.value())  && isNextAttemptReady(checkipgeo.lastattempt) && !firsttimefailsafe);
+  COROUTINE_AWAIT(!checkipgeo.complete && isHttpReady() && isNextAttemptReady(checkipgeo.lastattempt) && isApiValid(ipgeoapi.value()) && !firsttimefailsafe);
     ESP_LOGI(TAG, "Checking IP Geolocation...");
     httpbusy = true;
     checkipgeo.jsonParsed = false;
@@ -454,7 +456,8 @@ COROUTINE(checkIpgeo) {
           checkipgeo.lastsuccess = systemClock.getNow();
           checkipgeo.complete = true;
           checkipgeo.retries = 0;
-          processLoc();
+          updateCoords();
+          checkgeocode.ready = true;
           processTimezone();
         }
       }
@@ -480,7 +483,7 @@ COROUTINE(systemMessages) {
     if (showready.loc) 
     {
       displaytoken.setToken(4);
-      scrolltext.message = (String)"Location: ";
+      scrolltext.message = (String)"New Location: " + current.city + ", " + current.state + ", " + current.country;
       scrolltext.color = GREEN;
       scrolltext.active = true;
       COROUTINE_AWAIT(!scrolltext.active);
@@ -500,7 +503,6 @@ COROUTINE(systemMessages) {
     if (showready.reset && (millis() - scrolltext.resetmsgtime) > T1M*1000)
     {
       displaytoken.setToken(4);
-      scrolltext.showingreset = true;
       alertflash.color = RED;
       alertflash.laps = 5;
       alertflash.active = true;
@@ -535,7 +537,7 @@ COROUTINE(coroutineManager) {
   acetime_t now = systemClock.getNow();
   if (iotWebConf.getState() == 1)
       firsttimefailsafe = true;
-  if (!displaytoken.isReady(0))
+  if (!showClock.isSuspended() && !displaytoken.isReady(0))
   {
       showClock.suspend();
       ESP_LOGD(TAG, "Show Clock Coroutine Suspended");
@@ -595,53 +597,58 @@ COROUTINE(coroutineManager) {
     showAirquality.resume();
     ESP_LOGD(TAG, "Show Air Quality Coroutine Resumed");
   }
-  else if ((!show_airquality.isChecked() && !showAirquality.isSuspended())
-  }
+  else if (!show_airquality.isChecked() && !showAirquality.isSuspended())
+  {
     showAirquality.suspend();
     ESP_LOGD(TAG, "Show Air Quality Coroutine Suspended");
   }
   #ifndef DISABLE_WEATHERCHECK         
   // Weather couroutine management
-  if ((show_weather.isChecked() || show_weather_daily.isChecked()) && checkWeather.isSuspended() && isLocValid() && isValidApi(weatherapi.value()) && WiFi.isConnected()) 
+  if ((show_weather.isChecked() || show_weather_daily.isChecked()) && checkWeather.isSuspended() && isCoordsValid() && isApiValid(weatherapi.value()) && iotWebConf.getState() == 4) 
   {
     checkWeather.reset();
     checkWeather.resume();
     ESP_LOGD(TAG, "Check Weather Coroutine Resumed");
   }
-  else if ((!show_weather.isChecked() && !show_weather_daily.isChecked() && !checkWeather.isSuspended()) || !WiFi.isConnected()) || !isLocValid() || !isValidApi(weatherapi.value())
-           {
-             checkWeather.suspend();
-            ESP_LOGD(TAG, "Check Weather Coroutine Suspended"); 
-           }
+  else if ((!show_weather.isChecked() && !show_weather_daily.isChecked() && !checkWeather.isSuspended()) && (iotWebConf.getState() != 4 || !isCoordsValid() || !isApiValid(weatherapi.value())))
+  {
+    checkWeather.suspend();
+    ESP_LOGD(TAG, "Check Weather Coroutine Suspended"); 
+  }
   #endif
   // Alerts coroutine management
   #ifndef DISABLE_ALERTCHECK
-  if (checkAlerts.isSuspended() && WiFi.isConnected()) 
+  if (checkAlerts.isSuspended() && iotWebConf.getState() == 4) 
   {
     checkAlerts.reset();
     checkAlerts.resume();
     ESP_LOGD(TAG, "Check Alerts Coroutine Resumed");
   }
-  else if (!checkAlerts.isSuspended() && !WiFi.isConnected())
-           }
+  else if (!checkAlerts.isSuspended() && iotWebConf.getState() != 4)
+  {
     checkAlerts.suspend();
     ESP_LOGD(TAG, "Check Alerts Coroutine Suspended");
-           }
+  }
   #endif
-  // AQI coroutine management
+  //AQI coroutine management
   #ifndef DISABLE_AQICHECK         
-  if ((checkAirQuality.isSuspended() && WiFi.isConnected() && isLocValid() && isValidApi(weatherapi.value())) && (show_weather.isChecked() || show_weather_daily.isChecked() || show_aqi_isChecked())) 
+  if ((checkAirquality.isSuspended() && iotWebConf.getState() == 4 && isCoordsValid() && isApiValid(weatherapi.value())) && (show_weather.isChecked() || show_weather_daily.isChecked() || show_airquality.isChecked())) 
   {
-    checkAirQuality.reset();
-    checkAirQuality.resume();
+    checkAirquality.reset();
+    checkAirquality.resume();
     ESP_LOGD(TAG, "Check Air Quality Coroutine Resumed");
   }
-  else if (!checkAirQuality.isSuspended() && (!isLocValid() || !isValidApi(weatherapi.value())) && !show_weather.isChecked() && !show_weather_daily.isChecked() && !show_aqi_isChecked() && !WiFi.isConnected())
+  else if (!checkAirquality.isSuspended() && (!isCoordsValid() || !isApiValid(weatherapi.value())) && !show_weather.isChecked() && !show_weather_daily.isChecked() && !show_airquality.isChecked() && iotWebConf.getState() != 4)
            {           
-    checkAirQuality.suspend();    
+    checkAirquality.suspend();    
     ESP_LOGD(TAG, "Check Air Quality Coroutine Suspended");
            }
   #endif
+  if (checkipgeo.complete && !checkIpgeo.isSuspended())
+  {
+    checkIpgeo.suspend();    
+    ESP_LOGD(TAG, "Check IPGeolocation Coroutine Suspended");
+  }
   COROUTINE_YIELD();
   }
 }
@@ -734,12 +741,12 @@ COROUTINE(gps_checkData) {
         gps.lat = String(GPS.location.lat(), 5);
         gps.lon = String(GPS.location.lng(), 5);
         gps.lockage = systemClock.getNow();
-        processLoc();
+        updateCoords();
       }
       else {
         gps.lat = fixedLat.value();
         gps.lon = fixedLon.value();
-        processLoc();
+        updateCoords();
       }
       ESP_LOGV(TAG, "GPS Location updated: Lat: %s Lon: %s", gps.lat, gps.lon);
     }

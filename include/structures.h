@@ -1,4 +1,4 @@
-typedef struct GPSData
+struct GPSData
 {
   bool fix;
   uint8_t sats;
@@ -9,21 +9,21 @@ typedef struct GPSData
   acetime_t timestamp;
   acetime_t lastcheck;
   acetime_t lockage;
-} GPSData;
+};
 
-typedef struct RgbColor
+struct RgbColor
 {
     unsigned char r;
     unsigned char g;
     unsigned char b;
-} RgbColor;
+};
 
-typedef struct HsvColor
+struct HsvColor
 {
     unsigned char h;
     unsigned char s;
     unsigned char v;
-} HsvColor;
+};
 
 struct Weather {
   char currentIcon[5];
@@ -36,13 +36,14 @@ struct Weather {
   char dayIcon[5];
   int16_t dayTempMin;
   int16_t dayTempMax;
-  acetime_t daySunrise;
-  acetime_t daySunset;
+  //acetime_t daySunrise;
+  //acetime_t daySunset;
   int dayHumidity;
   char dayDescription[20];
-  double dayMoonPhase;
+  //double dayMoonPhase;
   int dayWindSpeed;
   int dayWindGust;
+  
   uint8_t currentaqi;
   double carbon_monoxide;
   double nitrogen_monoxide;
@@ -53,12 +54,8 @@ struct Weather {
   double particulates_medium;
   double ammonia;
 
-  acetime_t timestamp;
   acetime_t lastattempt;
-  acetime_t lastshown;
   acetime_t lastsuccess;
-  acetime_t lastdailyshown;
-  acetime_t lastaqishown;
 };
 
 struct Alerts {
@@ -71,21 +68,9 @@ struct Alerts {
   char urgency1[15];
   char event1[50];
   char description1[256];
-  char status2[15];
-  char severity2[15];
-  char certainty2[15];
-  char urgency2[15];
-  char event2[50];
-  char description2[256];
-  char status3[15];
-  char severity3[15];
-  char certainty3[15];
-  char urgency3[15];
-  char event3[50];
-  char description3[256];
+  acetime_t lastsuccess;
+  acetime_t lastattempt;
   acetime_t timestamp;
-  acetime_t lastshown;
-  
 };
 
 struct Ipgeo {
@@ -101,43 +86,11 @@ struct Geocode {
   char country[32];
 };
 
-struct Checkalerts {
-  bool active;
-  uint8_t retries;
+struct CheckClass {
+  bool ready;
   bool jsonParsed;
-  acetime_t lastattempt;
-  acetime_t lastsuccess;
-};
-
-struct Checkweather {
-  bool active;
-  uint8_t retries;
-  bool jsonParsed;
-  acetime_t lastattempt;
-  acetime_t lastsuccess;
-};
-
-struct Checkaqi {
-  bool active;
-  uint8_t retries;
-  bool jsonParsed;
-  acetime_t lastattempt;
-  acetime_t lastsuccess;
-};
-
-struct Checkipgeo {
-  bool active;
-  uint8_t retries;
-  boolean jsonParsed;
-  acetime_t lastattempt;
-  acetime_t lastsuccess;
   bool complete;
-};
-
-struct Checkgeocode {
-  bool active;
   uint8_t retries;
-  boolean jsonParsed;
   acetime_t lastattempt;
   acetime_t lastsuccess;
 };
@@ -153,10 +106,6 @@ struct ScrollText {
   bool active;
   bool displayicon;
   bool tempshown;
-  bool showingreset;
-  bool showingloc;
-  bool showingip;
-  bool showingcfg;
   char icon[5];
   String message;
   uint16_t color;
@@ -165,14 +114,33 @@ struct ScrollText {
   uint32_t resetmsgtime;
 };
 
+struct ShowReady {
+  bool alerts;
+  bool currentweather;
+  bool date;
+  bool dayweather;
+  bool aqi;
+  bool reset;
+  bool loc;
+  bool ip;
+  bool cfgupdate;
+};
+
+struct LastShown {
+  acetime_t date;
+  acetime_t alerts;
+  acetime_t currentweather;
+  acetime_t dayweather;
+  acetime_t aqi;
+};
+
 struct ShowClock {
-  uint8_t fstop;
-  uint32_t millis;
-  uint8_t seconds;
   bool colonflicker;
   bool colonoff;
-  acetime_t datelastshown;
+  uint8_t fstop;
+  uint8_t seconds;
   uint16_t color;
+  uint32_t millis;
 };
 
 struct CoTimers {
@@ -182,14 +150,10 @@ struct CoTimers {
   uint8_t scrollspeed;
   uint32_t scrollsize;
   int16_t scrolliters;
-  bool show_alert_ready;
-  bool show_weather_ready;
-  bool show_date_ready;
-  bool show_weather_daily_ready;
-  bool show_airquality_ready;
   uint8_t iconcycle;
   uint32_t icontimer;
   uint32_t iotloop;
+  acetime_t lasthttptime;
 };
 
 struct Current {
@@ -207,12 +171,14 @@ struct Current {
   uint16_t oldstatuswclr;
   uint16_t oldaqiclr;
   String locsource;
+  char city[32];
+  char state[32];
+  char country[32];
 };
 
 class DisplayToken
 {
   public:
-  
     String showTokens() {
       String buf;
       if (token1)

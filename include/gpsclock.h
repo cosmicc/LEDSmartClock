@@ -76,7 +76,7 @@ class GPSClock: public Clock {
 
   acetime_t readResponse() const {
     if (GPS.time.isUpdated()) {
-      if (GPS.time.age() < 100) {
+      if (GPS.time.age() < 100 && GPS.satellites.value() != 0) {
         setTimeSource("gps");
         resetLastNtpCheck();
         auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());

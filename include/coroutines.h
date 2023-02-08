@@ -1,14 +1,4 @@
 // Coroutines
-
-#ifdef COROUTINE_PROFILER
-COROUTINE(printProfiling) {
-  COROUTINE_LOOP() {
-    LogBinTableRenderer::printTo(Serial, 2 /*startBin*/, 13 /*endBin*/, false /*clear*/);
-    COROUTINE_DELAY(PROFILER_DELAY * 1000);
-  }
-}
-#endif
-
 COROUTINE(sysClock) {
   COROUTINE_LOOP()
   {
@@ -16,6 +6,15 @@ COROUTINE(sysClock) {
     COROUTINE_YIELD();
   }
 }
+
+COROUTINE(IotWebConf) {
+  COROUTINE_LOOP() 
+  {
+    iotWebConf.doLoop();
+    COROUTINE_YIELD();
+  }
+}
+
 
 COROUTINE(showClock) {
   COROUTINE_LOOP() {
@@ -101,171 +100,116 @@ COROUTINE(showClock) {
 
 COROUTINE(checkAirquality) {
   COROUTINE_LOOP() {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkaqi.lastsuccess) > (airquality_interval.value() * T1M) && abs(systemClock.getNow() - checkaqi.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0) && !firsttimefailsafe);
+    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkaqi.lastsuccess, airquality_interval.value(), T1M) && isNextAttemptReady(checkaqi.lastattempt) && isApiValid(weatherapi.value()) && isCoordsValid() && !firsttimefailsafe);
     ESP_LOGI(TAG, "Checking air quality conditions...");
-    checkaqi.active = true;
-    checkaqi.retries = 1;
+    httpbusy = true;
+    checkaqi.retries++;
     checkaqi.jsonParsed = false;
-    while (!checkaqi.jsonParsed && (checkaqi.retries <= 2))
-    {
-      COROUTINE_DELAY(1000);
-      ESP_LOGD(TAG, "Connecting to %s", urls[3]);
-      HTTPClient http;
-      http.begin(urls[3]);
-      int httpCode = http.GET();
-      ESP_LOGD(TAG, "HTTP code : %d", httpCode);
-      if (httpCode == 200)
+    IotWebConf.suspend();
+    if (httpRequest(3)) {
+    int httpCode = request.GET();
+    IotWebConf.resume();
+    String payload;
+    if (httpCode > 0)
+          payload = request.getString();
+    if (httpCode == 200)
       {
-        aqiJson = JSON.parse(http.getString());
-        if (JSON.typeof(aqiJson) == "undefined")
-          ESP_LOGE(TAG, "Parsing aqiJson input failed!");
-        else
-          checkaqi.jsonParsed = true;
-      } 
-      else if (httpCode == 401) {
-        alertflash.color = RED;
-        alertflash.laps = 1;
-        alertflash.active = true;
-        COROUTINE_AWAIT(!alertflash.active);
-        scrolltext.message = "Invalid Openweathermap.org API Key";
-        scrolltext.color = RED;
-        scrolltext.active = true;
-        scrolltext.displayicon = false;
-        COROUTINE_AWAIT(!scrolltext.active);
-      } else {
-        alertflash.color = RED;
-        alertflash.laps = 1;
-        alertflash.active = true;
-        COROUTINE_AWAIT(!alertflash.active);
-        scrolltext.message = (String)"Error getting air quality conditions: " +httpCode;
-        scrolltext.color = RED;
-        scrolltext.active = true;
-        scrolltext.displayicon = false;       
-        COROUTINE_AWAIT(!scrolltext.active);
+        ESP_LOGI(TAG, "AQI response code: %d", httpCode);
+        Json = JSON.parse(payload);
+        if (JSON.typeof(Json) == "undefined")
+          ESP_LOGE(TAG, "Parsing AQIJson input failed!");
+        else 
+        {
+            checkaqi.jsonParsed = true;
+            fillAqiFromJson(&weather);
+            checkaqi.lastsuccess = systemClock.getNow();
+            checkaqi.retries = 0;
+            showready.aqi = true;
+        }
       }
-      http.end();
-      checkaqi.retries++;
+      else
+        ESP_LOGE(TAG, "AQI error code: %d", httpCode);
     }
-    if (!checkaqi.jsonParsed)
-      ESP_LOGE(TAG, "Error: JSON");
-    else
-    {
-      fillAqiFromJson(&weather);
-      checkaqi.lastsuccess = systemClock.getNow();
-    }
+    request.end();
     checkaqi.lastattempt = systemClock.getNow();
-    checkaqi.active = false;
+    httpbusy = false;
   }
 }
 
 COROUTINE(checkWeather) {
   COROUTINE_LOOP() {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkweather.lastsuccess) > (show_weather_interval.value() * T1M) && abs(systemClock.getNow() - checkweather.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0) && !firsttimefailsafe);
+    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkweather.lastsuccess, show_weather_interval.value(), T1M) && isNextAttemptReady(checkweather.lastattempt)  && isApiValid(weatherapi.value()) && isCoordsValid() && !firsttimefailsafe);
     ESP_LOGI(TAG, "Checking weather forecast...");
-    checkweather.retries = 1;
+    httpbusy = true;
+    checkweather.retries++;
     checkweather.jsonParsed = false;
-    checkweather.active = true;
-    while (!checkweather.jsonParsed && (checkweather.retries <= 2))
+    IotWebConf.suspend();
+    if (httpRequest(0)) 
     {
-      COROUTINE_DELAY(1000);
-      ESP_LOGD(TAG, "Connecting to %s", urls[0]);
-      HTTPClient http;
-      http.begin(urls[0]);
-      int httpCode = http.GET();
-      ESP_LOGD(TAG, "HTTP code : %d", httpCode);
+      int httpCode = request.GET();
+      IotWebConf.resume();
+      String payload;
       if (httpCode == 200)
       {
-        weatherJson = JSON.parse(http.getString());
-        if (JSON.typeof(weatherJson) == "undefined")
-          ESP_LOGE(TAG, "Parsing weatherJson input failed!");
-        else
-          checkweather.jsonParsed = true;
-      } 
-      else if (httpCode == 401) {
-        alertflash.color = RED;
-        alertflash.laps = 1;
-        alertflash.active = true;
-        COROUTINE_AWAIT(!alertflash.active);
-        scrolltext.message = "Invalid Openweathermap.org API Key";
-        scrolltext.color = RED;
-        scrolltext.active = true;
-        scrolltext.displayicon = false;
-        COROUTINE_AWAIT(!scrolltext.active);
-      } else {
-        alertflash.color = RED;
-        alertflash.laps = 1;
-        alertflash.active = true;
-        COROUTINE_AWAIT(!alertflash.active);
-        scrolltext.message = (String)"Error getting weather forcast: " +httpCode;
-        scrolltext.color = RED;
-        scrolltext.active = true;
-        scrolltext.displayicon = false;       
-        COROUTINE_AWAIT(!scrolltext.active);
+        payload = request.getString();
+        ESP_LOGI(TAG, "Weather response code: %d", httpCode);
+        Json = JSON.parse(payload);
+        if (JSON.typeof(Json) == "undefined")
+          ESP_LOGE(TAG, "Parsing WeatherJson input failed!");
+        else 
+        {
+            checkweather.jsonParsed = true;
+            fillWeatherFromJson(&weather);
+            checkweather.lastsuccess = systemClock.getNow();
+            checkweather.retries = 0;
+            showready.currentweather = true;
+            showready.dayweather = true;
+        }
       }
-      http.end();
-      checkweather.retries++;
+      else
+        ESP_LOGE(TAG, "Weather error code: %d", httpCode);
+      
     }
-    if (!checkweather.jsonParsed)
-      ESP_LOGE(TAG, "Error: JSON");
-    else
-    {
-      fillWeatherFromJson(&weather);
-      checkweather.lastsuccess = systemClock.getNow();
-    }
+    request.end();
     checkweather.lastattempt = systemClock.getNow();
-    checkweather.active = false;
+    httpbusy = false;
   }
 }
-
 
 #ifndef DISABLE_ALERTCHECK
 COROUTINE(checkAlerts) {
   COROUTINE_LOOP() {
-    COROUTINE_AWAIT(!httpbusy && abs(systemClock.getNow() - checkalerts.lastsuccess) > (5 * T1M) && (systemClock.getNow() - checkalerts.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && displaytoken.isReady(0));
+    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkalerts.lastsuccess, 5, T1M) && isNextAttemptReady(checkalerts.lastattempt) && isCoordsValid());
     ESP_LOGI(TAG, "Checking weather alerts...");
     httpbusy = true;
-    checkalerts.active;
-    checkalerts.retries = 1;
+    checkalerts.retries++;
     checkalerts.jsonParsed = false;
-    while (!checkalerts.jsonParsed && (checkalerts.retries <= 2))
+    IotWebConf.suspend();
+    if (httpRequest(1)) 
     {
-      COROUTINE_DELAY(1000);
-      ESP_LOGD(TAG, "Connecting to %s", urls[1]);
-      HTTPClient http;
-      http.begin(urls[1]);
-      int httpCode = http.GET();
-      ESP_LOGD(TAG, "HTTP code : %d", httpCode);
+      int httpCode = request.GET();
+      IotWebConf.resume();
+      String payload; 
       if (httpCode == 200)
       {
-        alertsJson = JSON.parse(http.getString());
-        if (JSON.typeof(alertsJson) == "undefined")
-          ESP_LOGE(TAG, "Parsing alertJson input failed!");
-        else
-          checkalerts.jsonParsed = true;
-      } else 
-      {
-          alertflash.color = RED;
-          alertflash.laps = 1;
-          alertflash.active = true;
-        COROUTINE_AWAIT(!alertflash.active);
-        scrolltext.message = (String) "Error getting weather alerts: " + httpCode;
-        scrolltext.color = RED;
-        scrolltext.active = true;
-        scrolltext.displayicon = false;
-        COROUTINE_AWAIT(!scrolltext.active);
+        payload = request.getString();
+        ESP_LOGI(TAG, "Alerts response code: %d", httpCode);
+        Json = JSON.parse(payload);
+        if (JSON.typeof(Json) == "undefined")
+          ESP_LOGE(TAG, "Parsing AlertsJson input failed!");
+        else 
+        {
+            checkalerts.jsonParsed = true;
+            fillAlertsFromJson(&alerts);
+            checkalerts.lastsuccess = systemClock.getNow();
+            showready.alerts;
+        }
       }
-      http.end();
-      checkalerts.retries++;
+      else
+        ESP_LOGE(TAG, "Alerts error code: %d", httpCode);
     }
-    if (!checkalerts.jsonParsed)
-      ESP_LOGE(TAG, "Error: JSON");
-    else
-    {
-      fillAlertsFromJson(&alerts);
-      checkalerts.lastsuccess = systemClock.getNow();
-    }
+    request.end();
     checkalerts.lastattempt = systemClock.getNow();
-    checkipgeo.active = false;
     httpbusy = false;
   }
 }
@@ -273,27 +217,27 @@ COROUTINE(checkAlerts) {
 
 COROUTINE(showDate) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(cotimer.show_date_ready && show_date.isChecked() && iotWebConf.getState() != 1 && displaytoken.isReady(1));
+  COROUTINE_AWAIT(isNextShowReady(lastshown.date, show_date_interval.value(), T1H) && show_date.isChecked() && iotWebConf.getState() != 1 && displaytoken.isReady(1));
   displaytoken.setToken(1);
   scrolltext.message = getSystemZonedDateString();
   scrolltext.color = hex2rgb(datecolor.value());
   scrolltext.active = true;
   COROUTINE_AWAIT(!scrolltext.active);
-  showclock.datelastshown = systemClock.getNow();
-  cotimer.show_date_ready = false;
+  lastshown.date = systemClock.getNow();
+  showready.date = false;
   displaytoken.resetToken(1);
   }
 }
 
 COROUTINE(showWeather) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(cotimer.show_weather_ready && show_weather.isChecked() && displaytoken.isReady(2));
+  COROUTINE_AWAIT(showready.currentweather && show_weather.isChecked() && displaytoken.isReady(2));
   displaytoken.setToken(2);
   alertflash.color = hex2rgb(weather_color.value());
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = capString((String)"Currently: " + weather.currentDescription + " Humidity " + weather.currentHumidity + "% Wind " + int(weather.currentWindSpeed) + "/" + int(weather.currentWindGust) + " Air: " + air_quality[weather.currentaqi]);
+  scrolltext.message = capString((String)"Current " + weather.currentDescription + " Humidity " + weather.currentHumidity + "% Wind " + int(weather.currentWindSpeed) + "/" + int(weather.currentWindGust) + " Air: " + air_quality[weather.currentaqi]);
   scrolltext.color = hex2rgb(weather_color.value());
   scrolltext.active = true;
   scrolltext.displayicon = true;
@@ -309,37 +253,37 @@ COROUTINE(showWeather) {
     matrix->show();
     COROUTINE_DELAY(50);
   }
-  weather.lastshown = systemClock.getNow();
-  cotimer.show_weather_ready = false;
+  lastshown.currentweather = systemClock.getNow();
+  showready.currentweather = false;
   displaytoken.resetToken(2);
   }
 }
 
 COROUTINE(showWeatherDaily) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(cotimer.show_weather_daily_ready && show_weather_daily.isChecked() && displaytoken.isReady(8));
+  COROUTINE_AWAIT(showready.dayweather && show_weather_daily.isChecked() && displaytoken.isReady(8));
   displaytoken.setToken(8);
   alertflash.color = hex2rgb(weather_daily_color.value());
   alertflash.laps = 1;
   alertflash.active = true;
   strncpy(scrolltext.icon, weather.dayIcon, 4);
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = capString((String)"Today: " + weather.dayDescription + " Humidity " + weather.dayHumidity + "% Wind " + int(weather.dayWindSpeed) + "/" + int(weather.dayWindGust));
+  scrolltext.message = capString((String)"Today " + weather.dayDescription + " Humidity " + weather.dayHumidity + "% Wind " + int(weather.dayWindSpeed) + "/" + int(weather.dayWindGust));
   scrolltext.color = hex2rgb(weather_daily_color.value());
   scrolltext.active = true;
   scrolltext.displayicon = true;
   COROUTINE_AWAIT(!scrolltext.active);
   scrolltext.displayicon = false;
   cotimer.millis = millis();
-  weather.lastdailyshown = systemClock.getNow();
-  cotimer.show_weather_daily_ready = false;
+  lastshown.dayweather = systemClock.getNow();
+  showready.dayweather = false;
   displaytoken.resetToken(8);
   }
 }
 
 COROUTINE(showAirquality) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(cotimer.show_airquality_ready && show_airquality.isChecked() && displaytoken.isReady(9));
+  COROUTINE_AWAIT(showready.aqi && show_airquality.isChecked() && displaytoken.isReady(9));
   displaytoken.setToken(9);
   uint16_t color;
   if (use_fixed_aqicolor.isChecked())
@@ -363,233 +307,202 @@ COROUTINE(showAirquality) {
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = (String) "Air Quality: " + air_quality[weather.currentaqi];
+  scrolltext.message = (String) "AQI: " + air_quality[weather.currentaqi];
   scrolltext.displayicon = false;
   scrolltext.active = true;
   COROUTINE_AWAIT(!scrolltext.active);
   cotimer.millis = millis();
-  weather.lastaqishown = systemClock.getNow();
-  cotimer.show_airquality_ready = false;
+  lastshown.aqi = systemClock.getNow();
+  showready.aqi = false;
   displaytoken.resetToken(9);
   }
 }
 
 COROUTINE(showAlerts) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(cotimer.show_alert_ready && displaytoken.isReady(3));
-  displaytoken.setToken(3);
-  uint16_t acolor;
-  if (alerts.inWarning)
-    acolor = RED;
-  else if (alerts.inWatch)
-    acolor = YELLOW;
-  alertflash.color = RED;
-  alertflash.laps = 3;
-  alertflash.active = true;
-  COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = (String)alerts.description1;
-  scrolltext.color = RED;
-  scrolltext.active = true;
-  scrolltext.displayicon = false;
-  COROUTINE_AWAIT(!scrolltext.active);
-  alerts.lastshown = systemClock.getNow();
-  cotimer.show_alert_ready = false;
-  displaytoken.resetToken(3);
+  COROUTINE_AWAIT(showready.alerts && displaytoken.isReady(3));
+  if (alerts.active) {
+    displaytoken.setToken(3);
+    uint16_t acolor;
+    if (alerts.inWarning)
+      acolor = RED;
+    else if (alerts.inWatch)
+      acolor = YELLOW;
+    alertflash.color = RED;
+    alertflash.laps = 3;
+    alertflash.active = true;
+    COROUTINE_AWAIT(!alertflash.active);
+    scrolltext.message = (String)alerts.description1;
+    scrolltext.color = RED;
+    scrolltext.active = true;
+    scrolltext.displayicon = false;
+    COROUTINE_AWAIT(!scrolltext.active);
+    lastshown.alerts = systemClock.getNow();
+    displaytoken.resetToken(3);
+  }
+  showready.alerts = false;
   }
 }
 
 COROUTINE(serialInput) {
   COROUTINE_LOOP() {
-    COROUTINE_AWAIT(serialdebug.isChecked());
-    if(Serial.available())
+  COROUTINE_AWAIT(500);
+  if (Serial.available())
+  {
+    char input;
+    input = Serial.read();
+    switch (input)
     {
-      char input;
-      input = Serial.read();
-      switch (input)
-      {
-        case 'd':
-          print_debugData();
-          break;
-        case 's':
-          CoroutineScheduler::list(Serial);
-          break;
-      }
+    case 'd':
+        print_debugData();
+        break;
+    case 's':
+        CoroutineScheduler::list(Serial);
+        break;
+    case 'r':
+        showready.aqi = true;
+        break;
+    case 'w':
+        showready.currentweather = true;
+        break;
+    case 'e':
+        showready.date = true;
+        break;
+    case 'q':
+        showready.dayweather = true;
+        break;
+    case 'c':
+        //iotWebConf._allParameters.debugTo(&Serial);
+        Serial.println();
+        break;
+    #ifdef COROUTINE_PROFILER    
+    case 'f':
+      LogBinTableRenderer::printTo(Serial, 2 /*startBin*/, 13 /*endBin*/, false /*clear*/);
+      break;
+    #endif
     }
+  }
   }
 }
 
 COROUTINE(checkGeocode) {
   COROUTINE_LOOP() {
-  COROUTINE_AWAIT(!httpbusy && checkgeocode.active && checkipgeo.complete && abs(systemClock.getNow() - checkgeocode.lastattempt) > T1M && iotWebConf.getState() == 4 && (current.lat).length() > 1 && (weatherapi.value())[0] != '\0' && displaytoken.isReady(0) && !firsttimefailsafe && urls[3][0] != '\0');
+  COROUTINE_AWAIT(isHttpReady() && isNextAttemptReady(checkgeocode.lastattempt) && isCoordsValid() && isApiValid(weatherapi.value()) && checkgeocode.ready && checkipgeo.complete && !firsttimefailsafe);
   ESP_LOGI(TAG, "Checking Geocode Location...");
   httpbusy = true;
-  checkgeocode.retries = 1;
   checkgeocode.jsonParsed = false;
-  while (!checkgeocode.jsonParsed && (checkgeocode.retries <= 1))
-  {
-    COROUTINE_DELAY(1000);
-    ESP_LOGD(TAG, "Connecting to %s", urls[2]);
-    HTTPClient http;
-    http.begin(urls[2]);
-    int httpCode = http.GET();
-    ESP_LOGD(TAG, "HTTP code : %d", httpCode);
+  IotWebConf.suspend();
+  if (httpRequest(2)) {
+    int httpCode = request.GET();
+    IotWebConf.resume();
+    String payload;
+    checkgeocode.retries++;
     if (httpCode == 200)
     {
-      geocodeJson = JSON.parse(http.getString());
-      if (JSON.typeof(geocodeJson) == "undefined")
-        ESP_LOGE(TAG, "Parsing geocodeJson input failed!");
-      else
-        checkgeocode.jsonParsed = true;
+      payload = request.getString();
+      ESP_LOGI(TAG, "Geocode response code: %d", httpCode);
+      Json = JSON.parse(payload);
+      if (JSON.typeof(Json) == "undefined")
+        ESP_LOGE(TAG, "Parsing GEOCodeJson input failed!");
+      else 
+      {
+          checkgeocode.jsonParsed = true;
+          fillGeocodeFromJson(&geocode);
+          checkgeocode.lastsuccess = systemClock.getNow();
+          checkgeocode.retries = 0;
+          checkgeocode.ready = false;
+          updateLocation();
+      }
     }
     else if (httpCode == 401)
     {
-      alertflash.color = RED;
-      alertflash.laps = 1;
-      alertflash.active = true;
-      COROUTINE_AWAIT(!alertflash.active);
-      scrolltext.message = "Invalid Openweather API Key";
-      scrolltext.color = RED;
-      scrolltext.active = true;
-      scrolltext.displayicon = false;
-      COROUTINE_AWAIT(!scrolltext.active);
+      ESP_LOGE(TAG, "Geocode Invalid API, error code: %d", httpCode);
+      //TODO: scroll invalid api
     }
     else
-    {
-      alertflash.color = RED;
-      alertflash.laps = 1;
-      alertflash.active = true;
-      COROUTINE_AWAIT(!alertflash.active);
-      scrolltext.message = (String) "Error getting geocode location: " + httpCode;
-      scrolltext.color = RED;
-      scrolltext.active = true;
-      scrolltext.displayicon = false;
-      COROUTINE_AWAIT(!scrolltext.active);
-    }
-    http.end();
-    checkgeocode.retries++;
+      ESP_LOGE(TAG, "Geocode error code: %d", httpCode);
   }
-  if (!checkgeocode.jsonParsed)
-    ESP_LOGE(TAG, "Error: JSON");
-  else
-  {
-    fillGeocodeFromJson(&geocode);
-    checkgeocode.lastsuccess = systemClock.getNow();
-  }
+  request.end();
   checkgeocode.lastattempt = systemClock.getNow();
-  checkgeocode.active = false;
   httpbusy = false;
   }
 }
 
 #ifndef DISABLE_IPGEOCHECK
 COROUTINE(checkIpgeo) {
-  COROUTINE_BEGIN();
-  COROUTINE_AWAIT(!httpbusy && iotWebConf.getState() == 4 && (ipgeoapi.value())[0] != '\0' && displaytoken.isReady(0) && !firsttimefailsafe && urls[4][0] != '\0');
-  while (!checkipgeo.complete)
-  {
-    COROUTINE_AWAIT(abs(systemClock.getNow() - checkipgeo.lastattempt) > T1M);
+  COROUTINE_LOOP() {
+  COROUTINE_AWAIT(!checkipgeo.complete && isHttpReady() && isNextAttemptReady(checkipgeo.lastattempt) && isApiValid(ipgeoapi.value()) && !firsttimefailsafe);
     ESP_LOGI(TAG, "Checking IP Geolocation...");
     httpbusy = true;
-    checkipgeo.active = true;
-    checkipgeo.retries = 1;
     checkipgeo.jsonParsed = false;
-    while (!checkipgeo.jsonParsed && (checkipgeo.retries <= 1))
+    IotWebConf.suspend();
+    if (httpRequest(4))
     {
-      COROUTINE_DELAY(1000);
-      ESP_LOGD(TAG, "Connecting to %s", urls[4]);
-      HTTPClient http;
-      http.begin(urls[4]);
-      int httpCode = http.GET();
-      ESP_LOGD(TAG, "HTTP code : %d", httpCode);
-      if (httpCode == 200)
+    int httpCode = request.GET();
+    IotWebConf.resume();
+    String payload;
+    checkipgeo.retries++;
+    if (httpCode == 200)
       {
-        ipgeoJson = JSON.parse(http.getString());
-        http.end();
-        if (JSON.typeof(ipgeoJson) == "undefined")
-        ESP_LOGE(TAG, "Parsing weatherJson input failed!");
-        else
+      payload = request.getString();
+      ESP_LOGI(TAG, "IPGeo response code: %d", httpCode);
+      Json = JSON.parse(payload);
+      if (JSON.typeof(Json) == "undefined")
+          ESP_LOGE(TAG, "Parsing IPGeoJson input failed!");
+        else 
+        {
           checkipgeo.jsonParsed = true;
           fillIpgeoFromJson(&ipgeo);
           checkipgeo.lastsuccess = systemClock.getNow();
           checkipgeo.complete = true;
-          checkipgeo.active = false;
-          processLoc();
+          checkipgeo.retries = 0;
+          updateCoords();
+          checkgeocode.ready = true;
           processTimezone();
+        }
       }
       else if (httpCode == 401)
-      {
-        http.end();
-        alertflash.color = RED;
-        alertflash.laps = 1;
-        alertflash.active = true;
-        COROUTINE_AWAIT(!alertflash.active);
-        scrolltext.message = "Invalid IPGeolocation API Key";
-        scrolltext.color = RED;
-        scrolltext.active = true;
-        scrolltext.displayicon = false;
-        COROUTINE_AWAIT(!scrolltext.active);
-      }
-      else
-      {
-        http.end();
-        alertflash.color = RED;
-        alertflash.laps = 1;
-        //alertflash.active = true;
-        //COROUTINE_AWAIT(!alertflash.active);
-        scrolltext.message = (String) "Error getting ip geolocation: " + httpCode;
-        scrolltext.color = RED;
-        scrolltext.active = true;
-        scrolltext.displayicon = false;
-        COROUTINE_AWAIT(!scrolltext.active);
-      }
-      checkipgeo.retries++;
+    {
+      ESP_LOGE(TAG, "IPGeo Invalid API, error code: %d", httpCode);
+      //TODO: scroll invalid api
     }
+      else
+        ESP_LOGE(TAG, "IPGeo response code: %d", httpCode);
+    }
+    request.end();
     checkipgeo.lastattempt = systemClock.getNow();
     httpbusy = false;
   }
-  COROUTINE_END();
 }
 #endif
 
 COROUTINE(systemMessages) {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(iotWebConf.getState() == 1 || resetme || scrolltext.showingip || scrolltext.showingloc);
-    COROUTINE_AWAIT((millis() - scrolltext.resetmsgtime) > T1M*1000 && displaytoken.isReady(4));
-    if (scrolltext.showingloc) 
+    COROUTINE_AWAIT((iotWebConf.getState() == 1 || showready.reset || showready.ip || showready.loc) && displaytoken.isReady(4));
+    if (showready.loc) 
     {
       displaytoken.setToken(4);
-      scrolltext.message = (String)"";
+      scrolltext.message = (String)"New Location: " + current.city + ", " + current.state + ", " + current.country;
       scrolltext.color = GREEN;
       scrolltext.active = true;
       COROUTINE_AWAIT(!scrolltext.active);
-      scrolltext.showingcfg = false;
+      showready.loc = false;
       displaytoken.resetToken(4);
     }
-    if (scrolltext.showingcfg) 
-    {
-      displaytoken.setToken(4);
-      scrolltext.message = "Settings Updated";
-      scrolltext.color = GREEN;
-      scrolltext.active = true;
-      COROUTINE_AWAIT(!scrolltext.active);
-      scrolltext.showingcfg = false;
-      displaytoken.resetToken(4);
-    }
-    if (scrolltext.showingip) 
+    if (showready.ip) 
     {
       displaytoken.setToken(4);
       scrolltext.message = (String)"IP: " + (WiFi.localIP()).toString();
       scrolltext.color = GREEN;
       scrolltext.active = true;
       COROUTINE_AWAIT(!scrolltext.active);
-      scrolltext.showingip = false;
+      showready.ip = false;
       displaytoken.resetToken(4);
     }
-    if (resetme)
+    if (showready.reset && (millis() - scrolltext.resetmsgtime) > T1M*1000)
     {
       displaytoken.setToken(4);
-      scrolltext.showingreset = true;
       alertflash.color = RED;
       alertflash.laps = 5;
       alertflash.active = true;
@@ -604,7 +517,6 @@ COROUTINE(systemMessages) {
      }
      else if (iotWebConf.getState() == 1 && (millis() - scrolltext.resetmsgtime) > T1M*1000) {
       displaytoken.setToken(4);
-      scrolltext.showingreset = true;
       alertflash.color = RED;
       alertflash.laps = 5;
       alertflash.active = true;
@@ -614,7 +526,6 @@ COROUTINE(systemMessages) {
       scrolltext.active = true;
       COROUTINE_AWAIT(!scrolltext.active);
       scrolltext.resetmsgtime = millis();
-      scrolltext.showingreset = false;
       displaytoken.resetToken(4);
      }
   }
@@ -626,72 +537,127 @@ COROUTINE(coroutineManager) {
   acetime_t now = systemClock.getNow();
   if (iotWebConf.getState() == 1)
       firsttimefailsafe = true;
-  if (!displaytoken.isReady(0))
+  if (!showClock.isSuspended() && !displaytoken.isReady(0))
+  {
       showClock.suspend();
+      ESP_LOGD(TAG, "Show Clock Coroutine Suspended");
+  }
   if (showClock.isSuspended() && displaytoken.isReady(0))
+  {
     showClock.resume();
-  if (serialdebug.isChecked() && serialInput.isSuspended() && displaytoken.isReady(0))
+    ESP_LOGD(TAG, "Show Clock Coroutine Resumed");
+  }
+    
+  if (serialdebug.isChecked() && serialInput.isSuspended())
+  {
     serialInput.resume();
+    ESP_LOGD(TAG, "Serial Input Coroutine Resumed");
+  }
   else if (!serialdebug.isChecked() && !serialInput.isSuspended())
+  {
     serialInput.suspend();
-  if (show_date.isChecked() && showDate.isSuspended() && iotWebConf.getState() != 1)
+   ESP_LOGD(TAG, "Serial Input Coroutine Suspended"); 
+  }
+    
+  if (show_date.isChecked() && showDate.isSuspended())
+  {
     showDate.resume();
-  else if ((!show_date.isChecked() && !showDate.isSuspended()) || iotWebConf.getState() == 1)
+   ESP_LOGD(TAG, "Show Date Coroutine Resumed"); 
+  }
+  else if (!show_date.isChecked() && !showDate.isSuspended())
+  {
     showDate.suspend();
-  if (show_weather.isChecked() && showWeather.isSuspended() && iotWebConf.getState() != 1 && displaytoken.isReady(0))
+    ESP_LOGD(TAG, "Show Date Coroutine Suspended");
+  }
+    
+  if (show_weather.isChecked() && showWeather.isSuspended())
+  {
     showWeather.resume();
-  else if ((!show_weather.isChecked() && !showWeather.isSuspended()) || iotWebConf.getState() == 1)
+    ESP_LOGD(TAG, "Show Current Weather Coroutine Resumed");
+  }
+  else if ((!show_weather.isChecked() && !showWeather.isSuspended()))
+  {
     showWeather.suspend();
-  if (show_weather_daily.isChecked() && showWeatherDaily.isSuspended() && iotWebConf.getState() != 1 && displaytoken.isReady(0))
+    ESP_LOGD(TAG, "Show Current Weather Coroutine Suspended");
+  }
+    
+  if (show_weather_daily.isChecked() && showWeatherDaily.isSuspended())
+  {
     showWeatherDaily.resume();
-  else if ((!show_weather_daily.isChecked() && !showWeatherDaily.isSuspended()) || iotWebConf.getState() == 1)
+   ESP_LOGD(TAG, "Show Day Weather Coroutine Resumed"); 
+  }
+  else if (!show_weather_daily.isChecked() && !showWeatherDaily.isSuspended())
+  {
     showWeatherDaily.suspend();
-  if (show_airquality.isChecked() && checkAirquality.isSuspended() && iotWebConf.getState() != 1 && displaytoken.isReady(0))
-    checkAirquality.resume();
-  else if ((!show_airquality.isChecked() && !checkAirquality.isSuspended()) || iotWebConf.getState() == 1)
-    checkAirquality.suspend();
-  if ((show_weather.isChecked() || show_weather_daily.isChecked()) && checkWeather.isSuspended() && iotWebConf.getState() != 1 && iotWebConf.getState() == 4 && displaytoken.isReady(0)) {
+    ESP_LOGD(TAG, "Show Day Weather Coroutine Suspended");
+  }
+
+  if (show_airquality.isChecked() && showAirquality.isSuspended())
+  {
+    showAirquality.resume();
+    ESP_LOGD(TAG, "Show Air Quality Coroutine Resumed");
+  }
+  else if (!show_airquality.isChecked() && !showAirquality.isSuspended())
+  {
+    showAirquality.suspend();
+    ESP_LOGD(TAG, "Show Air Quality Coroutine Suspended");
+  }
+  #ifndef DISABLE_WEATHERCHECK         
+  // Weather couroutine management
+  if ((show_weather.isChecked() || show_weather_daily.isChecked()) && checkWeather.isSuspended() && isCoordsValid() && isApiValid(weatherapi.value()) && iotWebConf.getState() == 4) 
+  {
     checkWeather.reset();
     checkWeather.resume();
+    ESP_LOGD(TAG, "Check Weather Coroutine Resumed");
   }
-  else if ((!show_weather.isChecked() && !show_weather_daily.isChecked() && !checkWeather.isSuspended()) || iotWebConf.getState() == 1 || iotWebConf.getState() != 4)
+  else if ((!show_weather.isChecked() && !show_weather_daily.isChecked() && !checkWeather.isSuspended()) && (iotWebConf.getState() != 4 || !isCoordsValid() || !isApiValid(weatherapi.value())))
+  {
     checkWeather.suspend();
+    ESP_LOGD(TAG, "Check Weather Coroutine Suspended"); 
+  }
+  #endif
+  // Alerts coroutine management
   #ifndef DISABLE_ALERTCHECK
-  if (checkAlerts.isSuspended() && iotWebConf.getState() != 1 && iotWebConf.getState() == 4 && displaytoken.isReady(0)) {
+  if (checkAlerts.isSuspended() && iotWebConf.getState() == 4) 
+  {
     checkAlerts.reset();
     checkAlerts.resume();
+    ESP_LOGD(TAG, "Check Alerts Coroutine Resumed");
   }
-  else if (!checkAlerts.isSuspended() && iotWebConf.getState() < 4)
-    checkAlerts.suspend();
-  #endif
-  if ((abs(now - alerts.lastshown) > (show_alert_interval.value()*T1M)) && show_alert_interval.value() != 0 && displaytoken.isReady(0) && alerts.active)
-    cotimer.show_alert_ready = true;
-  if ((abs(now - weather.lastshown) > (show_weather_interval.value() * T1M)) && (abs(now - checkweather.lastsuccess)) < T1H + 60 && displaytoken.isReady(0))
-    cotimer.show_weather_ready = true;
-  if ((abs(now - showclock.datelastshown) > (show_date_interval.value() * T1H)) && displaytoken.isReady(0))
-    cotimer.show_date_ready = true;
-  if ((abs(now - weather.lastdailyshown) > (show_weather_daily_interval.value() * T1H)) && (abs(now - checkweather.lastsuccess)) < T1D && displaytoken.isReady(0))
-    cotimer.show_weather_daily_ready = true;  
-  if ((abs(now - weather.lastaqishown) > (airquality_interval.value() * T1M)) && (abs(now - checkaqi.lastsuccess)) < T1H + 60 && displaytoken.isReady(0))
-    cotimer.show_airquality_ready = true;
-  COROUTINE_YIELD();
-  }
-}
-
-COROUTINE(IotWebConf) {
-  COROUTINE_LOOP() 
+  else if (!checkAlerts.isSuspended() && iotWebConf.getState() != 4)
   {
-    //COROUTINE_AWAIT(millis() - cotimer.iotloop > 5);
-    iotWebConf.doLoop();
-    //cotimer.iotloop = millis();
-    COROUTINE_YIELD();
+    checkAlerts.suspend();
+    ESP_LOGD(TAG, "Check Alerts Coroutine Suspended");
+  }
+  #endif
+  //AQI coroutine management
+  #ifndef DISABLE_AQICHECK         
+  if ((checkAirquality.isSuspended() && iotWebConf.getState() == 4 && isCoordsValid() && isApiValid(weatherapi.value())) && (show_weather.isChecked() || show_weather_daily.isChecked() || show_airquality.isChecked())) 
+  {
+    checkAirquality.reset();
+    checkAirquality.resume();
+    ESP_LOGD(TAG, "Check Air Quality Coroutine Resumed");
+  }
+  else if (!checkAirquality.isSuspended() && (!isCoordsValid() || !isApiValid(weatherapi.value())) && !show_weather.isChecked() && !show_weather_daily.isChecked() && !show_airquality.isChecked() && iotWebConf.getState() != 4)
+           {           
+    checkAirquality.suspend();    
+    ESP_LOGD(TAG, "Check Air Quality Coroutine Suspended");
+           }
+  #endif
+  if (checkipgeo.complete && !checkIpgeo.isSuspended())
+  {
+    checkIpgeo.suspend();    
+    ESP_LOGD(TAG, "Check IPGeolocation Coroutine Suspended");
+  }
+  COROUTINE_YIELD();
   }
 }
 
 COROUTINE(AlertFlash) {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(alertflash.active && showClock.isSuspended() && !disable_alertflash.isChecked());
+    COROUTINE_AWAIT(alertflash.active && showClock.isSuspended());
+    if (!disable_alertflash.isChecked()) {
       displaytoken.setToken(6);
       alertflash.lap = 0;
       matrix->clear();
@@ -708,6 +674,7 @@ COROUTINE(AlertFlash) {
         COROUTINE_DELAY(250);
         alertflash.lap++;
       }
+    }
       alertflash.active = false;
       displaytoken.resetToken(6);
   }
@@ -723,7 +690,6 @@ COROUTINE(scrollText) {
       {
         displaytoken.setToken(10);
         ESP_LOGI(TAG, "Scrolltext Message: %s",scrolltext.message);
-        ESP_LOGI(TAG, "Scrolltext Color: %llu",scrolltext.color);
       }
       uint16_t size = (scrolltext.message).length() * 6;
       if (scrolltext.position >= size - size - size) {
@@ -731,7 +697,6 @@ COROUTINE(scrollText) {
         matrix->setCursor(scrolltext.position, 0);
         matrix->setTextColor(scrolltext.color);
         matrix->print(scrolltext.message);
-        //display_showStatus();
         if (scrolltext.displayicon)
           display_weatherIcon(scrolltext.icon);
         matrix->show();
@@ -741,7 +706,7 @@ COROUTINE(scrollText) {
       scrolltext.active = false;
       scrolltext.position = mw;
       scrolltext.displayicon = false;
-      ESP_LOGD(TAG, "Scrolltext [%s] complete",scrolltext.message);
+      ESP_LOGD(TAG, "Scrolltext complete",scrolltext.message);
       displaytoken.resetToken(10);
       
       }
@@ -776,12 +741,12 @@ COROUTINE(gps_checkData) {
         gps.lat = String(GPS.location.lat(), 5);
         gps.lon = String(GPS.location.lng(), 5);
         gps.lockage = systemClock.getNow();
-        processLoc();
+        updateCoords();
       }
       else {
         gps.lat = fixedLat.value();
         gps.lon = fixedLon.value();
-        processLoc();
+        updateCoords();
       }
       ESP_LOGV(TAG, "GPS Location updated: Lat: %s Lon: %s", gps.lat, gps.lon);
     }

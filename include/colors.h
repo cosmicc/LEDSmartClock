@@ -23,6 +23,7 @@ uint16_t DARKYELLOW	=	RGB16(150, 150, 0);
 uint16_t DARKPURPLE	=	RGB16(80, 0, 150);
 uint16_t DARKMAGENTA=	RGB16(150, 0, 150);
 uint16_t DARKCYAN   =	RGB16(0, 150, 150);
+uint16_t DARKORANGE =	RGB16(150, 75, 0);
 
 int hexcolorToInt(char upper, char lower)
 {
@@ -31,7 +32,6 @@ int lVal = (int)lower;
 uVal = uVal > 64 ? uVal - 55 : uVal - 48;
 uVal = uVal << 4;
 lVal = lVal > 64 ? lVal - 55 : lVal - 48;
-// Serial.println(uVal+lVal);
 return uVal + lVal;
 }
 
@@ -46,18 +46,6 @@ uint16_t hex2rgb(char* str) {
  return RGB16(red, green, blue);
 }
 
-/*
-uint16_t hex2rgb(char* hex) {
-    Serial.println((String)"hex: " + hex);
-    uint32_t rgb=strtoul(hex+1,NULL,16);
-    Serial.println((String)"rgb: " + rgb);
-    byte r=(byte)(rgb>>16);
-    byte g=(byte)(r>>8);
-    byte b=(byte)rgb;
-    Serial.println((String)"r: " + r + " g: " + g + " b: " + b);
-    return RGB16(r, g, b);
-}
-*/
 uint16_t hsv2rgb(uint8_t hsvr)
 {
     RgbColor rgb;

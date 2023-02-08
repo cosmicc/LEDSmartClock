@@ -20,8 +20,9 @@ LEDSmartClock is a ESP32 powered GPS/Wifi enabled wall clock with a 8x32 WS2812B
 -  Reset button to reset lost password and force clock in AP mode.
 -  Full web interface to change settings, view additional info, and OTA wifi firmware updates.
 
-## Download Firmware
-Current version is v1.0.0 and can be downloaded in the [Releases](https://github.com/cosmicc/LEDSmartClock/releases) section.  Firmware in the releases section can only be applied via the web interface after initial installation.  If this is a first time installation, you must flash your ESP32 manually. Please follow the instructions in the *initial install* section below.
+## Download
+If this is a first time installation, you must flash your ESP32 manually. Please follow the instructions in the *initial install* section below.
+Latest version can be downloaded in the [Releases](https://github.com/cosmicc/LEDSmartClock/releases) section.  Firmware in the releases section can only be applied via the web interface after initial installation.  
 
 ## Components
 

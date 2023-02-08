@@ -1,4 +1,4 @@
-# Smart LED Clock
+# LEDSmartClock
 
 ## Summary
 LEDSmartClock is a ESP32 powered GPS/Wifi enabled wall clock with a 8x32 WS2812B LED matrix display.  It has many features, including multiple ways to obtain and keep accurate date & time, timezone, location, local weather conditions, local weather alerts, and outdoor air quality.  It has a web interface to display additional information, and many configuration options. 

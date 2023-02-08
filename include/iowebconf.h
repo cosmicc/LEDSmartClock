@@ -52,7 +52,7 @@
 // String fixedLon;                    // Fixed GPS Longitude
 // String ipgeoapi                     // IP Geolocation API
 
-static const char *CV = "VERSION_CONFIG";
+static const char *CV = VERSION_CONFIG;
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CV);
 iotwebconf::CheckboxTParameter resetdefaults =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("resetdefaults").label("Reset to Defaults (AP mode)").defaultValue(false).build();

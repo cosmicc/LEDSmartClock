@@ -7,7 +7,7 @@
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 0
 #define VERSION_PATCH 0
-#define VERSION_CONFIG "4"
+#define VERSION_CONFIG "10"  //major&minor
 
 #include <nvs_flash.h>
 #include <esp_task_wdt.h>

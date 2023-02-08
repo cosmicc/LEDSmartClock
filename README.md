@@ -81,9 +81,7 @@ Upgrading to a new version is easy!
 
 *The current firmware version running on the clock is displayed on the web interface's info page.*
 
-> WARNING: If you are upgrading to a new major version ie v1.0.0 to v2.0.0
-> (The first number of the new version is different), the clock configuration will be lost
-> and you will have to reconfigure the clock settings.  This does not happen if upgrading to a minor or patch version (the first number of the new version is the same)
+> WARNING: Some new major and minor versions may require you to reconfigure the settings on your clock. This will be fairly infrequent (only if new configuration settings are added in release) and will be clearly announced if the upgrade will casue the settings will be reset.
 
 
 ## Status Indicators
@@ -125,7 +123,7 @@ PLEASE, feel free to contribute any bug fixes, code optimizations, updates, secu
 
 -Use the `dev` branch for development and pull requests.  The `main` branch is only for merges from `dev` for new version releases.  
 -The `legacy` and `pre-coroutine` branches were used to to archive major rewrites during development and are now locked for reference.
--Release version numbers are formatted Major.Minor.Patch.  New major versions will require the LEDSmartClock settings to be reconfigured as all settings will be lost after upgrading due to IotWebConf options updates and the IotWebConf config version changing.
+-Release version numbers are formatted Major.Minor.Patch.  Some major and minor versions may require the LEDSmartClock settings to be reconfigured as all settings will be lost after upgrading due to IotWebConf options updates and the IotWebConf config version changing.
 -weather images used to create the animated bitmaps are located in the `icons` directory.
 -A Jtag connection will be available on the circuit board for easy debugging.
 -An extra I2C connection will be available on the circuit board for optional expansion.

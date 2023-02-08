@@ -7,7 +7,7 @@
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 0
 #define VERSION_PATCH 0
-#define VERSION_CONFIG 4
+#define VERSION_CONFIG "4"
 
 #include <nvs_flash.h>
 #include <esp_task_wdt.h>
@@ -30,9 +30,7 @@
 #include <HTTPClient.h>
 #include <Arduino_JSON.h>
 
-//static const char* CONFIGVER = "4";// config version (advance if iotwebconf config additions to reset defaults)
-
-#define COROUTINE_PROFILER          // Enable the coroutine debug profiler
+#undef COROUTINE_PROFILER          // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages
 #undef DISABLE_WEATHERCHECK
 #undef DISABLE_AIRCHECK

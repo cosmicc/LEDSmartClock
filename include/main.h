@@ -8,6 +8,7 @@
 #define VERSION_MINOR 0
 #define VERSION_PATCH 0
 #define VERSION_CONFIG "10"  //major&minor
+// WARNING: Not advancing the config version after adding/deleting iotwebconf config options will result in system settings data corruption.  Iotwebconf will erase the config if it sees a different config version to avoid this corruption.
 
 #include <nvs_flash.h>
 #include <esp_task_wdt.h>

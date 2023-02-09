@@ -52,6 +52,8 @@
 // String fixedLon;                    // Fixed GPS Longitude
 // String ipgeoapi                     // IP Geolocation API
 
+// WARNING: Not advancing the config version in main.h after adding/deleting iotwebconf config options will result in system settings data corruption.  Iotwebconf will erase the config if it sees a different config version to avoid this corruption.
+
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, VERSION_CONFIG);
 iotwebconf::CheckboxTParameter resetdefaults =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("resetdefaults").label("Reset to Defaults (AP mode)").defaultValue(false).build();

@@ -406,7 +406,7 @@ void updateLocation()
     memcpy(current.city, geocode.city, 32);
     memcpy(current.state, geocode.state, 32);
     memcpy(current.country, geocode.country, 32);
-    ESP_LOGD(TAG, "Using Geocode location: %s, %s, %s", current.city, current.state, current.country);
+    ESP_LOGI(TAG, "Using Geocode location: %s, %s, %s", current.city, current.state, current.country);
   }
   else if (isLocationValid("saved"))
   {
@@ -729,9 +729,7 @@ void fillAlertsFromJson(Alerts* alerts)
     sprintf(alerts->certainty1, "%s", (const char *)Json["features"][0]["properties"]["certainty"]);
     sprintf(alerts->urgency1, "%s", (const char *)Json["features"][0]["properties"]["urgency"]);
     sprintf(alerts->event1, "%s", (const char *)Json["features"][0]["properties"]["event"]);
-    const char *j = (const char *)Json["features"][0]["properties"]["description"];
-    Serial.println((String) "!!!!!Alert Size: " + sizeof(j) + " length: " + ((String)j).length());
-    sprintf(alerts->description1, "%s", (char *)cleanString(j));
+    sprintf(alerts->description1, "%s", cleanString((const char *)Json["features"][0]["properties"]["description"]));
     if ((String)alerts->certainty1 == "Observed" || (String)alerts->certainty1 == "Likely")
     {
       alerts->inWarning = true;
@@ -937,20 +935,24 @@ const char* ordinal_suffix(int n)
 
 char* cleanString(const char* p) 
 {
-    char* q = (char *)p;
-    while (p != 0 && *p != '\0') {
-        if (*p == '\n' || *p == '*') {
-            p++;
-            *q = *p;
-        } 
-        else {
-            *q++ = *p++;
-        }
+    ESP_LOGD(TAG, "cleanString(): Incoming string: [%s]", p);
+    char *q = (char *)p;
+    while (p != 0 && *p != '\0')
+    {
+    if (*p == '\n')
+    {
+      p++;
+      *q = *p;
+    }
+    else
+    {
+      *q++ = *p++;
+    }
     }
     *q = '\0';
+    ESP_LOGD(TAG, "cleanString(): Outgoing string: [%s]", q);
     return q;
 }
-
 
  //FIXME: string printouts on debug messages for scrolltext, etc showing garbled
  //TODO: web interface cleanup

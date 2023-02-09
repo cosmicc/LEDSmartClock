@@ -67,7 +67,7 @@ struct Alerts {
   char certainty1[15];
   char urgency1[15];
   char event1[50];
-  char description1[256];
+  char description1[512];
   acetime_t lastsuccess;
   acetime_t lastattempt;
   acetime_t timestamp;
@@ -97,6 +97,9 @@ struct CheckClass {
 
 struct Alertflash {
   bool active;
+  uint8_t fadecycle;
+  uint16_t brightness;
+  double multiplier;
   uint8_t lap;
   uint8_t laps;
   uint16_t color;
@@ -398,7 +401,7 @@ class DisplayToken
     }
 
   private:
-    char name[11][32] = {"", "Date", "CurWeather", "Alerts", "Misc", "N/A", "AlertFlash", "", "DayWeather", "AirQual", "ScrollText"};
+    char name[11][32] = {"", "Date", "CurWeather", "Alerts", "Misc", "N/A", "AlertFlash", "Alertflash_test", "DayWeather", "AirQual", "ScrollText"};
     bool token1;
     bool token2;
     bool token3;

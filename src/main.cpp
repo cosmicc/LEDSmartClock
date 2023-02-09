@@ -87,9 +87,9 @@ void setup ()
   iotWebConf.setConfigPin(CONFIG_PIN);
   iotWebConf.setApConnectionHandler(&connectAp);
   iotWebConf.setWifiConnectionHandler(&connectWifi);
-  //iotWebConf.setupUpdateServer(
-  //  [](const char* updatePath) { httpUpdater.setup(&server, updatePath); },
-  //  [](const char* userName, char* password) { httpUpdater.updateCredentials(userName, password); });
+  iotWebConf.setupUpdateServer(
+    [](const char* updatePath) { httpUpdater.setup(&server, updatePath); },
+    [](const char* userName, char* password) { httpUpdater.updateCredentials(userName, password); });
   iotWebConf.init();
   if (serialdebug.isChecked()) {
     
@@ -103,7 +103,6 @@ void setup ()
       systemClock.loop();
        ESP_EARLY_LOGD(TAG, "Waiting for Light Sensor...");
   }
-  //ESP_LOGE(TAG, "No Tsl2561 found. Check wiring: SCL=%d SDA=%d", TSL2561_SCL, TSL2561_SDA);
   Tsl.on();
   Tsl.setSensitivity(true, Tsl2561::EXP_14);
   ESP_EARLY_LOGD(TAG, "Initializing GPS Module...");
@@ -151,7 +150,7 @@ void setup ()
   gps.lastcheck = bootTime - T1Y + 60;
   gps.lockage = bootTime - T1Y + 60;
   checkweather.lastsuccess = bootTime;
-  checkalerts.lastsuccess = bootTime + (60*3);
+  checkalerts.lastsuccess = bootTime - (60*3);
   checkipgeo.lastsuccess = bootTime - T1Y + 60;
   checkaqi.lastsuccess = bootTime;
   checkgeocode.lastsuccess = bootTime - T1Y + 60;
@@ -169,7 +168,7 @@ void setup ()
   gps.lon = "0";
   scrolltext.position = mw;
   if (use_fixed_loc.isChecked())
-       ESP_EARLY_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
+    ESP_EARLY_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
   updateCoords();
   updateLocation();
   showclock.fstop = 250;
@@ -307,22 +306,17 @@ void print_debugData() {
     String uptime = elapsedTime(now - bootTime);
     String iga = elapsedTime(now - checkipgeo.lastattempt);
     String igs = elapsedTime(now - checkipgeo.lastsuccess);
-
     String wls = elapsedTime(now - checkweather.lastsuccess);
     String wla = elapsedTime(now - checkweather.lastattempt);
     String cwns = elapsedTime((now - lastshown.currentweather) - (show_weather_interval.value()*60));
     String dwns = elapsedTime((now - lastshown.dayweather) - (show_weather_daily_interval.value()*60*60));
-    
     String alla = elapsedTime(now - checkalerts.lastattempt);
     String alls = elapsedTime(now - checkalerts.lastsuccess);
     String alns = elapsedTime(now - lastshown.alerts);
-
     String aqla = elapsedTime(now - checkaqi.lastattempt);
     String aqls = elapsedTime(now - checkaqi.lastsuccess);
     String aqns = elapsedTime((now - lastshown.aqi) - (airquality_interval.value()*60));
-    
     String dtns = elapsedTime((now - lastshown.date) - (show_date_interval.value()*60*60));
-    
     String lst = elapsedTime(now - systemClock.getLastSyncTime());
     String npt = elapsedTime((now - lastntpcheck) - NTPCHECKTIME * 60);
     String lip = (WiFi.localIP()).toString();
@@ -485,15 +479,7 @@ void updateCoords()
     iotWebConf.saveConfig();
     checkgeocode.ready = true;
   }
-  //if (nlat != 0 && nlon != 0 && ) {
-  //  char sla[12];
-  //  char slo[12];
-  //  (current.lat).toCharArray(sla, 12);
-  //  (current.lon).toCharArray(slo, 12);
-  //  memcpy(savedlat.value(), sla, sizeof(sla));
-  //  memcpy(savedlon.value(), slo, sizeof(slo));
-  //  iotWebConf.saveConfig();
-  // }
+
   buildURLs();
 }
 
@@ -743,7 +729,9 @@ void fillAlertsFromJson(Alerts* alerts)
     sprintf(alerts->certainty1, "%s", (const char *)Json["features"][0]["properties"]["certainty"]);
     sprintf(alerts->urgency1, "%s", (const char *)Json["features"][0]["properties"]["urgency"]);
     sprintf(alerts->event1, "%s", (const char *)Json["features"][0]["properties"]["event"]);
-    sprintf(alerts->description1, "%s", (char*)cleanString((const char *)Json["features"][0]["properties"]["description"]));
+    const char *j = (const char *)Json["features"][0]["properties"]["description"];
+    Serial.println((String) "!!!!!Alert Size: " + sizeof(j) + " length: " + ((String)j).length());
+    sprintf(alerts->description1, "%s", (char *)cleanString(j));
     if ((String)alerts->certainty1 == "Observed" || (String)alerts->certainty1 == "Likely")
     {
       alerts->inWarning = true;
@@ -948,10 +936,10 @@ const char* ordinal_suffix(int n)
 }
 
 char* cleanString(const char* p) 
-{        //char *buf;
+{
     char* q = (char *)p;
     while (p != 0 && *p != '\0') {
-        if (*p == '\n') {
+        if (*p == '\n' || *p == '*') {
             p++;
             *q = *p;
         } 
@@ -966,15 +954,11 @@ char* cleanString(const char* p)
 
  //FIXME: string printouts on debug messages for scrolltext, etc showing garbled
  //TODO: web interface cleanup
- //FIXME: invalid apis crashing on 401
- //FIXME: reboot after initial config
- //TODO: status pixel air quality
- //TODO: remove weather check interval, sync weather, aqi show with checks, no checks if not shown
- //TODO: sync alertcheck with alertshow
  //TODO: advanced aqi calulations
- //TODO: basic aqi in current and daily weather
  //TODO: table titles
  //TODO: remove tables is show is disabled 
  //TODO: weather daily in web
  //TODO: timezone name in web
+ //FIXME: make sure checkaqi is ran before weather display
+
 

@@ -375,7 +375,16 @@ COROUTINE(serialInput) {
         //iotWebConf._allParameters.debugTo(&Serial);
         Serial.println();
         break;
-    #ifdef COROUTINE_PROFILER    
+    case 't':
+      alertflash.color = YELLOW;
+      alertflash.laps = 5;
+      alertflash.active = true;
+      displaytoken.setToken(7);
+      showClock.suspend();
+      COROUTINE_AWAIT(!alertflash.active);
+      displaytoken.resetToken(7);
+      break;
+#ifdef COROUTINE_PROFILER    
     case 'f':
       LogBinTableRenderer::printTo(Serial, 2 /*startBin*/, 13 /*endBin*/, false /*clear*/);
       break;
@@ -653,27 +662,72 @@ COROUTINE(coroutineManager) {
   }
 }
 
+COROUTINE(setBrightness) {
+  COROUTINE_LOOP() {
+    COROUTINE_AWAIT(Tsl.available());
+    Tsl.fullLuminosity(current.rawlux);
+    current.lux = constrain(map(current.rawlux, 0, 500, LUXMIN, LUXMAX), LUXMIN, LUXMAX);
+    current.brightavg = ((current.brightness) + (current.lux + userbrightness)) / 2;
+    if (current.brightavg != current.brightness) 
+    {
+      current.brightness = current.brightavg;
+      matrix->setBrightness(current.brightness);
+      matrix->show();
+    }
+    #ifdef DEBUG_LIGHT
+    Serial.println((String) "Lux: " + full + " brightness: " + cb + " avg: " + current.brightness);
+    #endif
+    COROUTINE_DELAY(LIGHT_CHECK_DELAY);
+  }
+}
+
 COROUTINE(AlertFlash) {
   COROUTINE_LOOP() 
   {
     COROUTINE_AWAIT(alertflash.active && showClock.isSuspended());
-    if (!disable_alertflash.isChecked()) {
+    if (!disable_alertflash.isChecked()) 
+    {
       displaytoken.setToken(6);
       alertflash.lap = 0;
+      setBrightness.suspend();
       matrix->clear();
       matrix->show();
-      COROUTINE_DELAY(250);
+      alertflash.brightness = 0;
+      alertflash.fadecycle = 0;
+      alertflash.multiplier = 0;
+      COROUTINE_DELAY(50);
       while (alertflash.lap < alertflash.laps)
       {
-        matrix->clear();
-        matrix->fillScreen(alertflash.color);
-        matrix->show();
-        COROUTINE_DELAY(250);
-        matrix->clear();
-        matrix->show();
-        COROUTINE_DELAY(250);
+        while (alertflash.fadecycle <= 4)
+        {
+          alertflash.multiplier = alertflash.multiplier + 0.25;
+          alertflash.brightness = current.brightness * alertflash.multiplier;
+          matrix->clear();
+          matrix->setBrightness(alertflash.brightness);
+          matrix->fillScreen(alertflash.color);
+          matrix->show();
+          alertflash.fadecycle++;
+          COROUTINE_DELAY(25);
+        }
+        alertflash.fadecycle = 0;
+        while (alertflash.fadecycle <= 4)
+        {
+          alertflash.multiplier = alertflash.multiplier - 0.25;
+          alertflash.brightness = current.brightness * alertflash.multiplier;
+          matrix->clear();
+          matrix->setBrightness(alertflash.brightness);
+          matrix->fillScreen(alertflash.color);
+          matrix->show();
+          alertflash.fadecycle++;
+          COROUTINE_DELAY(25);
+        }
+        COROUTINE_DELAY(50);
         alertflash.lap++;
+        alertflash.fadecycle = 0;
+        alertflash.multiplier = 0;
       }
+      setBrightness.resume();
+      COROUTINE_DELAY(50);
     }
       alertflash.active = false;
       displaytoken.resetToken(6);
@@ -762,24 +816,5 @@ COROUTINE(gps_checkData) {
     }
     if (GPS.charsProcessed() < 10) ESP_LOGE(TAG, "No GPS data. Check wiring.");
   COROUTINE_DELAY(1000);
-  }
-}
-
-COROUTINE(setBrightness) {
-  COROUTINE_LOOP() {
-    COROUTINE_AWAIT(Tsl.available());
-    Tsl.fullLuminosity(current.rawlux);
-    current.lux = constrain(map(current.rawlux, 0, 500, LUXMIN, LUXMAX), LUXMIN, LUXMAX);
-    current.brightavg = ((current.brightness) + (current.lux + userbrightness)) / 2;
-    if (current.brightavg != current.brightness) 
-    {
-      current.brightness = current.brightavg;
-      matrix->setBrightness(current.brightness);
-      matrix->show();
-    }
-    #ifdef DEBUG_LIGHT
-    Serial.println((String) "Lux: " + full + " brightness: " + cb + " avg: " + current.brightness);
-    #endif
-    COROUTINE_DELAY(LIGHT_CHECK_DELAY);
   }
 }

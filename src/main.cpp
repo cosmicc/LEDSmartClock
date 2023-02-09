@@ -34,13 +34,15 @@ void setup ()
   gpsClock.setup();
   printSystemZonedTime();
   ESP_EARLY_LOGD(TAG, "Initializing IotWebConf...");
+  group1.addItem(&imperial);
   group1.addItem(&brightness_level);
   group1.addItem(&text_scroll_speed);
+  group1.addItem(&systemcolor);
   group1.addItem(&show_date);
   group1.addItem(&datecolor);
   group1.addItem(&show_date_interval);
-  group1.addItem(&disable_status);
-  group1.addItem(&disable_alertflash);
+  group1.addItem(&enable_status);
+  group1.addItem(&enable_alertflash);
   group2.addItem(&twelve_clock);
   group2.addItem(&use_fixed_tz);
   group2.addItem(&fixed_offset);
@@ -48,7 +50,6 @@ void setup ()
   group2.addItem(&flickerfast);
   group2.addItem(&use_fixed_clockcolor);
   group2.addItem(&fixed_clockcolor);
-  group3.addItem(&imperial);
   group3.addItem(&use_fixed_tempcolor);
   group3.addItem(&fixed_tempcolor);
   group3.addItem(&show_weather);
@@ -200,7 +201,7 @@ void configSaved()
   userbrightness = calcbright(brightness_level.value());
   ESP_LOGI(TAG, "Configuration was updated.");
   if (resetdefaults.isChecked())
-    resetme = true;
+    showready.reset = true;
   if (!serialdebug.isChecked())
     Serial.println("Serial debug info has been disabled.");
   firsttimefailsafe = false;
@@ -442,7 +443,7 @@ void updateCoords()
     current.lon = fixedLon.value();
     current.locsource = "User Defined";
   }
-  if (gps.lon == "0" && ipgeo.lon[0] == '\0' && current.lon == "0")
+  else if (gps.lon == "0" && ipgeo.lon[0] == '\0' && current.lon == "0")
   {
     current.lat = savedlat.value();
     current.lon = savedlon.value();
@@ -479,7 +480,6 @@ void updateCoords()
     iotWebConf.saveConfig();
     checkgeocode.ready = true;
   }
-
   buildURLs();
 }
 
@@ -500,7 +500,7 @@ void display_showStatus()
     uint16_t sclr;
     uint16_t wclr;
     uint16_t aclr;
-    bool ds = disable_status.isChecked();
+    bool ds = !enable_status.isChecked();
     if (ds)
       sclr = BLACK;
     acetime_t now = systemClock.getNow();
@@ -542,7 +542,7 @@ void display_showStatus()
       wclr = YELLOW;
     else
       wclr = BLACK;
-    if (!disable_status.isChecked())
+    if (enable_status.isChecked())
       matrix->drawPixel(0, 7, sclr);
     if (show_airquality.isChecked())
       matrix->drawPixel(0, 0, aclr);

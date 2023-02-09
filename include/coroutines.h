@@ -376,7 +376,7 @@ COROUTINE(serialInput) {
         Serial.println();
         break;
     case 't':
-      alertflash.color = YELLOW;
+      alertflash.color = hex2rgb(systemcolor.value());
       alertflash.laps = 5;
       alertflash.active = true;
       displaytoken.setToken(7);
@@ -493,7 +493,7 @@ COROUTINE(systemMessages) {
     {
       displaytoken.setToken(4);
       scrolltext.message = (String)"New Location: " + current.city + ", " + current.state + ", " + current.country;
-      scrolltext.color = GREEN;
+      scrolltext.color = hex2rgb(systemcolor.value());
       scrolltext.active = true;
       COROUTINE_AWAIT(!scrolltext.active);
       showready.loc = false;
@@ -503,7 +503,7 @@ COROUTINE(systemMessages) {
     {
       displaytoken.setToken(4);
       scrolltext.message = (String)"IP: " + (WiFi.localIP()).toString();
-      scrolltext.color = GREEN;
+      scrolltext.color = hex2rgb(systemcolor.value());
       scrolltext.active = true;
       COROUTINE_AWAIT(!scrolltext.active);
       showready.ip = false;
@@ -685,7 +685,7 @@ COROUTINE(AlertFlash) {
   COROUTINE_LOOP() 
   {
     COROUTINE_AWAIT(alertflash.active && showClock.isSuspended());
-    if (!disable_alertflash.isChecked()) 
+    if (enable_alertflash.isChecked()) 
     {
       displaytoken.setToken(6);
       alertflash.lap = 0;
@@ -695,9 +695,9 @@ COROUTINE(AlertFlash) {
       alertflash.brightness = 0;
       alertflash.fadecycle = 0;
       alertflash.multiplier = 0;
-      COROUTINE_DELAY(50);
       while (alertflash.lap < alertflash.laps)
       {
+        COROUTINE_DELAY(100);
         while (alertflash.fadecycle <= 4)
         {
           alertflash.multiplier = alertflash.multiplier + 0.25;
@@ -721,13 +721,14 @@ COROUTINE(AlertFlash) {
           alertflash.fadecycle++;
           COROUTINE_DELAY(25);
         }
-        COROUTINE_DELAY(50);
         alertflash.lap++;
         alertflash.fadecycle = 0;
         alertflash.multiplier = 0;
       }
+      matrix->clear();
+      matrix->show();
       setBrightness.resume();
-      COROUTINE_DELAY(50);
+      COROUTINE_DELAY(200);
     }
       alertflash.active = false;
       displaytoken.resetToken(6);

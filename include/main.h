@@ -124,10 +124,8 @@ CoTimers cotimer;
 ScrollText scrolltext;
 Alertflash alertflash;
 Current current;
-
 acetime_t lastntpcheck;
 bool clock_display_offset;      // Clock display offset for single digit hour
-bool resetme;                   // reset to factory defaults
 acetime_t bootTime;             // boot time
 String timesource = "none";     // Primary timeclock source gps/ntp
 uint8_t userbrightness;         // Current saved brightness setting (from iotwebconf)

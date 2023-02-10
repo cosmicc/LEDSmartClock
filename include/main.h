@@ -29,7 +29,7 @@
 #include <FastLED_NeoMatrix.h>
 #include <FastLED.h>
 #include <HTTPClient.h>
-#include <ArduinoJson.h>
+#include <Arduino_JSON.h>
 
 #undef COROUTINE_PROFILER          // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages

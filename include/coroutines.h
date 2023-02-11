@@ -1,4 +1,3 @@
-// Coroutines
 COROUTINE(sysClock) {
   COROUTINE_LOOP()
   {
@@ -79,7 +78,6 @@ COROUTINE(showClock) {
       {
         display_showStatus();
         matrix->show();
-        showclock.colonoff = true;
         COROUTINE_AWAIT(millis() - showclock.millis > showclock.fstop);
         if (clock_display_offset)
         {
@@ -106,27 +104,22 @@ COROUTINE(checkAirquality) {
     checkaqi.retries++;
     checkaqi.jsonParsed = false;
     IotWebConf.suspend();
-    if (httpRequest(3)) {
-    int httpCode = request.GET();
-    IotWebConf.resume();
-    String payload;
-    if (httpCode > 0)
-          payload = request.getString();
-    if (httpCode == 200)
+    int httpCode;
+    String reqdata;
+    if (httpRequest(3))
+    {
+      httpCode = request.GET();
+      IotWebConf.resume();
+      if (httpCode == 200)
       {
-        ESP_LOGI(TAG, "AQI response code: [%d]", httpCode);
-        Json = JSON.parse(payload);
-        if (JSON.typeof(Json) == "undefined")
-          ESP_LOGE(TAG, "Parsing AQIJson input failed!");
-        else 
-        {
-            checkaqi.jsonParsed = true;
-            fillAqiFromJson(&weather);
-            checkaqi.lastsuccess = systemClock.getNow();
-            checkaqi.retries = 0;
-            if (isNextShowReady(checkaqi.lastsuccess, airquality_interval.value(), T1M))
-              showready.aqi = true;
-        }
+        reqdata = request.getString();
+        ESP_LOGD(TAG, "AQI http response code: [%d], payload length: [%d]", httpCode, reqdata.length());
+        fillAqiFromJson(reqdata);
+        checkaqi.lastsuccess = systemClock.getNow();
+        checkaqi.retries = 0;
+        ESP_LOGI(TAG, "New air quality data received");
+        if (isNextShowReady(checkaqi.lastsuccess, airquality_interval.value(), T1M))
+          showready.aqi = true;
       }
       else if (httpCode == 401)
       {
@@ -151,27 +144,22 @@ COROUTINE(checkWeather) {
     checkweather.retries++;
     checkweather.jsonParsed = false;
     IotWebConf.suspend();
-    if (httpRequest(0)) 
+    int httpCode;
+    String reqdata;
+    if (httpRequest(0))
     {
-      int httpCode = request.GET();
+      httpCode = request.GET();
       IotWebConf.resume();
-      String payload;
       if (httpCode == 200)
       {
-        payload = request.getString();
-        ESP_LOGI(TAG, "Weather response code: [%d]", httpCode);
-        Json = JSON.parse(payload);
-        if (JSON.typeof(Json) == "undefined")
-          ESP_LOGE(TAG, "Parsing WeatherJson input failed!");
-        else 
-        {
-            checkweather.jsonParsed = true;
-            fillWeatherFromJson(&weather);
-            checkweather.lastsuccess = systemClock.getNow();
-            checkweather.retries = 0;
-            showready.currentweather = true;
-            showready.dayweather = true;
-        }
+        reqdata = request.getString();
+        ESP_LOGD(TAG, "Weather http response code: [%d], payload length: [%d]", httpCode, reqdata.length());
+        fillWeatherFromJson(reqdata);
+        checkweather.lastsuccess = systemClock.getNow();
+        checkweather.retries = 0;
+        showready.currentweather = true;
+        showready.dayweather = true;
+        ESP_LOGI(TAG, "New weather data received");
       }
       else if (httpCode == 401)
       {
@@ -195,30 +183,23 @@ COROUTINE(checkAlerts) {
     ESP_LOGI(TAG, "Checking weather alerts...");
     httpbusy = true;
     checkalerts.retries++;
-    checkalerts.jsonParsed = false;
     IotWebConf.suspend();
-    if (httpRequest(1)) 
+    int httpCode;
+    String reqdata;
+    if (httpRequest(1))
     {
-      int httpCode = request.GET();
+      httpCode = request.GET();
       IotWebConf.resume();
-      String payload; 
       if (httpCode == 200)
       {
-        payload = request.getString();
-        ESP_LOGI(TAG, "Alerts response code: [%d]", httpCode);
-        Json = JSON.parse(payload);
-        if (JSON.typeof(Json) == "undefined")
-          ESP_LOGE(TAG, "Parsing AlertsJson input failed!");
-        else 
-        {
-            checkalerts.jsonParsed = true;
-            checkalerts.retries = 0;
-            fillAlertsFromJson(&alerts);
-            cleanString(alerts.description1);
-            cleanString(alerts.instruction1);
-            checkalerts.lastsuccess = systemClock.getNow();
-            showready.alerts;
-        }
+        reqdata = request.getString();
+        ESP_LOGD(TAG, "Alerts http response code: [%d], payload length: [%d]", httpCode, reqdata.length());
+        checkalerts.retries = 0;
+        fillAlertsFromJson(reqdata);
+        cleanString(alerts.description1);
+        cleanString(alerts.instruction1);
+        checkalerts.lastsuccess = systemClock.getNow();
+        showready.alerts;
       }
       else
         ESP_LOGE(TAG, "Alerts ERROR code: [%d]", httpCode);
@@ -256,7 +237,7 @@ COROUTINE(showWeather) {
   scrolltext.color = hex2rgb(weather_color.value());
   scrolltext.active = true;
   scrolltext.displayicon = true;
-  strncpy(scrolltext.icon, weather.currentIcon, 4);
+  scrolltext.icon = weather.currentIcon;
   COROUTINE_AWAIT(!scrolltext.active);
   scrolltext.displayicon = false;
   cotimer.millis = millis();
@@ -281,7 +262,7 @@ COROUTINE(showWeatherDaily) {
   alertflash.color = hex2rgb(weather_daily_color.value());
   alertflash.laps = 1;
   alertflash.active = true;
-  strncpy(scrolltext.icon, weather.dayIcon, 4);
+  scrolltext.icon = weather.dayIcon;
   COROUTINE_AWAIT(!alertflash.active);
   scrolltext.message = capString((String)"Today " + weather.dayDescription + " Humidity " + weather.dayHumidity + "% Wind " + int(weather.dayWindSpeed) + "/" + int(weather.dayWindGust));
   scrolltext.color = hex2rgb(weather_daily_color.value());
@@ -416,36 +397,31 @@ COROUTINE(checkGeocode) {
   httpbusy = true;
   checkgeocode.jsonParsed = false;
   IotWebConf.suspend();
-  if (httpRequest(2)) {
-    int httpCode = request.GET();
+  int httpCode;
+  if (httpRequest(2))
+  {
+    httpCode = request.GET();
     IotWebConf.resume();
     String payload;
     checkgeocode.retries++;
     if (httpCode == 200)
     {
       payload = request.getString();
-      ESP_LOGI(TAG, "Geocode response code: [%d]", httpCode);
-      Json = JSON.parse(payload);
-      if (JSON.typeof(Json) == "undefined")
-        ESP_LOGE(TAG, "Parsing GEOCodeJson input failed!");
-      else 
-      {
-          checkgeocode.jsonParsed = true;
-          fillGeocodeFromJson(&geocode);
-          checkgeocode.lastsuccess = systemClock.getNow();
-          checkgeocode.retries = 0;
-          checkgeocode.ready = false;
-          updateLocation();
+      ESP_LOGD(TAG, "GEOcode http response code: [%d], payload length: [%d]", httpCode, payload.length());
+      fillGeocodeFromJson(payload);
+      checkgeocode.lastsuccess = systemClock.getNow();
+      checkgeocode.retries = 0;
+      checkgeocode.ready = false;
+      updateLocation();
       }
-    }
-    else if (httpCode == 401)
-    {
+      else if (httpCode == 401)
+      {
       ESP_LOGE(TAG, "Openweather.org Invalid API, error code: [%d]", httpCode);
       showready.apierrorname = "openweather.org";
       showready.apierror = true;
-    }
-    else
-      ESP_LOGE(TAG, "Geocode ERROR code: [%d]", httpCode);
+      }
+      else
+       ESP_LOGE(TAG, "Geocode ERROR code: [%d]", httpCode);
   }
   request.end();
   checkgeocode.lastattempt = systemClock.getNow();
@@ -461,40 +437,34 @@ COROUTINE(checkIpgeo) {
     httpbusy = true;
     checkipgeo.jsonParsed = false;
     IotWebConf.suspend();
+    int httpCode;
     if (httpRequest(4))
     {
-    int httpCode = request.GET();
+    httpCode = request.GET();
     IotWebConf.resume();
     String payload;
     checkipgeo.retries++;
     if (httpCode == 200)
       {
       payload = request.getString();
-      ESP_LOGI(TAG, "IPGeo response code: [%d]", httpCode);
-      Json = JSON.parse(payload);
-      if (JSON.typeof(Json) == "undefined")
-          ESP_LOGE(TAG, "Parsing IPGeoJson input failed!");
-        else 
-        {
-          checkipgeo.jsonParsed = true;
-          fillIpgeoFromJson(&ipgeo);
-          checkipgeo.lastsuccess = systemClock.getNow();
-          checkipgeo.complete = true;
-          checkipgeo.retries = 0;
-          updateCoords();
-          checkgeocode.ready = true;
-          processTimezone();
-        }
+      ESP_LOGD(TAG, "IPGeo http response code: [%d], payload length: [%d]", httpCode, payload.length());
+      fillIpgeoFromJson(payload);
+      checkipgeo.lastsuccess = systemClock.getNow();
+      checkipgeo.complete = true;
+      checkipgeo.retries = 0;
+      updateCoords();
+      checkgeocode.ready = true;
+      processTimezone();
       }
-      else if (httpCode == 401)
+    }
+    else if (httpCode == 401)
     {
       ESP_LOGE(TAG, "IPGeolocation.io Invalid API, error code: [%d]", httpCode);
       showready.apierrorname = "ipgeolocation.io";
       showready.apierror = true;
     }
-      else
+    else
         ESP_LOGE(TAG, "IPGeo ERROR code: [%d]", httpCode);
-    }
     request.end();
     checkipgeo.lastattempt = systemClock.getNow();
     httpbusy = false;
@@ -783,7 +753,7 @@ COROUTINE(scrollText) {
       if (!displaytoken.getToken(10)) 
       {
         displaytoken.setToken(10);
-        ESP_LOGI(TAG, "Scrolltext Message: %s", (String)scrolltext.message);
+        ESP_LOGI(TAG, "Scrolltext(): Scrolling message: [%s]", scrolltext.message.c_str());
       }
       uint16_t size = (scrolltext.message).length() * 6;
       if (scrolltext.position >= size - size - size) {
@@ -800,7 +770,7 @@ COROUTINE(scrollText) {
       scrolltext.active = false;
       scrolltext.position = mw;
       scrolltext.displayicon = false;
-      ESP_LOGD(TAG, "Scrolltext complete", (String)scrolltext.message);
+      ESP_LOGD(TAG, "Scrolltext(): Scrolling complete: [%s]", scrolltext.message.c_str());
       displaytoken.resetToken(10);
       
       }
@@ -832,14 +802,14 @@ COROUTINE(gps_checkData) {
     if (GPS.location.isUpdated()) 
     {
       if (!use_fixed_loc.isChecked()) {
-        gps.lat = String(GPS.location.lat(), 5);
-        gps.lon = String(GPS.location.lng(), 5);
+        gps.lat =GPS.location.lat();
+        gps.lon = GPS.location.lng();
         gps.lockage = systemClock.getNow();
         updateCoords();
       }
       else {
-        gps.lat = fixedLat.value();
-        gps.lon = fixedLon.value();
+        gps.lat = strtod(fixedLat.value(), NULL);
+        gps.lon = strtod(fixedLon.value(), NULL);
         updateCoords();
       }
       ESP_LOGV(TAG, "GPS Location updated: Lat: %s Lon: %s", gps.lat, gps.lon);

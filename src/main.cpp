@@ -1,7 +1,7 @@
 // LedSmartClock for a 8x32 LED neopixel display
 //
 // Created by: Ian Perry (ianperry99@gmail.com)
-// https://github.com/cosmicc/led_clock         // firmware version
+// https://github.com/cosmicc/LEDSmartClock     
 
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock (Everything is coroutines now)
 
@@ -92,9 +92,6 @@ void setup ()
     [](const char* updatePath) { httpUpdater.setup(&server, updatePath); },
     [](const char* userName, char* password) { httpUpdater.updateCredentials(userName, password); });
   iotWebConf.init();
-  if (serialdebug.isChecked()) {
-    
-  }
   ESP_EARLY_LOGD(TAG, "Initializing Light Sensor...");
   userbrightness = calcbright(brightness_level.value());
   current.brightness = userbrightness;
@@ -165,8 +162,6 @@ void setup ()
   lastshown.date = bootTime;
   lastshown.currentweather = bootTime;
   lastshown.aqi = bootTime;
-  gps.lat = "0";
-  gps.lon = "0";
   scrolltext.position = mw;
   if (use_fixed_loc.isChecked())
     ESP_EARLY_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
@@ -183,7 +178,6 @@ void setup ()
   ESP_EARLY_LOGD(TAG, "Display initalization complete.");
   ESP_EARLY_LOGD(TAG, "Setup initialization complete: %d ms", (millis()-timer));
   scrolltext.resetmsgtime = millis() - 60000;
-  cotimer.iotloop = millis();
   displaytoken.resetAllTokens();
   CoroutineScheduler::setup();
 }
@@ -257,7 +251,7 @@ bool httpRequest(uint8_t index)
 
 
 bool isCoordsValid() {
-  if ((current.lat).length() > 1 && (current.lon).length() > 1) 
+  if (current.lat != 0 && current.lon != 0) 
   {
     return true;
   }
@@ -333,15 +327,16 @@ void print_debugData() {
     //char prBuffer[512]; // Print buffer
     //sprintf(prBuffer, "Version Firmware:v%d.%d.%d Config:v%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_CONFIG);
     //debug_print(prBuffer, true);
-
-    debug_print((String) "Version - Firmware:v" + VERSION_MAJOR + "." + VERSION_MINOR + "." + VERSION_PATCH + " | Config:v" + VERSION_CONFIG, true);
+    char dprint[512];
+    sprintf(dprint, "Firmware - Version:v%d.%d.%d | Config:v%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_CONFIG);
+    debug_print(dprint, true);
     debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + connection_state[iotWebConf.getState()] + " | HttpReady:" + yesno[isHttpReady()] + " | IP:" + lip + " | Uptime:" + uptime, true);
     debug_print((String) "Clock - Status:" + clock_status[systemClock.getSyncStatusCode()] + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastAttempt:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextAttempt:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " Seconds | NextNtp:" + npt + " | LastSync:" + lst, true);
     debug_print((String) "Loc - SavedLat:" + savedlat.value() + " | SavedLon:" + savedlon.value() + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon + " | LocValid:" + yesno[isCoordsValid()], true);
     debug_print((String) "IPGeo - Complete:" + yesno[checkipgeo.complete] + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | ValidApi:" + yesno[isApiValid(ipgeoapi.value())] + " | Retries:" + checkipgeo.retries + " | LastAttempt:" + iga + " | LastSuccess:" + igs, true);
     debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
-    debug_print((String) "Weather Current - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | ValidApi:" + yesno[isApiValid(weatherapi.value())] + " | Retries:" + checkweather.retries + " | LastAttempt:" + wla + " | LastSuccess:" + wls + " | NextShow:" + cwns, true);
-    debug_print((String) "Weather Day - Icon:" + weather.dayIcon + " | LoTemp:" + weather.dayTempMin + tempunit + " | HiTemp:" + weather.dayTempMax + tempunit + " | Humidity:" + weather.dayHumidity + "% | Wind:" + weather.dayWindSpeed + "/" + weather.dayWindGust + speedunit + " | Desc:" + weather.currentDescription + " | NextShow:" + dwns, true);
+    debug_print((String) "Weather Current - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit.c_str() + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | ValidApi:" + yesno[isApiValid(weatherapi.value())] + " | Retries:" + checkweather.retries + " | LastAttempt:" + wla + " | LastSuccess:" + wls + " | NextShow:" + cwns, true);
+    debug_print((String) "Weather Day - Icon:" + weather.dayIcon + " | LoTemp:" + weather.dayTempMin + tempunit.c_str() + " | HiTemp:" + weather.dayTempMax + tempunit + " | Humidity:" + weather.dayHumidity + "% | Wind:" + weather.dayWindSpeed + "/" + weather.dayWindGust + speedunit + " | Desc:" + weather.currentDescription + " | NextShow:" + dwns, true);
     debug_print((String) "Air Quality - Aqi:" + air_quality[weather.currentaqi] + " | Co:" + weather.carbon_monoxide + " | No:" + weather.nitrogen_monoxide + " | No2:" + weather.nitrogen_dioxide + " | Ozone:" + weather.ozone + " | So2:" + weather.sulfer_dioxide + " | Pm2.5:" + weather.particulates_small + " | Pm10:" + weather.particulates_medium + " | Ammonia:" + weather.ammonia + " | Retries:" + checkaqi.retries + " | LastAttempt:" + aqla + " | LastSuccess:" + aqls + " | NextShow:" + aqns, true);
     debug_print((String) "Alerts - Active:" + yesno[alerts.active] + " | Watch:" + yesno[alerts.inWatch] + " | Warn:" + yesno[alerts.inWarning] + " | Retries:" + checkalerts.retries + " | LastAttempt:" + alla + " | LastSuccess:" + alls + " | LastShown:" + alns, true);
     debug_print((String) "Location: ", false);
@@ -350,7 +345,7 @@ void print_debugData() {
     else
       debug_print("Currently not known", true);
     if (alerts.active)
-      debug_print((String) "*Alert1 - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1 + " " + alerts.instruction1, true);
+      debug_print((String) "*Alert - Status:" + alerts.status1 + " | Severity:" + alerts.severity1 + " | Certainty:" + alerts.certainty1 + " | Urgency:" + alerts.urgency1 + " | Event:" + alerts.event1 + " | Desc:" + alerts.description1 + " " + alerts.instruction1, true);
     debug_print((String)"Display Tokens: " + displaytoken.showTokens(), true);
 }
 
@@ -380,7 +375,7 @@ void processTimezone()
     ESP_LOGD(TAG, "Using ipgeolocation offset: %d", ipgeo.tzoffset);
     if (ipgeo.tzoffset != savedoffset)
     {
-      ESP_LOGI(TAG, "IP Geo timezone [%d] (%s) is different then saved timezone [%d], saving new timezone", ipgeo.tzoffset, ipgeo.timezone, savedoffset);
+      ESP_LOGI(TAG, "IP Geo timezone [%d] (%s) is different then saved timezone [%d], saving new timezone", ipgeo.tzoffset, ipgeo.timezone.c_str(), savedoffset);
       savedtzoffset.value() = ipgeo.tzoffset;
       iotWebConf.saveConfig();
     }
@@ -405,34 +400,34 @@ void updateLocation()
 {
   if (isLocationValid("geocode"))
   {
-    if (!cmpLocs(geocode.city, current.city))
+    if (geocode.city != current.city)
       showready.loc = true;
-    memcpy(current.city, geocode.city, 32);
-    memcpy(current.state, geocode.state, 32);
-    memcpy(current.country, geocode.country, 32);
-    ESP_LOGI(TAG, "Using Geocode location: %s, %s, %s", current.city, current.state, current.country);
+    current.city = geocode.city;
+    current.state = geocode.state;
+    current.country = geocode.country;
+    ESP_LOGI(TAG, "Using Geocode location: %s, %s, %s", current.city.c_str(), current.state.c_str(), current.country.c_str());
   }
   else if (isLocationValid("saved"))
   {
-    memcpy(current.city, savedcity.value(), 32);
-    memcpy(current.state, savedstate.value(), 32);
-    memcpy(current.country, savedcountry.value(), 32);
-    ESP_LOGD(TAG, "Using saved location: %s, %s, %s", current.city, current.state, current.country);
+    current.city = savedcity.value();
+    current.state = savedstate.value();
+    current.country = savedcountry.value();
+    ESP_LOGD(TAG, "Using saved location: %s, %s, %s", current.city.c_str(), current.state.c_str(), current.country.c_str());
   }
   else if (isLocationValid("current"))
   {
-    ESP_LOGD(TAG, "No new location update, using current location: %s, %s, %s", current.city, current.state, current.country);
+    ESP_LOGD(TAG, "No new location update, using current location: %s, %s, %s", current.city.c_str(), current.state.c_str(), current.country.c_str());
   }
   else
   {
     ESP_LOGD(TAG, "No valid locations found");
   }
-  if (!cmpLocs(savedcity.value(), current.city))
+  if ((String)savedcity.value() != current.city)
   {
-    ESP_LOGI(TAG, "Location not saved, saving new location: %s, %s, %s", current.city, current.state, current.country);
-    memcpy(savedcity.value(), current.city, 32);
-    memcpy(savedstate.value(), current.state, 32);
-    memcpy(savedcountry.value(), current.country, 32);
+    ESP_LOGI(TAG, "Location not saved, saving new location: %s, %s, %s", current.city.c_str(), current.state.c_str(), current.country.c_str());
+    (current.city).toCharArray(savedcity.value(), 32);
+    (current.state).toCharArray(savedstate.value(), 32);
+    (current.country).toCharArray(savedcountry.value(), 32);
     iotWebConf.saveConfig();
   }
 }
@@ -441,46 +436,42 @@ void updateCoords()
 {
   if (use_fixed_loc.isChecked())
   {
-    gps.lat = fixedLat.value();
-    gps.lon = fixedLon.value();
-    current.lat = fixedLat.value();
-    current.lon = fixedLon.value();
+    gps.lat = strtod(fixedLat.value(), NULL);
+    gps.lon = strtod(fixedLon.value(), NULL);
+    current.lat = strtod(fixedLat.value(), NULL);
+    current.lon = strtod(fixedLon.value(), NULL);
     current.locsource = "User Defined";
   }
-  else if (gps.lon == "0" && ipgeo.lon[0] == '\0' && current.lon == "0")
+  else if (gps.lon == 0 && ipgeo.lon == 0 && current.lon == 0)
   {
-    current.lat = savedlat.value();
-    current.lon = savedlon.value();
+    current.lat = strtod(savedlat.value(), NULL);
+    current.lon = strtod(savedlon.value(), NULL);
     current.locsource = "Previous Saved";
   }
-  else if (gps.lon == "0" && ipgeo.lon[0] != '\0' && current.lon == "0")
+  else if (gps.lon == 0 && ipgeo.lon != 0 && current.lon == 0)
   {
-    current.lat = (String)ipgeo.lat; 
-    current.lon = (String)ipgeo.lon;
+    current.lat = ipgeo.lat; 
+    current.lon = ipgeo.lon;
     current.locsource = "IP Geolocation";
-    ESP_LOGI(TAG, "Using IPGeo location information: Lat: %s Lon: %s", (ipgeo.lat), (ipgeo.lon));
+    ESP_LOGI(TAG, "Using IPGeo location information: Lat: %lf Lon: %lf", (ipgeo.lat), (ipgeo.lon));
   }
-  else if (gps.lon != "0")
+  else if (gps.lon != 0)
   {
     current.lat = gps.lat;
     current.lon = gps.lon;
     current.locsource = "GPS";
   }
-  double nlat = (current.lat).toDouble();
-  double nlon = (current.lon).toDouble();
-  String sa = savedlat.value();
-  String so = savedlon.value();
-  double olat = sa.toDouble();
-  double olon = so.toDouble();
-  if (abs(nlat - olat) > 0.02 || abs(nlon - olon) > 0.02) {
+  double olat = strtod(savedlat.value(), NULL);
+  double olon = strtod(savedlon.value(), NULL);
+  if (abs(current.lat - olat) > 0.02 || abs(current.lon - olon) > 0.02) {
     ESP_LOGW(TAG, "Major location shift, saving values");
-    ESP_LOGW(TAG, "Lat:[%0.6lf]->[%0.6lf] Lon:[%0.6lf]->[%0.6lf]", olat, nlat, olon, nlon);
-    char sla[12];
-    char slo[12];
-    (current.lat).toCharArray(sla, 12);
-    (current.lon).toCharArray(slo, 12);
-    memcpy(savedlat.value(), sla, sizeof(sla));
-    memcpy(savedlon.value(), slo, sizeof(slo));
+    ESP_LOGW(TAG, "Lat:[%0.6lf]->[%0.6lf] Lon:[%0.6lf]->[%0.6lf]", olat, current.lat, olon, current.lon);
+    //har sla[12];
+    //char slo[12];
+    dtostrf(current.lat, 12, 5, savedlat.value());
+    dtostrf(current.lon, 12, 5, savedlon.value());
+    //memcpy(savedlat.value(), sla, sizeof(sla));
+    //memcpy(savedlon.value(), slo, sizeof(slo));
     iotWebConf.saveConfig();
     checkgeocode.ready = true;
   }
@@ -564,7 +555,7 @@ void display_showStatus()
     }
 }
 
-void display_weatherIcon(char* icon) 
+void display_weatherIcon(String icon) 
 {
     bool night;
     char dn;
@@ -724,91 +715,227 @@ uint16_t calcaqi(double c, double i_hi, double i_low, double c_hi, double c_low)
   return (i_hi - i_low)/(c_hi - c_low)*(c - c_low) + i_low;
 }
 
-void fillAlertsFromJson(Alerts* alerts) 
+void fillAlertsFromJson(String payload) 
 {
-  if (Json["features"].length() != 0)
+  StaticJsonDocument<1024> filter;
+  filter["features"][0]["properties"]["status"] = true;
+  filter["features"][0]["properties"]["severity"] = true;
+  filter["features"][0]["properties"]["certainty"] = true;
+  filter["features"][0]["properties"]["urgency"] = true;
+  filter["features"][0]["properties"]["event"] = true;
+  filter["features"][0]["properties"]["instruction"] = true;
+  filter["features"][0]["properties"]["parameters"]["NWSheadline"] = true;
+  filter["features"][1]["properties"]["status"] = true;
+  filter["features"][1]["properties"]["severity"] = true;
+  filter["features"][1]["properties"]["certainty"] = true;
+  filter["features"][1]["properties"]["urgency"] = true;
+  filter["features"][1]["properties"]["event"] = true;
+  filter["features"][1]["properties"]["instruction"] = true;
+  filter["features"][1]["properties"]["parameters"]["NWSheadline"] = true;
+  filter["features"][2]["properties"]["status"] = true;
+  filter["features"][2]["properties"]["severity"] = true;
+  filter["features"][2]["properties"]["certainty"] = true;
+  filter["features"][2]["properties"]["urgency"] = true;
+  filter["features"][2]["properties"]["event"] = true;
+  filter["features"][2]["properties"]["instruction"] = true;
+  filter["features"][2]["properties"]["parameters"]["NWSheadline"] = true;
+  StaticJsonDocument <4096> doc;
+  DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
+  if (error) 
   {
-    if (Json["features"][0]["properties"]["severity"] != "Unknown")
-      sprintf(alerts->status1, "%s", (const char *)Json["features"][0]["properties"]["status"]);
-      sprintf(alerts->severity1, "%s", (const char *)Json["features"][0]["properties"]["severity"]);
-      sprintf(alerts->certainty1, "%s", (const char *)Json["features"][0]["properties"]["certainty"]);
-      sprintf(alerts->urgency1, "%s", (const char *)Json["features"][0]["properties"]["urgency"]);
-      sprintf(alerts->event1, "%s", (const char *)Json["features"][0]["properties"]["event"]);
-      sprintf(alerts->instruction1, "%s", (const char *)Json["features"][0]["properties"]["instruction"]);
-      sprintf(alerts->description1, "%s", (const char *)Json["features"][0]["properties"]["parameters"]["NWSheadline"]);
-
-    if ((String)alerts->certainty1 == "Observed" || (String)alerts->certainty1 == "Likely")
-    {
-      alerts->inWarning = true;
-      alerts->active = true;
-      showready.alerts = true;
-      alerts->timestamp = systemClock.getNow();
-    }
-    else if ((String)alerts->certainty1 == "Possible") {
-      alerts->inWatch= true;
-      alerts->active = true;
-      showready.alerts = true;
-      alerts->timestamp = systemClock.getNow();
-    } 
-    else {
-      alerts->active = false;
-      alerts->inWarning = false;
-      alerts->inWatch= false;     
-    }
-    ESP_LOGI(TAG, "Active weather alert received");
+    Serial.print(F("Alerts deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return;
   }
-  else {
-    alerts->active = false;
-    alerts->inWarning = false;
-    alerts->inWatch= false;    
-    ESP_LOGI(TAG, "No current weather alerts exist");
+  JsonObject obj = doc.as<JsonObject>();
+  uint8_t actwatch = 0;
+  uint8_t actwarn = 0;
+  if (obj["features"][0])
+  {
+    if ((obj["features"][0]["properties"]["severity"].as<String>()) != "Unknown")
+    {
+      if ((obj["features"][0]["properties"]["certainty"].as<String>()) == "Observed" || (obj["features"][0]["properties"]["certainty"].as<String>()) == "Likely")
+        actwarn = 1;
+      else if ((obj["features"][0]["properties"]["certainty"].as<String>()) == "Possible")
+        actwatch = 1;
+    }
+    else
+      ESP_LOGD(TAG, "Weather alert 1 received but is of status Unknown, skipping");
+    if (obj["features"][1])
+    {
+      if ((obj["features"][1]["properties"]["severity"].as<String>()) != "Unknown")
+      {
+        if ((obj["features"][1]["properties"]["certainty"].as<String>()) == "Observed" || (obj["features"][1]["properties"]["certainty"].as<String>()) == "Likely")
+          if (actwarn == 0) actwarn = 2;
+        else if ((obj["features"][1]["properties"]["certainty"].as<String>()) == "Possible")
+          if (actwatch == 0) actwatch = 2;
+      }
+      else
+        ESP_LOGD(TAG, "Weather alert 2 received but is of status Unknown, skipping");
+      if(obj["features"][2])
+      {
+        if ((obj["features"][2]["properties"]["severity"].as<String>()) != "Unknown")
+        {
+          if ((obj["features"][2]["properties"]["certainty"].as<String>()) == "Observed" || (obj["features"][2]["properties"]["certainty"].as<String>()) == "Likely")
+            if (actwarn == 0) actwarn = 3;
+          else if ((obj["features"][1]["properties"]["certainty"].as<String>()) == "Possible")
+            if (actwatch == 0) actwatch = 3;
+        }
+        else
+          ESP_LOGD(TAG, "Weather alert 3 received but is of status Unknown, skipping");
+      }
+    }
+  }
+  if (actwarn > 0) 
+  {
+    alerts.inWarning = true;
+    alerts.inWatch = false;
+    alerts.active = true;
+    showready.alerts = true;
+    alerts.timestamp = systemClock.getNow();
+    ESP_LOGI(TAG, "Active weather WARNING alert received");
+  }
+  else if (actwatch > 0)
+  {
+    alerts.inWarning = false;
+    alerts.inWatch = true;
+    alerts.active = true;
+    showready.alerts = true;
+    alerts.timestamp = systemClock.getNow();    
+    ESP_LOGI(TAG, "Active weather WATCH alert received");
+  }
+  if (actwarn == 1 || actwatch == 1)
+  {
+    alerts.status1 = obj["features"][0]["properties"]["status"].as<String>();
+    alerts.severity1 = obj["features"][0]["properties"]["severity"].as<String>();
+    alerts.certainty1 = obj["features"][0]["properties"]["certainty"].as<String>();
+    alerts.urgency1 = obj["features"][0]["properties"]["urgency"].as<String>();
+    alerts.event1 = obj["features"][0]["properties"]["event"].as<String>();
+    alerts.instruction1 = obj["features"][0]["properties"]["instruction"].as<String>();
+    alerts.description1 = obj["features"][0]["properties"]["parameters"]["NWSheadline"].as<String>();
+  }
+  else if (actwarn == 2 || actwatch == 2)
+  {
+    alerts.status1 = obj["features"][1]["properties"]["status"].as<String>();
+    alerts.severity1 = obj["features"][1]["properties"]["severity"].as<String>();
+    alerts.certainty1 = obj["features"][1]["properties"]["certainty"].as<String>();
+    alerts.urgency1 = obj["features"][1]["properties"]["urgency"].as<String>();
+    alerts.event1 = obj["features"][1]["properties"]["event"].as<String>();
+    alerts.instruction1 = obj["features"][1]["properties"]["instruction"].as<String>();
+    alerts.description1 = obj["features"][1]["properties"]["parameters"]["NWSheadline"].as<String>();      
+  }
+  else if (actwarn == 3 || actwatch == 3)
+  {
+    alerts.status1 = obj["features"][2]["properties"]["status"].as<String>();
+    alerts.severity1 = obj["features"][2]["properties"]["severity"].as<String>();
+    alerts.certainty1 = obj["features"][2]["properties"]["certainty"].as<String>();
+    alerts.urgency1 = obj["features"][2]["properties"]["urgency"].as<String>();
+    alerts.event1 = obj["features"][2]["properties"]["event"].as<String>();
+    alerts.instruction1 = obj["features"][2]["properties"]["instruction"].as<String>();
+    alerts.description1 = obj["features"][2]["properties"]["parameters"]["NWSheadline"].as<String>();      
+  }
+  else 
+  {
+    alerts.active = false;
+    alerts.inWarning = false;
+    alerts.inWatch= false;
+    ESP_LOGI(TAG, "No current active weather alerts");     
   }
 }
 
-void fillWeatherFromJson(Weather* weather) 
+void fillWeatherFromJson(String payload) 
 {
-  sprintf(weather->currentIcon, "%s", (const char*) Json["current"]["weather"][0]["icon"]);
-  weather->currentTemp = Json["current"]["temp"];
-  weather->currentFeelsLike = Json["current"]["feels_like"];
-  weather->currentHumidity = Json["current"]["humidity"];
-  weather->currentWindSpeed = Json["current"]["wind_speed"];
-  weather->currentWindSpeed = Json["current"]["wind_gust"];
-  sprintf(weather->currentDescription, "%s", (const char*) Json["current"]["weather"][0]["description"]);
-  weather->dayTempMin = Json["daily"][0]["feels_like"]["min"];
-  weather->dayTempMax = Json["daily"][0]["feels_like"]["max"];
-  weather->dayHumidity = Json["daily"][0]["humidity"];
-  weather->dayWindSpeed = Json["daily"][0]["wind_speed"];
-  weather->dayWindGust = Json["daily"][0]["wind_gust"];
-  sprintf(weather->dayDescription, "%s", (const char*) Json["daily"][0]["weather"][0]["description"]);
-  sprintf(weather->dayIcon, "%s", (const char*) Json["daily"][0]["weather"][0]["icon"]);
+  StaticJsonDocument<512> filter;
+  filter["current"]["weather"][0]["icon"] = true;
+  filter["current"]["temp"] = true;
+  filter["current"]["feels_like"] = true;
+  filter["current"]["humidity"] = true;
+  filter["current"]["wind_speed"] = true;
+  filter["current"]["wind_gust"] = true;
+  filter["current"]["weather"][0]["description"] = true;
+  filter["daily"][0]["feels_like"]["min"] = true;
+  filter["daily"][0]["feels_like"]["max"] = true;
+  filter["daily"][0]["humidity"] = true;
+  filter["daily"][0]["wind_speed"] = true;
+  filter["daily"][0]["wind_gust"]= true;
+  filter["daily"][0]["weather"][0]["description"] = true;
+  filter["daily"][0]["weather"][0]["icon"]= true;
+
+  StaticJsonDocument<4096> doc;
+  DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
+  if (error) {
+    Serial.print(F("Weather deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+  JsonObject obj = doc.as<JsonObject>();
+  weather.currentIcon = obj["current"]["weather"][0]["icon"].as<String>();
+  weather.currentTemp = obj["current"]["temp"];
+  weather.currentFeelsLike = obj["current"]["feels_like"];
+  weather.currentHumidity = obj["current"]["humidity"];
+  weather.currentWindSpeed = obj["current"]["wind_speed"];
+  weather.currentWindSpeed = obj["current"]["wind_gust"];
+  weather.currentDescription = obj["current"]["weather"][0]["description"].as<String>();
+  weather.dayTempMin = obj["daily"][0]["feels_like"]["min"];
+  weather.dayTempMax = obj["daily"][0]["feels_like"]["max"];
+  weather.dayHumidity = obj["daily"][0]["humidity"];
+  weather.dayWindSpeed = obj["daily"][0]["wind_speed"];
+  weather.dayWindGust = obj["daily"][0]["wind_gust"];
+  weather.dayDescription = obj["daily"][0]["weather"][0]["description"].as<String>();
+  weather.dayIcon = obj["daily"][0]["weather"][0]["icon"].as<String>();
   //weather->dayMoonPhase = weatherJson["daily"][0]["moon_phase"];
   //weather->daySunrise = weatherJson["daily"][0]["sunrise"];
   //weather->daySunset = weatherJson["daily"][0]["sunset"];
 }
 
-void fillIpgeoFromJson(Ipgeo* ipgeo) {
-  sprintf(ipgeo->timezone, "%s", (const char*) Json["time_zone"]["name"]);
-  ipgeo->tzoffset = Json["time_zone"]["offset"];
-  sprintf(ipgeo->lat, "%s", (const char*) Json["latitude"]);
-  sprintf(ipgeo->lon, "%s", (const char*) Json["longitude"]);
+void fillIpgeoFromJson(String payload) {
+  StaticJsonDocument<2048> doc;
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    Serial.print(F("IPGeo deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+  JsonObject obj = doc.as<JsonObject>();
+  ipgeo.timezone = obj["time_zone"]["name"].as<String>();
+  ipgeo.tzoffset = obj["time_zone"]["offset"];
+  ipgeo.lat = obj["latitude"];
+  ipgeo.lon = obj["longitude"];
 }
 
-void fillGeocodeFromJson(Geocode* geocode) {
-  sprintf(geocode->city, "%s", (const char*) Json[0]["name"]);
-  sprintf(geocode->state, "%s", (const char*) Json[0]["state"]);
-  sprintf(geocode->country, "%s", (const char*) Json[0]["country"]);
+void fillGeocodeFromJson(String payload) {
+  StaticJsonDocument<256> doc;
+  payload = (String)"{data:" + payload + "}";
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    Serial.print(F("GEOcode deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+  JsonObject obj = doc.as<JsonObject>();
+  geocode.city = obj["data"][0]["name"].as<String>();
+  geocode.state = obj["data"][0]["state"].as<String>();
+  geocode.country = obj["data"][0]["country"].as<String>();
 }
 
-void fillAqiFromJson(Weather* weather) {
-  weather->currentaqi = Json["list"][0]["main"]["aqi"];
-  weather->carbon_monoxide = Json["list"][0]["components"]["co"];
-  weather->nitrogen_monoxide = Json["list"][0]["components"]["no"];
-  weather->nitrogen_dioxide = Json["list"][0]["components"]["no2"];
-  weather->ozone = Json["list"][0]["components"]["o3"];
-  weather->sulfer_dioxide = Json["list"][0]["components"]["so2"];
-  weather->particulates_small = Json["list"][0]["components"]["pm2_5"];
-  weather->particulates_medium = Json["list"][0]["components"]["pm10"];
-  weather->ammonia = Json["list"][0]["components"]["nh3"];
+void fillAqiFromJson(String payload) {
+  StaticJsonDocument<384> doc;
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    Serial.print(F("AQI deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+  JsonObject obj = doc.as<JsonObject>();
+  weather.currentaqi = obj["list"][0]["main"]["aqi"];
+  weather.carbon_monoxide = obj["list"][0]["components"]["co"];
+  weather.nitrogen_monoxide = obj["list"][0]["components"]["no"];
+  weather.nitrogen_dioxide = obj["list"][0]["components"]["no2"];
+  weather.ozone = obj["list"][0]["components"]["o3"];
+  weather.sulfer_dioxide = obj["list"][0]["components"]["so2"];
+  weather.particulates_small = obj["list"][0]["components"]["pm2_5"];
+  weather.particulates_medium = obj["list"][0]["components"]["pm10"];
+  weather.ammonia = obj["list"][0]["components"]["nh3"];
 }
 
 void buildURLs() 
@@ -940,17 +1067,18 @@ const char* ordinal_suffix(int n)
         return suffixes[ord];
 }
 
-void cleanString(char *s) {
-    s[strcspn(s, "\n")] = 0;
+void cleanString(String &str) {
+  int index;
+  while ((index = str.indexOf('\n')) != -1) {
+    str.remove(index, 1);
+  }
 }
 
- //FIXME: string printouts on debug messages for scrolltext, etc showing garbled
  //TODO: web interface cleanup
  //TODO: advanced aqi calulations
  //TODO: table titles
- //TODO: remove tables is show is disabled 
+ //TODO: remove tables if show is disabled 
  //TODO: weather daily in web
  //TODO: timezone name in web
- //FIXME: make sure checkaqi is ran before weather display
 
 

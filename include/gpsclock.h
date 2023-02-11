@@ -76,17 +76,19 @@ class GPSClock: public Clock {
 
   acetime_t readResponse() const {
     if (GPS.time.isUpdated()) {
+      auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
+      acetime_t gpsSeconds = localDateTime.toEpochSeconds();
       if (GPS.time.age() < 100 && GPS.satellites.value() != 0) {
         setTimeSource("gps");
         resetLastNtpCheck();
-        auto localDateTime = LocalDateTime::forComponents(GPS.date.year(), GPS.date.month(), GPS.date.day(), GPS.time.hour(), GPS.time.minute(), GPS.time.second());
-        acetime_t gpsSeconds = localDateTime.toEpochSeconds();
-        ESP_LOGI(TAG, "GPSClock: readResponse(): gpsSeconds: %d | age: %d ms", gpsSeconds, GPS.time.age());
+        ESP_LOGI(TAG, "GPSClock: readResponse(): gpsSeconds: %d | skew: %dsec | age: %dms", gpsSeconds, abs(Now()) - abs(gpsSeconds), GPS.time.age());
         return gpsSeconds;
-      } else {
-          ESP_LOGW(TAG, "GPSClock: readResponse(): GPS time update not trusted and skipped, %d ms", GPS.time.age());
-          return kInvalidSeconds;
-        }
+      } 
+      else 
+      {
+        ESP_LOGW(TAG, "GPSClock: readResponse(): Stale GPS time skipped: gpsSeconds: %d | skew: %dsec | age: %dms", gpsSeconds, abs(Now()) - abs(gpsSeconds), GPS.time.age());
+        return kInvalidSeconds;
+      }
     }
     if (!ntpIsReady) return kInvalidSeconds;
     if (iotWebConf.getState() != 4) {

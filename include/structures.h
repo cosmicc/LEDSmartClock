@@ -1,9 +1,19 @@
+// second time aliases
+#define T1S 1*1L  // 1 second
+#define T1M 1*60L  // 1 minute
+#define T5M 5*60L  // 5 minutes
+#define T10M 10*60L  // 10 minutes
+#define T1H 1*60*60L  // 1 hour
+#define T2H 2*60*60L  // 2 hours 
+#define T1D 24*60*60L  // 1 day
+#define T1Y 365*24*60*60L  // 1 year
+
 struct GPSData
 {
   bool fix;
   uint8_t sats;
-  String lat;
-  String lon;
+  double lat;
+  double lon;
   int32_t elevation;
   int32_t hdop;
   acetime_t timestamp;
@@ -26,20 +36,20 @@ struct HsvColor
 };
 
 struct Weather {
-  char currentIcon[5];
+  String currentIcon;
   int16_t currentTemp;
   int16_t currentFeelsLike;
   uint8_t currentHumidity;
-  char currentDescription[20];
+  String currentDescription;
   int currentWindSpeed;
   int currentWindGust;
-  char dayIcon[5];
+  String dayIcon;
   int16_t dayTempMin;
   int16_t dayTempMax;
   //acetime_t daySunrise;
   //acetime_t daySunset;
   int dayHumidity;
-  char dayDescription[20];
+  String dayDescription;
   //double dayMoonPhase;
   int dayWindSpeed;
   int dayWindGust;
@@ -60,13 +70,13 @@ struct Alerts {
   bool active;
   bool inWatch;
   bool inWarning;
-  char status1[15];
-  char severity1[15];
-  char certainty1[15];
-  char urgency1[15];
-  char event1[50];
-  char description1[256];
-  char instruction1[512];
+  String status1;
+  String severity1;
+  String certainty1;
+  String urgency1;
+  String event1;
+  String description1;
+  String instruction1;
   acetime_t lastsuccess;
   acetime_t lastattempt;
   acetime_t timestamp;
@@ -74,15 +84,15 @@ struct Alerts {
 
 struct Ipgeo {
   int tzoffset;
-  char timezone[32];
-  char lat[12];
-  char lon[12];
+  String timezone;
+  double lat;
+  double lon;
 };
 
 struct Geocode {
-  char city[32];
-  char state[32];
-  char country[32];
+  String city;
+  String state;
+  String country;
 };
 
 struct CheckClass {
@@ -107,8 +117,7 @@ struct Alertflash {
 struct ScrollText {
   bool active;
   bool displayicon;
-  bool tempshown;
-  char icon[5];
+  String icon;
   String message;
   uint16_t color;
   int16_t position;
@@ -140,7 +149,6 @@ struct LastShown {
 
 struct ShowClock {
   bool colonflicker;
-  bool colonoff;
   uint8_t fstop;
   uint8_t seconds;
   uint16_t color;
@@ -148,23 +156,18 @@ struct ShowClock {
 };
 
 struct CoTimers {
-  bool firstboot;
-  uint8_t flashcycles;
   uint32_t millis;
   uint8_t scrollspeed;
-  uint32_t scrollsize;
-  int16_t scrolliters;
   uint8_t iconcycle;
   uint32_t icontimer;
-  uint32_t iotloop;
   acetime_t lasthttptime;
 };
 
 struct Current {
   uint16_t brightness; 
   uint8_t clockhue;
-  String lat = "0";
-  String lon = "0"; 
+  double lat;
+  double lon; 
   uint8_t temphue; 
   TimeZone timezone;
   int16_t tzoffset;
@@ -175,9 +178,9 @@ struct Current {
   uint16_t oldstatuswclr;
   uint16_t oldaqiclr;
   String locsource;
-  char city[32];
-  char state[32];
-  char country[32];
+  String city;
+  String state;
+  String country;
 };
 
 class DisplayToken

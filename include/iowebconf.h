@@ -63,17 +63,17 @@ iotwebconf::ParameterGroup group1 = iotwebconf::ParameterGroup("Display", "Displ
   iotwebconf::CheckboxTParameter imperial =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("imperial").label("Use imperial units (Instead of metric)").defaultValue(true).build();
   iotwebconf::IntTParameter<int8_t> brightness_level =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("brightness_level").label("Brightness level (1-5)").defaultValue(2).min(1).max(5).step(1).placeholder("1(low)..5(high)").build();
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("brightness_level").label("Brightness level (1-5)").defaultValue(DEF_BRIGHTNESS_LEVEL).min(1).max(5).step(1).placeholder("1(low)..5(high)").build();
   iotwebconf::IntTParameter<int8_t> text_scroll_speed =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("text_scroll_speed").label("Text scroll speed (1-10)").defaultValue(5).min(1).max(10).step(1).placeholder("1(low)..10(high)").build();
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("text_scroll_speed").label("Text scroll speed (1-10)").defaultValue(DEF_SCROLL_SPEED).min(1).max(10).step(1).placeholder("1(low)..10(high)").build();
     iotwebconf::ColorTParameter systemcolor =
-   iotwebconf::Builder<iotwebconf::ColorTParameter>("systemcolor").label("Choose system messages text color").defaultValue("#FF8800").build();
+   iotwebconf::Builder<iotwebconf::ColorTParameter>("systemcolor").label("Choose system messages text color").defaultValue(DEF_SYSTEM_COLOR).build();
   iotwebconf::CheckboxTParameter show_date =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_date").label("Display the current date").defaultValue(true).build();
   iotwebconf::ColorTParameter datecolor =
-   iotwebconf::Builder<iotwebconf::ColorTParameter>("datecolor").label("Choose date color").defaultValue("#FF8800").build();
+   iotwebconf::Builder<iotwebconf::ColorTParameter>("datecolor").label("Choose date color").defaultValue(DEF_DATE_COLOR).build();
  iotwebconf::IntTParameter<int8_t> show_date_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("show_date_interval").label("Display date interval in hours (1-24)").defaultValue(1).min(1).max(24).step(1).placeholder("1..24(hours)").build();
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("show_date_interval").label("Display date interval in hours (1-24)").defaultValue(DEF_DATE_INTERVAL).min(1).max(24).step(1).placeholder("1..24(hours)").build();
   iotwebconf::CheckboxTParameter enable_status =  
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_status").label("Enable system status LED (Bottom left corner)").defaultValue(true).build();
 iotwebconf::CheckboxTParameter enable_alertflash =  
@@ -82,29 +82,29 @@ iotwebconf::ParameterGroup group3 = iotwebconf::ParameterGroup("Weather", "Weath
 iotwebconf::CheckboxTParameter use_fixed_tempcolor =  
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("use_fixed_tempcolor").label("Use custom temperature color (Disables auto color)").defaultValue(false).build();
   iotwebconf::ColorTParameter fixed_tempcolor =
-   iotwebconf::Builder<iotwebconf::ColorTParameter>("fixed_tempcolor").label("Custom temperature color").defaultValue("#FF8800").build();
+   iotwebconf::Builder<iotwebconf::ColorTParameter>("fixed_tempcolor").label("Custom temperature color").defaultValue(DEF_TEMP_COLOR).build();
   iotwebconf::CheckboxTParameter show_weather =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_weather").label("Display current weather conditions").defaultValue(true).build();
   iotwebconf::ColorTParameter weather_color =
-   iotwebconf::Builder<iotwebconf::ColorTParameter>("weather_color").label("Current conditions text color").defaultValue("#FF8800").build();
+   iotwebconf::Builder<iotwebconf::ColorTParameter>("weather_color").label("Current conditions text color").defaultValue(DEF_WEATHER_COLOR).build();
  iotwebconf::IntTParameter<int8_t> show_weather_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("weather_show_interval").label("Current conditions display interval in minutes (1-60)").defaultValue(10).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("weather_show_interval").label("Current conditions display interval in minutes (1-120)").defaultValue(DEF_WEATHER_INTERVAL).min(1).max(120).step(1).placeholder("1(min)..60(min)").build();
   iotwebconf::CheckboxTParameter show_weather_daily =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_weather_daily").label("Display daily weather conditions").defaultValue(true).build();
   iotwebconf::ColorTParameter weather_daily_color =
-   iotwebconf::Builder<iotwebconf::ColorTParameter>("weather_daily_color").label("Daily conditions text color").defaultValue("#FF8800").build();
+   iotwebconf::Builder<iotwebconf::ColorTParameter>("weather_daily_color").label("Daily conditions text color").defaultValue(DEF_DAILY_COLOR).build();
  iotwebconf::IntTParameter<int8_t> show_weather_daily_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("weather_daily_show_interval").label("Daily conditions display interval in hours (1-24)").defaultValue(1).min(1).max(24).step(1).placeholder("1(hour)..24(hours)").build();
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("weather_daily_show_interval").label("Daily conditions display interval in hours (1-24)").defaultValue(DEF_DAILY_INTERVAL).min(1).max(24).step(1).placeholder("1(hour)..24(hours)").build();
   iotwebconf::CheckboxTParameter show_airquality =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_airquality").label("Display current air quality").defaultValue(true).build();
 iotwebconf::CheckboxTParameter use_fixed_aqicolor =  
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("use_fixed_aqicolor").label("Use custom air quality color (Disables auto color)").defaultValue(false).build();
   iotwebconf::ColorTParameter airquality_color =
-   iotwebconf::Builder<iotwebconf::ColorTParameter>("airquality_color").label("Custom air quality color").defaultValue("#FF8800").build();
+   iotwebconf::Builder<iotwebconf::ColorTParameter>("airquality_color").label("Custom air quality color").defaultValue(DEF_AQI_COLOR).build();
  iotwebconf::IntTParameter<int8_t> airquality_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("airquality_interval").label("Air quality display interval in minutes (1-120)").defaultValue(30).min(1).max(120).step(1).placeholder("1(min)..120(min)").build();
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("airquality_interval").label("Air quality display interval in minutes (1-120)").defaultValue(DEF_AQI_INTERVAL).min(1).max(120).step(1).placeholder("1(min)..120(min)").build();
   iotwebconf::IntTParameter<int8_t> show_alert_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("alert_show_interval").label("Weather alert display interval in minites (1-60)").defaultValue(5).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("alert_show_interval").label("Weather alert display interval in minutes (1-60)").defaultValue(DEF_ALERT_INTERVAL).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
   iotwebconf::TextTParameter<33> weatherapi =
     iotwebconf::Builder<iotwebconf::TextTParameter<33>>("weatherapi").label("Openweathermap.org API Key").defaultValue("").build();
 iotwebconf::ParameterGroup group2 = iotwebconf::ParameterGroup("Clock", "Clock Settings");
@@ -121,7 +121,7 @@ iotwebconf::ParameterGroup group2 = iotwebconf::ParameterGroup("Clock", "Clock S
   iotwebconf::CheckboxTParameter use_fixed_clockcolor=
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("use_fixed_clockcolor").label("Use custom clock color (Disables auto color)").defaultValue(false).build();
     iotwebconf::ColorTParameter fixed_clockcolor =
-   iotwebconf::Builder<iotwebconf::ColorTParameter>("fixed_clockcolor").label("Custom clock color").defaultValue("#FF8800").build();
+   iotwebconf::Builder<iotwebconf::ColorTParameter>("fixed_clockcolor").label("Custom clock color").defaultValue(DEF_CLOCK_COLOR).build();
 iotwebconf::ParameterGroup group4 = iotwebconf::ParameterGroup("Location", "Location Settings");
   iotwebconf::CheckboxTParameter use_fixed_loc =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("use_fixed_loc").label("Use custom location (Disables auto location)").defaultValue(false).build();

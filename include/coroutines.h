@@ -233,7 +233,7 @@ COROUTINE(showWeather) {
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = capString((String)"Current " + weather.currentDescription + " Humidity " + weather.currentHumidity + "% Wind " + int(weather.currentWindSpeed) + "/" + int(weather.currentWindGust) + " Air: " + air_quality[weather.currentaqi]);
+  scrolltext.message = capString((String)"Current " + weather.currentDescription + " Humidity " + weather.currentHumidity + "% Wind " + int(weather.currentWindSpeed) + "/" + int(weather.currentWindGust) + " Air: " + air_quality[aqi.currentaqi]);
   scrolltext.color = hex2rgb(weather_color.value());
   scrolltext.active = true;
   scrolltext.displayicon = true;
@@ -285,15 +285,15 @@ COROUTINE(showAirquality) {
   if (use_fixed_aqicolor.isChecked())
     color = hex2rgb(airquality_color.value());
   else {
-    if (weather.currentaqi == 1)
+    if (aqi.currentaqi == 1)
         color = GREEN;
-    else if (weather.currentaqi == 2)
+    else if (aqi.currentaqi == 2)
         color = YELLOW;
-    else if (weather.currentaqi == 3)
+    else if (aqi.currentaqi == 3)
         color = ORANGE;
-    else if (weather.currentaqi == 4)
+    else if (aqi.currentaqi == 4)
         color = RED;
-    else if (weather.currentaqi == 5)
+    else if (aqi.currentaqi == 5)
         color = PURPLE;
     else
         color = WHITE;
@@ -303,7 +303,7 @@ COROUTINE(showAirquality) {
   alertflash.laps = 1;
   alertflash.active = true;
   COROUTINE_AWAIT(!alertflash.active);
-  scrolltext.message = (String) "AQI: " + air_quality[weather.currentaqi];
+  scrolltext.message = (String) "AQI: " + air_quality[aqi.currentaqi];
   scrolltext.displayicon = false;
   scrolltext.active = true;
   COROUTINE_AWAIT(!scrolltext.active);
@@ -356,12 +356,18 @@ COROUTINE(serialInput) {
         CoroutineScheduler::list(Serial);
         break;
     case 'r':
+        checkaqi.lastsuccess = systemClock.getNow() - (airquality_interval.value() * 60);
+        lastshown.aqi = systemClock.getNow() - (airquality_interval.value() * 60);
+        COROUTINE_AWAIT(fromNow(checkaqi.lastsuccess) < 10);
         showready.aqi = true;
         break;
     case 'w':
-        showready.currentweather = true;
+        checkweather.lastsuccess = systemClock.getNow() - (show_weather_interval.value() * 60);
+        COROUTINE_AWAIT(fromNow(checkweather.lastsuccess) < 10);
+        lastshown.currentweather = systemClock.getNow() - (show_weather_interval.value() * 60);
         break;
     case 'e':
+        lastshown.date = systemClock.getNow() - ((show_date_interval.value()) * 60);
         showready.date = true;
         break;
     case 'q':
@@ -375,10 +381,8 @@ COROUTINE(serialInput) {
       alertflash.color = hex2rgb(systemcolor.value());
       alertflash.laps = 5;
       alertflash.active = true;
-      displaytoken.setToken(7);
       showClock.suspend();
       COROUTINE_AWAIT(!alertflash.active);
-      displaytoken.resetToken(7);
       break;
 #ifdef COROUTINE_PROFILER    
     case 'f':

@@ -19,6 +19,7 @@ struct GPSData
   acetime_t timestamp;
   acetime_t lastcheck;
   acetime_t lockage;
+  int32_t packetdelay;
 };
 
 struct RgbColor
@@ -53,17 +54,29 @@ struct Weather {
   //double dayMoonPhase;
   int dayWindSpeed;
   int dayWindGust;
-  uint8_t currentaqi;
-  double carbon_monoxide;
-  double nitrogen_monoxide;
-  double nitrogen_dioxide;
-  double ozone;
-  double sulfer_dioxide;
-  double particulates_small;
-  double particulates_medium;
-  double ammonia;
   acetime_t lastattempt;
   acetime_t lastsuccess;
+};
+
+struct Aqi {
+  uint8_t currentaqi;
+  double cur_carbon_monoxide;
+  double cur_nitrogen_monoxide;
+  double cur_nitrogen_dioxide;
+  double cur_ozone;
+  double cur_sulfer_dioxide;
+  double cur_particulates_small;
+  double cur_particulates_medium;
+  double cur_ammonia;
+  uint8_t dayaqi;
+  double day_carbon_monoxide;
+  double day_nitrogen_monoxide;
+  double day_nitrogen_dioxide;
+  double day_ozone;
+  double day_sulfer_dioxide;
+  double day_particulates_small;
+  double day_particulates_medium;
+  double day_ammonia;
 };
 
 struct Alerts {

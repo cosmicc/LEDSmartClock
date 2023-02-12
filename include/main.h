@@ -107,7 +107,7 @@ static char truefalse[][6] = {"False", "True"};
 // Global Variables & Class Objects
 const char thingName[] = "LEDSMARTCLOCK";              // Default SSID used for new setup
 const char wifiInitialApPassword[] = "ledsmartclock";  // Default AP password for new setup
-char urls[5][256];                                     // Array of URLs
+char urls[6][256];                                     // Array of URLs
 WireInterface wireInterface(Wire);                     // I2C hardware object
 DS3231Clock<WireInterface> dsClock(wireInterface);     // Hardware DS3231 RTC object
 CRGB leds[NUMMATRIX];                                  // Led matrix array object
@@ -123,6 +123,7 @@ Alerts alerts;                                         // wweather alerts data c
 Ipgeo ipgeo;                                           // ip geolocation data class
 Geocode geocode;
 GPSData gps;                                           // gps data class
+Aqi aqi;
 LastShown lastshown;
 ShowReady showready;
 CheckClass checkalerts;
@@ -188,6 +189,7 @@ bool isNextAttemptReady(acetime_t lastattempt);
 bool isApiValid(char *apikey);
 bool connectAp(const char *apName, const char *password);
 void connectWifi(const char *ssid, const char *password);
+int32_t fromNow(acetime_t ctime);
 
 #include "iowebconf.h"
 #include "gpsclock.h"

@@ -197,7 +197,7 @@ void configSaved()
   if (resetdefaults.isChecked())
     showready.reset = true;
   if (!serialdebug.isChecked())
-    Serial.println("Serial debug info has been disabled.");
+    Serial.println(F("Serial debug info has been disabled."));
   firsttimefailsafe = false;
 }
 
@@ -324,20 +324,17 @@ void print_debugData() {
       tempunit = metric_units[0];
       speedunit = metric_units[1];
     }
-    //char prBuffer[512]; // Print buffer
-    //sprintf(prBuffer, "Version Firmware:v%d.%d.%d Config:v%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_CONFIG);
-    //debug_print(prBuffer, true);
-    char dprint[512];
-    sprintf(dprint, "Firmware - Version:v%d.%d.%d | Config:v%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_CONFIG);
-    debug_print(dprint, true);
-    debug_print((String) "System - RawLux:" + current.rawlux + " | Lux:" + current.lux + " | UsrBright:+" + userbrightness + " | Brightness:" + current.brightness + " | ClockHue:" + current.clockhue + " | temphue:" + current.temphue + " | WifiState:" + connection_state[iotWebConf.getState()] + " | HttpReady:" + yesno[isHttpReady()] + " | IP:" + lip + " | Uptime:" + uptime, true);
+    printf("Firmware - Version:v%d.%d.%d | Config:v%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_CONFIG);
+    printf("System - RawLux:%d | Lux:%d | UsrBright:+%d | Brightness:%d | ClockHue:%d | TempHue:%d | WifiState:%s | HttpReady:%s | IP:%s | Uptime:%s", current.rawlux, current.lux, userbrightness, current.brightness, current.clockhue, current.temphue, connection_state[iotWebConf.getState()], yesno[isHttpReady()], lip, uptime);
+  
     debug_print((String) "Clock - Status:" + clock_status[systemClock.getSyncStatusCode()] + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastAttempt:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextAttempt:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " Seconds | NextNtp:" + npt + " | LastSync:" + lst, true);
     debug_print((String) "Loc - SavedLat:" + savedlat.value() + " | SavedLon:" + savedlon.value() + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon + " | LocValid:" + yesno[isCoordsValid()], true);
     debug_print((String) "IPGeo - Complete:" + yesno[checkipgeo.complete] + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | ValidApi:" + yesno[isApiValid(ipgeoapi.value())] + " | Retries:" + checkipgeo.retries + " | LastAttempt:" + iga + " | LastSuccess:" + igs, true);
     debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
     debug_print((String) "Weather Current - Icon:" + weather.currentIcon + " | Temp:" + weather.currentTemp + tempunit.c_str() + " | FeelsLike:" + weather.currentFeelsLike + tempunit + " | Humidity:" + weather.currentHumidity + "% | Wind:" + weather.currentWindSpeed + "/" + weather.currentWindGust + speedunit + " | Desc:" + weather.currentDescription + " | ValidApi:" + yesno[isApiValid(weatherapi.value())] + " | Retries:" + checkweather.retries + " | LastAttempt:" + wla + " | LastSuccess:" + wls + " | NextShow:" + cwns, true);
     debug_print((String) "Weather Day - Icon:" + weather.dayIcon + " | LoTemp:" + weather.dayTempMin + tempunit.c_str() + " | HiTemp:" + weather.dayTempMax + tempunit + " | Humidity:" + weather.dayHumidity + "% | Wind:" + weather.dayWindSpeed + "/" + weather.dayWindGust + speedunit + " | Desc:" + weather.currentDescription + " | NextShow:" + dwns, true);
-    debug_print((String) "Air Quality - Aqi:" + air_quality[weather.currentaqi] + " | Co:" + weather.carbon_monoxide + " | No:" + weather.nitrogen_monoxide + " | No2:" + weather.nitrogen_dioxide + " | Ozone:" + weather.ozone + " | So2:" + weather.sulfer_dioxide + " | Pm2.5:" + weather.particulates_small + " | Pm10:" + weather.particulates_medium + " | Ammonia:" + weather.ammonia + " | Retries:" + checkaqi.retries + " | LastAttempt:" + aqla + " | LastSuccess:" + aqls + " | NextShow:" + aqns, true);
+    debug_print((String) "AQI Current - Index:" + air_quality[aqi.currentaqi] + " | Co:" + aqi.cur_carbon_monoxide + " | No:" + aqi.cur_nitrogen_monoxide + " | No2:" + aqi.cur_nitrogen_dioxide + " | Ozone:" + aqi.cur_ozone + " | So2:" + aqi.cur_sulfer_dioxide + " | Pm2.5:" + aqi.cur_particulates_small + " | Pm10:" + aqi.cur_particulates_medium + " | Ammonia:" + aqi.cur_ammonia + " | Retries:" + checkaqi.retries + " | LastAttempt:" + aqla + " | LastSuccess:" + aqls + " | NextShow:" + aqns, true);
+    debug_print((String) "AQI Day - Index:" + air_quality[aqi.dayaqi] + " | Co:" + aqi.day_carbon_monoxide + " | No:" + aqi.day_nitrogen_monoxide + " | No2:" + aqi.day_nitrogen_dioxide + " | Ozone:" + aqi.day_ozone + " | So2:" + aqi.day_sulfer_dioxide + " | Pm2.5:" + aqi.day_particulates_small + " | Pm10:" + aqi.day_particulates_medium + " | Ammonia:" + aqi.day_ammonia + " | Retries:" + checkaqi.retries + " | LastAttempt:" + aqla + " | LastSuccess:" + aqls, true);
     debug_print((String) "Alerts - Active:" + yesno[alerts.active] + " | Watch:" + yesno[alerts.inWatch] + " | Warn:" + yesno[alerts.inWarning] + " | Retries:" + checkalerts.retries + " | LastAttempt:" + alla + " | LastSuccess:" + alls + " | LastShown:" + alns, true);
     debug_print((String) "Location: ", false);
     if (isLocationValid("current"))
@@ -521,13 +518,13 @@ void display_showStatus()
       sclr = DARKRED;
     else if (!ds)
       sclr = DARKRED;
-    if (weather.currentaqi == 2)
+    if (aqi.currentaqi == 2)
       aclr = DARKYELLOW;
-    else if (weather.currentaqi == 3)
+    else if (aqi.currentaqi == 3)
       aclr = DARKORANGE;
-    else if (weather.currentaqi == 4)
+    else if (aqi.currentaqi == 4)
       aclr = DARKRED;
-    else if (weather.currentaqi == 5)
+    else if (aqi.currentaqi == 5)
       aclr = DARKPURPLE;
     else 
       aclr = BLACK;
@@ -743,8 +740,7 @@ void fillAlertsFromJson(String payload)
   DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
   if (error) 
   {
-    Serial.print(F("Alerts deserializeJson() failed: "));
-    Serial.println(error.f_str());
+    ESP_LOGE(TAG, "Alerts deserializeJson() failed: %s", error.f_str());
     return;
   }
   JsonObject obj = doc.as<JsonObject>();
@@ -864,8 +860,7 @@ void fillWeatherFromJson(String payload)
   StaticJsonDocument<4096> doc;
   DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
   if (error) {
-    Serial.print(F("Weather deserializeJson() failed: "));
-    Serial.println(error.f_str());
+    ESP_LOGE(TAG, "Weather deserializeJson() failed: %s", error.f_str());
     return;
   }
   JsonObject obj = doc.as<JsonObject>();
@@ -892,8 +887,7 @@ void fillIpgeoFromJson(String payload) {
   StaticJsonDocument<2048> doc;
   DeserializationError error = deserializeJson(doc, payload);
   if (error) {
-    Serial.print(F("IPGeo deserializeJson() failed: "));
-    Serial.println(error.f_str());
+    ESP_LOGE(TAG, "IPGeo deserializeJson() failed: ", error.f_str());
     return;
   }
   JsonObject obj = doc.as<JsonObject>();
@@ -908,8 +902,7 @@ void fillGeocodeFromJson(String payload) {
   payload = (String)"{data:" + payload + "}";
   DeserializationError error = deserializeJson(doc, payload);
   if (error) {
-    Serial.print(F("GEOcode deserializeJson() failed: "));
-    Serial.println(error.f_str());
+    ESP_LOGE(TAG, "GEOcode deserializeJson() failed: ", error.f_str());
     return;
   }
   JsonObject obj = doc.as<JsonObject>();
@@ -922,20 +915,19 @@ void fillAqiFromJson(String payload) {
   StaticJsonDocument<384> doc;
   DeserializationError error = deserializeJson(doc, payload);
   if (error) {
-    Serial.print(F("AQI deserializeJson() failed: "));
-    Serial.println(error.f_str());
+    ESP_LOGE(TAG, "AQI deserializeJson() failed: ", error.f_str());
     return;
   }
   JsonObject obj = doc.as<JsonObject>();
-  weather.currentaqi = obj["list"][0]["main"]["aqi"];
-  weather.carbon_monoxide = obj["list"][0]["components"]["co"];
-  weather.nitrogen_monoxide = obj["list"][0]["components"]["no"];
-  weather.nitrogen_dioxide = obj["list"][0]["components"]["no2"];
-  weather.ozone = obj["list"][0]["components"]["o3"];
-  weather.sulfer_dioxide = obj["list"][0]["components"]["so2"];
-  weather.particulates_small = obj["list"][0]["components"]["pm2_5"];
-  weather.particulates_medium = obj["list"][0]["components"]["pm10"];
-  weather.ammonia = obj["list"][0]["components"]["nh3"];
+  aqi.currentaqi = obj["list"][0]["main"]["aqi"];
+  aqi.cur_carbon_monoxide = obj["list"][0]["components"]["co"];
+  aqi.cur_nitrogen_monoxide = obj["list"][0]["components"]["no"];
+  aqi.cur_nitrogen_dioxide = obj["list"][0]["components"]["no2"];
+  aqi.cur_ozone = obj["list"][0]["components"]["o3"];
+  aqi.cur_sulfer_dioxide = obj["list"][0]["components"]["so2"];
+  aqi.cur_particulates_small = obj["list"][0]["components"]["pm2_5"];
+  aqi.cur_particulates_medium = obj["list"][0]["components"]["pm10"];
+  aqi.cur_ammonia = obj["list"][0]["components"]["nh3"];
 }
 
 void buildURLs() 
@@ -945,16 +937,19 @@ void buildURLs()
     units = "imperial";
   else
     units = "metric";
-  String wurl = (String) "https://api.openweathermap.org/data/2.5/onecall?units=" + units + "&exclude=minutely,hourly&appid=" + weatherapi.value() + "&lat=" + current.lat + "&lon=" + current.lon + "&lang=en";  // weather forecast url
-  wurl.toCharArray(urls[0], 256);
-  String aurl = (String) "https://api.weather.gov/alerts/active?status=actual&point=" + current.lat + "," + current.lon + "&limit=1";                                                                     // Weather alert url
-  aurl.toCharArray(urls[1], 256);
-  String curl = (String) "https://api.openweathermap.org/geo/1.0/reverse?lat=" + current.lat + "&lon=" + current.lon + "&limit=5&appid=" + weatherapi.value();                                                    // Geocoding url
-  curl.toCharArray(urls[2], 256);
-  String qurl = (String) "https://api.openweathermap.org/data/2.5/air_pollution?lat=" + current.lat + "&lon=" + current.lon + "&appid=" + weatherapi.value();                                                                                 //air pollution url
-  qurl.toCharArray(urls[3], 256);
-  String gurl = (String) "https://api.ipgeolocation.io/ipgeo?apiKey=" + ipgeoapi.value();
-  gurl.toCharArray(urls[4], 256);
+  String url;
+  url = (String) "https://api.openweathermap.org/data/2.5/onecall?units=" + units + "&exclude=minutely,hourly&appid=" + weatherapi.value() + "&lat=" + current.lat + "&lon=" + current.lon + "&lang=en"; // weather forecast url
+  url.toCharArray(urls[0], 256);
+  url = (String) "https://api.weather.gov/alerts/active?status=actual&point=" + current.lat + "," + current.lon + "&limit=1";                                                                     // Weather alert url
+  url.toCharArray(urls[1], 256);
+  url = (String) "https://api.openweathermap.org/geo/1.0/reverse?lat=" + current.lat + "&lon=" + current.lon + "&limit=5&appid=" + weatherapi.value();                                                    // Geocoding url
+  url.toCharArray(urls[2], 256);
+  url = (String) "https://api.openweathermap.org/data/2.5/air_pollution?lat=" + current.lat + "&lon=" + current.lon + "&appid=" + weatherapi.value();                                                                                 //air pollution url
+  url.toCharArray(urls[3], 256);
+  url = (String) "https://api.ipgeolocation.io/ipgeo?apiKey=" + ipgeoapi.value();
+  url.toCharArray(urls[4], 256);
+  url = (String) "https://api.openweathermap.org/data/2.5/air_pollution/forecast?lat=" + current.lat + "&lon=" + current.lon + "&appid=" + weatherapi.value();                                                                                 //air pollution url
+  url.toCharArray(urls[5], 256);
 }
 
 String elapsedTime(int32_t seconds) 
@@ -1074,11 +1069,18 @@ void cleanString(String &str) {
   }
 }
 
+int32_t fromNow(acetime_t ctime)
+{
+  return (systemClock.getNow() - ctime);
+}
+
  //TODO: web interface cleanup
  //TODO: advanced aqi calulations
  //TODO: table titles
  //TODO: remove tables if show is disabled 
  //TODO: weather daily in web
  //TODO: timezone name in web
+ //TODO: scroll sunrise/sunset
+ //TODO: full/new moon scroll and status icon?
 
 

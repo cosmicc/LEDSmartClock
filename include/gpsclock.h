@@ -55,12 +55,12 @@ class GPSClock: public Clock {
     if (!ntpIsReady)
         return;
     if (iotWebConf.getState() != 4) {
-    ESP_LOGW(TAG, "GPSClock: NtpsendRequest(): not connected");
+    ESP_LOGW(TAG, "GPSClock: sendRequest(): not connected");
     return;
     }
     if (abs(Now() - lastntpcheck) > NTPCHECKTIME*60) {
       while (mUdp.parsePacket() > 0) {}
-      ESP_LOGD(TAG, "GPSClock: NtpsendRequest(): sending request");
+      ESP_LOGD(TAG, "GPSClock: sendRequest(): sending request");
       IPAddress ntpServerIP;
       WiFi.hostByName(mServer, ntpServerIP);
       sendNtpPacket(ntpServerIP);  
@@ -92,7 +92,7 @@ class GPSClock: public Clock {
     }
     if (!ntpIsReady) return kInvalidSeconds;
     if (iotWebConf.getState() != 4) {
-      ESP_LOGW(TAG, "GPSClock: NtpreadResponse: not connected");
+      ESP_LOGW(TAG, "GPSClock: readResponse(): not connected");
       return kInvalidSeconds;
     }
     mUdp.read(mPacketBuffer, kNtpPacketSize);
@@ -102,12 +102,12 @@ class GPSClock: public Clock {
     ntpSeconds |= (uint32_t) mPacketBuffer[43];
     if (ntpSeconds != 0) {
       acetime_t epochSeconds = convertUnixEpochToAceTime(ntpSeconds);
-      ESP_LOGI(TAG, "GPSClock: readResponse(): ntpSeconds: %d | epochSeconds: %d", ntpSeconds, epochSeconds);
       resetLastNtpCheck();
       setTimeSource("ntp");
+      ESP_LOGI(TAG, "GPSClock: readResponse(): ntpSeconds: %d | epochSeconds: %d | skew: %dsec | age: %dms", ntpSeconds, epochSeconds, abs(Now()) - abs(epochSeconds), millis()-gps.packetdelay);
       return epochSeconds;
     } else {
-        ESP_LOGE(TAG, "0 Ntp second recieved");
+        ESP_LOGE(TAG, "GPSClock: Error: 0 NTP seconds recieved");
         return kInvalidSeconds;
     }
   }
@@ -122,7 +122,8 @@ class GPSClock: public Clock {
     mPacketBuffer[13] = 0x4E;
     mPacketBuffer[14] = 49;
     mPacketBuffer[15] = 52;
-    mUdp.beginPacket(address, 123); //NTP requests are to port 123
+    gps.packetdelay = millis();
+    mUdp.beginPacket(address, 123); // NTP requests are to port 123
     mUdp.write(mPacketBuffer, kNtpPacketSize);
     mUdp.endPacket();
   }

@@ -199,7 +199,7 @@ COROUTINE(checkAlerts) {
         cleanString(alerts.description1);
         cleanString(alerts.instruction1);
         checkalerts.lastsuccess = systemClock.getNow();
-        showready.alerts;
+        showready.alerts = true;
       }
       else
         ESP_LOGE(TAG, "Alerts ERROR code: [%d]", httpCode);
@@ -317,19 +317,23 @@ COROUTINE(showAirquality) {
 COROUTINE(showAlerts) {
   COROUTINE_LOOP() {
   COROUTINE_AWAIT(showready.alerts && displaytoken.isReady(3));
-  if (alerts.active) {
+  if (alerts.active)
+  {
     displaytoken.setToken(3);
-    uint16_t acolor;
-    if (alerts.inWarning)
-      acolor = RED;
+    if (alerts.inWarning) 
+    {
+      alertflash.color = RED;
+      scrolltext.color = RED;
+    }
     else if (alerts.inWatch)
-      acolor = YELLOW;
-    alertflash.color = RED;
+    {
+      alertflash.color = YELLOW;
+      scrolltext.color = YELLOW;
+    }
     alertflash.laps = 3;
     alertflash.active = true;
     COROUTINE_AWAIT(!alertflash.active);
     scrolltext.message = (String)alerts.description1 + " " + alerts.instruction1;
-    scrolltext.color = RED;
     scrolltext.active = true;
     scrolltext.displayicon = false;
     COROUTINE_AWAIT(!scrolltext.active);
@@ -556,7 +560,6 @@ COROUTINE(systemMessages) {
 COROUTINE(coroutineManager) {
   COROUTINE_LOOP() 
   { 
-  acetime_t now = systemClock.getNow();
   if (iotWebConf.getState() == 1)
       firsttimefailsafe = true;
   if (!showClock.isSuspended() && !displaytoken.isReady(0))
@@ -816,17 +819,17 @@ COROUTINE(gps_checkData) {
         gps.lon = strtod(fixedLon.value(), NULL);
         updateCoords();
       }
-      ESP_LOGV(TAG, "GPS Location updated: Lat: %s Lon: %s", gps.lat, gps.lon);
+      ESP_LOGV(TAG, "GPS Location updated: Lat: %f Lon: %f", gps.lat, gps.lon);
     }
     if (GPS.altitude.isUpdated()) 
     {
       gps.elevation = GPS.altitude.feet();
-      ESP_LOGV(TAG, "GPS Elevation updated: %f feet", gps.elevation);
+      ESP_LOGV(TAG, "GPS Elevation updated: %d feet", gps.elevation);
     }
     if (GPS.hdop.isUpdated()) 
     {
       gps.hdop = GPS.hdop.hdop();
-      ESP_LOGV(TAG, "GPS HDOP updated: %f m",gps.hdop);
+      ESP_LOGV(TAG, "GPS HDOP updated: %d m",gps.hdop);
     }
     if (GPS.charsProcessed() < 10) ESP_LOGE(TAG, "No GPS data. Check wiring.");
   COROUTINE_DELAY(1000);

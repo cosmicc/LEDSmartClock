@@ -1,0 +1,7 @@
+# ESP-IDF Partition Table
+# Name, Type, SubType, Offset, Size, Flags
+nvs,data,nvs,,24K,,
+otadata,data,ota,,8K,,
+ota_0,app,ota_0,,1792K,,
+ota_1,app,ota_1,,1729K,,
+spiffs,data,spiffs,,190K,,

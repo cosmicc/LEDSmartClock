@@ -7,22 +7,11 @@
 
 #include "main.h"
 
-// System Loop
-void loop() 
-{
-  esp_task_wdt_reset();
-  #ifdef COROUTINE_PROFILER
-  CoroutineScheduler::loopWithProfiler();
-  #else
-  CoroutineScheduler::loop();
-  #endif
-}
-
-// System Setup
-void setup () 
+extern "C" void app_main()
 {
   Serial.begin(115200);
-  uint32_t timer = millis();
+  uint32_t init_timer = millis();
+  nvs_flash_init();
   ESP_EARLY_LOGD(TAG, "Initializing Hardware Watchdog...");
   esp_task_wdt_init(WDT_TIMEOUT, true);                //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);                              //add current thread to WDT watch
@@ -86,7 +75,7 @@ void setup ()
   iotWebConf.getApTimeoutParameter()->visible = true;
   iotWebConf.setStatusPin(STATUS_PIN);
   iotWebConf.setConfigPin(CONFIG_PIN);
-  iotWebConf.setApConnectionHandler(&connectAp);
+  //iotWebConf.setApConnectionHandler(&connectAp);
   iotWebConf.setWifiConnectionHandler(&connectWifi);
   iotWebConf.setupUpdateServer(
     [](const char* updatePath) { httpUpdater.setup(&server, updatePath); },
@@ -176,10 +165,19 @@ void setup ()
   matrix->setBrightness(userbrightness);
   matrix->setTextWrap(false);
   ESP_EARLY_LOGD(TAG, "Display initalization complete.");
-  ESP_EARLY_LOGD(TAG, "Setup initialization complete: %d ms", (millis()-timer));
+  ESP_EARLY_LOGD(TAG, "Setup initialization complete: %d ms", (millis()-init_timer));
   scrolltext.resetmsgtime = millis() - 60000;
   displaytoken.resetAllTokens();
   CoroutineScheduler::setup();
+  for (;;)
+  {
+    esp_task_wdt_reset();
+    #ifdef COROUTINE_PROFILER
+    CoroutineScheduler::loopWithProfiler();
+    #else
+    CoroutineScheduler::loop();
+    #endif
+  }
 }
 
 //callbacks 
@@ -324,10 +322,9 @@ void print_debugData() {
       tempunit = metric_units[0];
       speedunit = metric_units[1];
     }
-    printf("Firmware - Version:v%d.%d.%d | Config:v%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_CONFIG);
-    printf("System - RawLux:%d | Lux:%d | UsrBright:+%d | Brightness:%d | ClockHue:%d | TempHue:%d | WifiState:%s | HttpReady:%s | IP:%s | Uptime:%s", current.rawlux, current.lux, userbrightness, current.brightness, current.clockhue, current.temphue, connection_state[iotWebConf.getState()], yesno[isHttpReady()], lip, uptime);
-  
-    debug_print((String) "Clock - Status:" + clock_status[systemClock.getSyncStatusCode()] + " | TimeSource:" + timesource + " | CurrentTZ:" + current.tzoffset +  " | NtpReady:" + gpsClock.ntpIsReady + " | LastAttempt:" + elapsedTime(systemClock.getSecondsSinceSyncAttempt()) + " | NextAttempt:" + elapsedTime(systemClock.getSecondsToSyncAttempt()) + " | Skew:" + systemClock.getClockSkew() + " Seconds | NextNtp:" + npt + " | LastSync:" + lst, true);
+    printf("Firmware - Version:v%d.%d.%d | Config:v%s\n", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_CONFIG);
+    printf("System - RawLux:%d | Lux:%d | UsrBright:+%d | Brightness:%d | ClockHue:%d | TempHue:%d | WifiState:%s | HttpReady:%s | IP:%s | Uptime:%s\n", current.rawlux, current.lux, userbrightness, current.brightness, current.clockhue, current.temphue, (connection_state[iotWebConf.getState()]), (yesno[isHttpReady()]), lip.c_str(), uptime.c_str());
+    printf("Clock - Status:%s | TimeSource:%s | CurrentTZ:%d | NtpReady:%s | LastAttempt:%s | NextAttempt:%s | Skew:%d Seconds | NextNtp:%s | LastSync:%s\n", clock_status[systemClock.getSyncStatusCode()], timesource, current.tzoffset, gpsClock.ntpIsReady, elapsedTime(systemClock.getSecondsSinceSyncAttempt()), elapsedTime(systemClock.getSecondsToSyncAttempt()), systemClock.getClockSkew(), npt, lst);
     debug_print((String) "Loc - SavedLat:" + savedlat.value() + " | SavedLon:" + savedlon.value() + " | CurrentLat:" + current.lat + " | CurrentLon:" + current.lon + " | LocValid:" + yesno[isCoordsValid()], true);
     debug_print((String) "IPGeo - Complete:" + yesno[checkipgeo.complete] + " | Lat:" + ipgeo.lat + " | Lon:" + ipgeo.lon + " | TZoffset:" + ipgeo.tzoffset + " | Timezone:" + ipgeo.timezone + " | ValidApi:" + yesno[isApiValid(ipgeoapi.value())] + " | Retries:" + checkipgeo.retries + " | LastAttempt:" + iga + " | LastSuccess:" + igs, true);
     debug_print((String) "GPS - Chars:" + GPS.charsProcessed() + " | With-Fix:" + GPS.sentencesWithFix() + " | Failed:" + GPS.failedChecksum() + " | Passed:" + GPS.passedChecksum() + " | Sats:" + gps.sats + " | Hdop:" + gps.hdop + " | Elev:" + gps.elevation + " | Lat:" + gps.lat + " | Lon:" + gps.lon + " | FixAge:" + gage + " | LocAge:" + loca, true);
@@ -349,10 +346,12 @@ void print_debugData() {
 void debug_print(String message, bool cr = false)
 {
   if (serialdebug.isChecked())
+  {
     if (cr)
       Serial.println(message);
     else
       Serial.print(message);
+  }
 }
 
 void processTimezone()
@@ -382,7 +381,7 @@ void processTimezone()
     current.timezone = TimeZone::forHours(savedoffset);
     ESP_LOGD(TAG, "Using saved timezone offset: %d", savedoffset);
   }
-  ESP_LOGV(TAG, "Process timezone complete: %d ms", (millis()-timer));
+  ESP_LOGV(TAG, "Process timezone complete: %lu ms", (millis()-timer));
 }
 
 bool cmpLocs(char a1[32], char a2[32])
@@ -475,80 +474,84 @@ void updateCoords()
   buildURLs();
 }
 
-void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) 
-{ 
-    if (position == 0) position = 0;
-    else if (position == 1) position = 7;
-    else if (position == 2) position = 16;
-    else if (position == 3) position = 23;
-    if (clock_display_offset) 
-      matrix->drawBitmap(position-4, 0, num[bmp_num], 8, 8, color);    
-    else
-      matrix->drawBitmap(position, 0, num[bmp_num], 8, 8, color); 
+void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color) {
+// define the column value based on the position parameter
+uint8_t pos;
+switch (position) {
+case 0 : pos = 0; break; // set to 0 when position is 0
+case 1 : pos = 7; break; // set to 7 when position is 1
+case 2 : pos = 16; break; // set to 16 when position is 2
+case 3 : pos = 23; break; // set to 23 when position is 3
+}
+// draw the bitmap using column and color parameters
+matrix->drawBitmap((clock_display_offset) ? (pos - 4) : pos, 0, num[bmp_num], 8, 8, color);
 }
 
-void display_showStatus() 
+void display_showStatus()
 {
     uint16_t sclr;
     uint16_t wclr;
     uint16_t aclr;
     bool ds = !enable_status.isChecked();
-    if (ds)
-      sclr = BLACK;
+
     acetime_t now = systemClock.getNow();
-    if (now - systemClock.getLastSyncTime() > (NTPCHECKTIME*60) + 60)
-        sclr = DARKRED;
-    else if (timesource == "gps" && gps.fix && (now - systemClock.getLastSyncTime()) <= 600)
+    if (ds) {
         sclr = BLACK;
-    else if (timesource == "gps" && !gps.fix && (now - systemClock.getLastSyncTime()) <= 600)
-        sclr = DARKBLUE;
-    else if (timesource == "gps" && !gps.fix && (now - systemClock.getLastSyncTime()) > 600)
-        sclr = DARKPURPLE;
-    else if (gps.fix && timesource == "ntp")
-        sclr = DARKPURPLE;
-    else if (timesource == "ntp" && iotWebConf.getState() == 4 && !ds)
-      sclr = DARKGREEN;
-    else if (iotWebConf.getState() == 3)  // connecting
-      sclr = DARKYELLOW; 
-    else if (iotWebConf.getState() <= 2)  // boot, apmode, notconfigured
-      sclr = DARKMAGENTA;
-    else if (iotWebConf.getState() == 4)  // online
-      sclr = DARKCYAN;
-    else if (iotWebConf.getState() == 5) // offline
-      sclr = DARKRED;
-    else if (!ds)
-      sclr = DARKRED;
-    if (aqi.currentaqi == 2)
-      aclr = DARKYELLOW;
-    else if (aqi.currentaqi == 3)
-      aclr = DARKORANGE;
-    else if (aqi.currentaqi == 4)
-      aclr = DARKRED;
-    else if (aqi.currentaqi == 5)
-      aclr = DARKPURPLE;
-    else 
-      aclr = BLACK;
-    if (alerts.inWarning)
-      wclr = RED;
-    else if (alerts.inWatch)
-      wclr = YELLOW;
-    else
-      wclr = BLACK;
-    if (enable_status.isChecked())
-      matrix->drawPixel(0, 7, sclr);
-    if (show_airquality.isChecked())
-      matrix->drawPixel(0, 0, aclr);
+    } else if (now - systemClock.getLastSyncTime() > (NTPCHECKTIME*60) + 60) {
+        sclr = DARKRED;
+    } else if (timesource == "gps") {
+        if(gps.fix && (now - systemClock.getLastSyncTime()) <= 600) {
+            sclr = BLACK;
+        } else {
+            sclr = DARKPURPLE;
+        }
+    } else if (timesource == "ntp" && iotWebConf.getState() == 4) {
+        sclr = DARKGREEN;
+    } else if (iotWebConf.getState() == 3) {  // connecting
+        sclr = DARKYELLOW;
+    } else if (iotWebConf.getState() <= 2) {  // boot, apmode, notconfigured
+        sclr = DARKMAGENTA;
+    } else if (iotWebConf.getState() == 4) {  // online
+        sclr = DARKCYAN;
+    } else if (iotWebConf.getState() == 5) { // offline
+        sclr = DARKRED;
+    } else if (!ds) { 
+        sclr = DARKRED;
+    }
+
+    switch (aqi.currentaqi) {
+        case 2: aclr = DARKYELLOW; break;
+        case 3: aclr = DARKORANGE; break;
+        case 4: aclr = DARKRED; break;
+        case 5: aclr = DARKPURPLE; break;
+        default: aclr = BLACK; break;
+    }
+
+    if (alerts.inWarning) {
+        wclr = RED;
+    } else if (alerts.inWatch) {
+        wclr = YELLOW;
+    } else {
+        wclr = BLACK;
+    }
+
+    if (enable_status.isChecked()) {
+        matrix->drawPixel(0, 7, sclr);
+    }
+    if (show_airquality.isChecked()) {
+        matrix->drawPixel(0, 0, aclr);
+    }
     if (!scrolltext.active) {
-      matrix->drawPixel(0, 3, wclr);
-      matrix->drawPixel(0, 4, wclr);
-      matrix->drawPixel(mw-1, 3, wclr);
-      matrix->drawPixel(mw-1, 4, wclr);
+        matrix->drawPixel(0, 3, wclr);
+        matrix->drawPixel(0, 4, wclr);
+        matrix->drawPixel(mw-1, 3, wclr);
+        matrix->drawPixel(mw-1, 4, wclr);
     }
     if (current.oldaqiclr != aclr || current.oldstatusclr != sclr || current.oldstatuswclr != wclr) {
-      matrix->show();
-      current.oldstatusclr = sclr;
-      current.oldstatuswclr = wclr;
-      current.oldaqiclr = aclr;
+        matrix->show();
+        current.oldstatusclr = sclr;
+        current.oldstatuswclr = wclr;
+        current.oldaqiclr = aclr;
     }
 }
 
@@ -633,10 +636,12 @@ void display_temperature()
     {
       current.temphue = constrain(map(weather.currentFeelsLike, tl, th, NIGHTHUE, 0), NIGHTHUE, 0);
       if (weather.currentFeelsLike < tl)
+      {
         if (imperial.isChecked() && weather.currentFeelsLike + abs(weather.currentFeelsLike) == 0)
           current.temphue = NIGHTHUE + tl;
         else
           current.temphue = NIGHTHUE + (abs(weather.currentFeelsLike)/2);
+      }
       tc = hsv2rgb(current.temphue);
     }
     else
@@ -673,9 +678,9 @@ ace_time::ZonedDateTime getSystemZonedTime()
 String getSystemZonedTimeString() 
 {
   ace_time::ZonedDateTime now = getSystemZonedTime();
-  char *string;
-  sprintf(string, "%d/%d/%d %d:%d:%d [%d]", now.month(), now.day(), now.year(), now.hour(), now.minute(), now.second(), now.timeOffset());
-  return (String)string;
+  char *str;
+  sprintf(str, "%d/%d/%d %d:%d:%d [%lu]", now.month(), now.day(), now.year(), now.hour(), now.minute(), now.second(), now.timeOffset());
+  return (String)str;
 }
 
 String getSystemZonedDateString() 
@@ -700,7 +705,7 @@ String getSystemZonedDateTimeString()
       ap = "pm";
     if (hour > 12)
       hour = hour - 12;
-    sprintf(buf, "%d:%02d%s %s, %s %d%s %04d", ldt.hour(), ldt.minute(), ap, DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
+    sprintf(buf, "%d:%02d%s %s, %s %u%s %04d", ldt.hour(), ldt.minute(), ap.c_str(), DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
   } 
   else
     sprintf(buf, "%02d:%02d %s, %s %d%s %04d", ldt.hour(), ldt.minute(), DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()), day, ordinal_suffix(day), ldt.year());
@@ -740,7 +745,7 @@ void fillAlertsFromJson(String payload)
   DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
   if (error) 
   {
-    ESP_LOGE(TAG, "Alerts deserializeJson() failed: %s", error.f_str());
+    //ESP_LOGE(TAG, "Alerts deserializeJson() failed: %s", (error.f_str()).c_str()); //FIXME:
     return;
   }
   JsonObject obj = doc.as<JsonObject>();
@@ -762,7 +767,9 @@ void fillAlertsFromJson(String payload)
       if ((obj["features"][1]["properties"]["severity"].as<String>()) != "Unknown")
       {
         if ((obj["features"][1]["properties"]["certainty"].as<String>()) == "Observed" || (obj["features"][1]["properties"]["certainty"].as<String>()) == "Likely")
+        {
           if (actwarn == 0) actwarn = 2;
+        }
         else if ((obj["features"][1]["properties"]["certainty"].as<String>()) == "Possible")
           if (actwatch == 0) actwatch = 2;
       }
@@ -773,9 +780,15 @@ void fillAlertsFromJson(String payload)
         if ((obj["features"][2]["properties"]["severity"].as<String>()) != "Unknown")
         {
           if ((obj["features"][2]["properties"]["certainty"].as<String>()) == "Observed" || (obj["features"][2]["properties"]["certainty"].as<String>()) == "Likely")
-            if (actwarn == 0) actwarn = 3;
+          {
+            if (actwarn == 0)
+              actwarn = 3;
+          }
           else if ((obj["features"][1]["properties"]["certainty"].as<String>()) == "Possible")
-            if (actwatch == 0) actwatch = 3;
+          {
+            if (actwatch == 0)
+              actwatch = 3;
+          }
         }
         else
           ESP_LOGD(TAG, "Weather alert 3 received but is of status Unknown, skipping");
@@ -860,7 +873,7 @@ void fillWeatherFromJson(String payload)
   StaticJsonDocument<4096> doc;
   DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
   if (error) {
-    ESP_LOGE(TAG, "Weather deserializeJson() failed: %s", error.f_str());
+    //ESP_LOGE(TAG, "Weather deserializeJson() failed: %s", error.f_str());
     return;
   }
   JsonObject obj = doc.as<JsonObject>();
@@ -887,7 +900,7 @@ void fillIpgeoFromJson(String payload) {
   StaticJsonDocument<2048> doc;
   DeserializationError error = deserializeJson(doc, payload);
   if (error) {
-    ESP_LOGE(TAG, "IPGeo deserializeJson() failed: ", error.f_str());
+    //ESP_LOGE(TAG, "IPGeo deserializeJson() failed: ", error.f_str());
     return;
   }
   JsonObject obj = doc.as<JsonObject>();
@@ -902,7 +915,7 @@ void fillGeocodeFromJson(String payload) {
   payload = (String)"{data:" + payload + "}";
   DeserializationError error = deserializeJson(doc, payload);
   if (error) {
-    ESP_LOGE(TAG, "GEOcode deserializeJson() failed: ", error.f_str());
+    //ESP_LOGE(TAG, "GEOcode deserializeJson() failed: ", error.f_str());
     return;
   }
   JsonObject obj = doc.as<JsonObject>();
@@ -915,7 +928,7 @@ void fillAqiFromJson(String payload) {
   StaticJsonDocument<384> doc;
   DeserializationError error = deserializeJson(doc, payload);
   if (error) {
-    ESP_LOGE(TAG, "AQI deserializeJson() failed: ", error.f_str());
+    //ESP_LOGE(TAG, "AQI deserializeJson() failed: ", error.f_str());
     return;
   }
   JsonObject obj = doc.as<JsonObject>();
@@ -952,37 +965,34 @@ void buildURLs()
   url.toCharArray(urls[5], 256);
 }
 
-String elapsedTime(int32_t seconds) 
+String elapsedTime(uint32_t seconds) 
 {
   String result;
-  uint8_t granularity;
-  seconds = abs(seconds);
-  uint32_t tseconds = seconds;
+  uint8_t granularity = 2;
   if (seconds > T1Y - 60)
     return "never";
-  if (seconds < 60)
-    return (String)seconds + " seconds";
-  else granularity = 2;
-  uint32_t value;
+  if (seconds < 60){
+    result = (String)seconds + " seconds";
+    return result;
+  }
+
   for (uint8_t i = 0; i < 6; i++)
   {
-    uint32_t vint = atoi(intervals[i]);
-    value = floor(seconds / vint);
+    uint32_t value = seconds / atoi(intervals[i]);
     if (value != 0)
     {
-      seconds = seconds - value * vint;
-      if (granularity != 0) {
-        result = result + value + " " + interval_names[i];
+      seconds = seconds - value * atoi(intervals[i]);
+        result += value + " " + (String)interval_names[i];
         granularity--;
         if (granularity > 0)
-          result = result + ", ";
-      }
+          result += ", ";
     }
   }
   if (granularity != 0)
-    result = result + seconds + " seconds";
+    result += (String)seconds + " seconds";
   return result;
 }
+
 
 String capString (String str) 
 {
@@ -1036,30 +1046,42 @@ acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds)
     lastntpcheck = systemClock.getNow();
   }
 
-  uint16_t calcbright(uint16_t bl) 
-  {
-  if (bl == 1)
-    return 0;
-  else if (bl == 2)
-    return 5;
-  else if (bl == 3)
-    return 10;
-  else if (bl == 4)
-    return 20;
-  else if (bl == 5)
-    return 30;
-  else
-    return 0;
-  }
+uint16_t calcbright (uint16_t bl) {
+    uint16_t retVal = 0;
+    switch(bl) {
+        case 1:
+            retVal = 0;
+            break;
+        case 2:
+            retVal = 5;
+            break;
+        case 3:
+            retVal = 10;
+            break;
+        case 4:
+            retVal = 20;
+            break;
+        case 5:
+            retVal = 30;
+            break;
+        default:
+            retVal = 0;
+            break;
+    }
+    return retVal;
+}
+
 
 const char* ordinal_suffix(int n)
 {
-        static const char suffixes [][3] = {"th", "st", "nd", "rd"};
-        auto ord = n % 100;
-        if (ord / 10 == 1) { ord = 0; }
-        ord = ord % 10;
-        if (ord > 3) { ord = 0; }
-        return suffixes[ord];
+// Check if number is divisible by 10
+int div = n % 10;
+switch (div) {
+case 1: return "st";
+case 2: return "nd";
+case 3: return "rd";
+default: return "th";
+}
 }
 
 void cleanString(String &str) {

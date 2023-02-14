@@ -1,7 +1,3 @@
-#if !defined(ESP32)
-#error "LEDSmartClock only runs on an ESP32, please make sure you have the proper board selected"
-#endif
-
 // Emable SPI for FastLED
 #define HSPI_MOSI   23
 #define FASTLED_ALL_PINS_HARDWARE_SPI
@@ -49,7 +45,6 @@
 #define DEF_WEATHER_COLOR "#FF8800"
 #define DEF_DAILY_COLOR "#FF8800"
 #define DEF_AQI_COLOR "#FF8800"
-#define DEF_DATE_INTERVAL 1  //hours
 #define DEF_WEATHER_INTERVAL 10  //minutes
 #define DEF_DAILY_INTERVAL 1  //hours
 #define DEF_DATE_INTERVAL 4  //hours
@@ -155,7 +150,7 @@ void handleRoot();
 void configSaved();
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper);
 void buildURLs();
-String elapsedTime(int32_t seconds);
+String elapsedTime(uint32_t seconds);
 void display_showStatus();
 void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color);
 void fillAlertsFromJson(String payload);

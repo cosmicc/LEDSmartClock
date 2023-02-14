@@ -104,7 +104,7 @@ class GPSClock: public Clock {
       acetime_t epochSeconds = convertUnixEpochToAceTime(ntpSeconds);
       resetLastNtpCheck();
       setTimeSource("ntp");
-      ESP_LOGI(TAG, "GPSClock: readResponse(): ntpSeconds: %d | epochSeconds: %d | skew: %dsec | age: %dms", ntpSeconds, epochSeconds, abs(Now()) - abs(epochSeconds), millis()-gps.packetdelay);
+      ESP_LOGI(TAG, "GPSClock: readResponse(): ntpSeconds: %u | epochSeconds: %d | skew: %dsec | age: %lums", ntpSeconds, epochSeconds, abs(Now()) - abs(epochSeconds), millis()-gps.packetdelay);
       return epochSeconds;
     } else {
         ESP_LOGE(TAG, "GPSClock: Error: 0 NTP seconds recieved");

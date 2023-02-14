@@ -2,7 +2,7 @@
 # LEDSmartClock
 ## Summary
 
-LEDSmartClock is a ESP32 powered GPS/Wifi enabled wall clock with a 8x32 WS2812B LED matrix display. It has many features, including multiple ways to obtain and keep accurate date & time, timezone, location, local weather conditions, local weather alerts, and outdoor air quality. It has a web interface to display additional information, and many configuration options.
+LEDSmartClock is a ESP32 powered GPS/Wifi enabled wall clock with a 8x32 WS2812B LED matrix display. It has many features, including multiple ways to obtain and keep accurate date & time, timezone, location, local weather conditions, local weather alerts, and outdoor air quality. It has a web interface to display additional information, and many configuration options. It utilizes free subscriptions from openweathermap.org and ipgeolocation.io to obtain location and forecast information over the Internet.
 
 ## Features
 
@@ -81,7 +81,7 @@ In order to get all the features of the smartclock (weather, geolocation, air qu
 - The `Alert Flash` is a full screen led display flash before any notification.
 
 ## Upgrading
-You can either use the ESP32 flash tool as the initial installation (which requires you to plug in via USB), or the much easier uploading of the firmware directly to the clock "over the air":
+You can either use the ESP32 flash tool as used in the initial installation (which requires you to plug in via USB), or the much easier uploading of the firmware directly to the clock "over the air":
 1. Download the new firmware in the [Releases](https://github.com/cosmicc/LEDSmartClock/releases) section.
 2. Connect to the web interface of the LEDSmartClock (Either over the network or directly in AP mode)
 3. Click on the Configure Settings link to navigate to the configure settings page.
@@ -91,7 +91,7 @@ You can either use the ESP32 flash tool as the initial installation (which requi
 
 *The current firmware version running on the clock is displayed on the web interface's info page.*
 
-> WARNING: Some new major and minor versions may require you to reconfigure the settings on your clock. This will be fairly infrequent (only if new configuration settings are added in release) and will be clearly announced if the upgrade will casue the settings will be reset.
+> WARNING: Some new major and minor versions may require you to reconfigure the settings on your clock. This will be fairly infrequent (only if new configuration settings are added in the release) and will be clearly announced if the upgrade will cause the settings will be reset.
 
 ## Status Indicators
 
@@ -124,6 +124,10 @@ You can either use the ESP32 flash tool as the initial installation (which requi
 
 Feel free to suggest any new features, changes, and ideas in the [discussions](https://github.com/cosmicc/LEDSmartClock/discussions) section.
 
+ - [ ] Add sunrise and sunset information and options.  Ability to enable text scroll notification to announce these events.
+ - [ ] Add moon phase information and options.   Possible new top right status icon for moon phase information.  Maybe scroll moon phase information, new moon, full moon, waxing, waning, etc.
+ - [ ] Look into adding other information like equinox, solstice, UV index, etc.
+
 ## Known Issues
 
 Please post any issues in the [issues](https://github.com/cosmicc/LEDSmartClock/issues) section.
@@ -131,14 +135,22 @@ Please post any issues in the [issues](https://github.com/cosmicc/LEDSmartClock/
 ## Developers / Contributions
 
 I create raspberry-pi and micro-controller projects as a hobby, and far from being a decent embedded programmer. (Python was my normal go-to, but I'm creating projects like this to learn C to use in all my future projects)
-PLEASE, feel free to contribute any bug fixes, code optimizations, updates, security fixes, etc. Your contributions will be much appreciated and you will be included in the project credits.
--The `dev` branch for development and pull requests. The `main` branch is only for merges from `dev` for new version releases.
--The `legacy` and `pre-coroutine` branches are archives of early rewrites during development and are locked.
--Release version numbers are formatted Major.Minor.Patch. Some major and minor versions may require the LEDSmartClock settings to be reconfigured as all settings will be lost after upgrading due to IotWebConf options updates and the IotWebConf config version changing.
--images that were used to create the animated bitmaps are located in the `icons` directory.
--A Jtag connection will be available on the circuit board for easy debugging.
--An extra I2C connection will be available on the circuit board for optional expansion.
--If `debug to serial` is checked in settings, debug information will be sent to the USB serial port. Make sure `DCORE_DEBUG_LEVEL` is set to `4` in platformio.txt for full debug log output.
+PLEASE, feel free to contribute any bug fixes, code optimizations, updates, security fixes, etc. Your contributions will be much appreciated and you will be included in the project credits.  
+
+-The `dev` branch for development and pull requests. The `main` branch is only for merges from `dev` for new version releases.  
+
+-The `legacy` and `pre-coroutine` branches are archives of early rewrites during development and are locked.  
+
+-Release version numbers are formatted Major.Minor.Patch. Some major and minor versions may require the LEDSmartClock settings to be reconfigured as all settings will be lost after upgrading due to IotWebConf options updates and the IotWebConf config version changing.  
+
+-images that were used to create the animated bitmaps are located in the `icons` directory.  
+
+-A Jtag connection will be available on the circuit board for easy debugging.  
+
+-An extra I2C connection will be available on the circuit board for optional expansion.  
+
+-If `debug to serial` is checked in settings, debug information will be sent to the USB serial port. Make sure `DCORE_DEBUG_LEVEL` is set to `4` in platformio.txt for full debug log output.  
+
 -Single character commands can be sent to the Serial to get debug information:
 `d` - Displays all current debug information
 `s` - Displays all coroutine states
@@ -150,7 +162,7 @@ PLEASE, feel free to contribute any bug fixes, code optimizations, updates, secu
 
 ## Credits
 
-- Created by Ian Perry (cosmicc) https://github.com/cosmicc
-Thanks to Brian Parks (bxparks) https://github.com/bxparks for creating some amazing AceTime, AceTimeClock, and AceRoutines libraries.
-Thanks to Balázs Kelemen (prampec) https://github.com/prampec for the wonderful IotWebConf library.
-Thanks to Marc Merlin (marcmerlin) https://github.com/marcmerlin for creating the great FastLED NeoMatrix library, making interfacing with the LED matrix incredibly easy.
+ - LEDSmartClock was created by Ian Perry (cosmicc) https://github.com/cosmicc
+ - Thanks to Brian Parks (bxparks) https://github.com/bxparks for creating some amazing AceTime, AceTimeClock, and AceRoutines libraries.
+ - Thanks to Balázs Kelemen (prampec) https://github.com/prampec for the wonderful IotWebConf library.
+ - Thanks to Marc Merlin (marcmerlin) https://github.com/marcmerlin for creating the great FastLED NeoMatrix library, making interfacing with the LED matrix incredibly easy.

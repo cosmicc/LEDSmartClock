@@ -33,3 +33,6 @@
 
 .vscode/
 .pio/
+sdkconfig.esp32dev
+build/
+

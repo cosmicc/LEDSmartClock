@@ -19,15 +19,15 @@ class GPSClock: public Clock {
     bool isSetup() const { return ntpIsReady; }
 
     void setup() {
-      if (iotWebConf.getState() == 4) {
-        mUdp.begin(mLocalPort);
-        ESP_LOGD(TAG, "GPSClock: NTP ready");
-        ntpIsReady = true;
-      }
+      setupNTP();
     }
 
     void ntpReady() {
-      if (iotWebConf.getState() == 4 || !ntpIsReady) {
+      setupNTP();
+    }
+
+    void setupNTP() {
+      if (!ntpIsReady && iotWebConf.getState() == 4) {
         mUdp.begin(mLocalPort);
         ESP_LOGD(TAG, "GPSClock: NTP ready");
         ntpIsReady = true;
@@ -37,34 +37,30 @@ class GPSClock: public Clock {
   acetime_t getNow() const {
     if (GPS.time.isUpdated())
         readResponse();
-    if (!ntpIsReady || iotWebConf.getState() != 4 || abs(Now() - lastntpcheck) > NTPCHECKTIME*60)
+    if (!ntpIsReady || iotWebConf.getState() != 4 || abs(Now() - lastntpcheck) > (NTPCHECKTIME * 60))
       return kInvalidSeconds;
     sendRequest();
-    uint16_t startTime = millis();
-    while ((uint16_t)(millis() - startTime) < mRequestTimeout)
+    uint32_t startTime = millis();
+    while ((millis() - startTime) < mRequestTimeout)
       if (isResponseReady())
            return readResponse();
     return kInvalidSeconds;
     }
 
   void sendRequest() const {
-    while (Serial1.available() > 0)
+    while (Serial1.available())
         GPS.encode(Serial1.read());
-    if (GPS.time.isUpdated())
-        return;
-    if (!ntpIsReady)
-        return;
-    if (iotWebConf.getState() != 4) {
-    ESP_LOGW(TAG, "GPSClock: sendRequest(): not connected");
-    return;
+    if (GPS.time.isUpdated() || !ntpIsReady || iotWebConf.getState() != 4) {
+      return;
     }
-    if (abs(Now() - lastntpcheck) > NTPCHECKTIME*60) {
+    if (abs(Now() - lastntpcheck) < NTPCHECKTIME*60) {
+      return;
+    }
       while (mUdp.parsePacket() > 0) {}
       ESP_LOGD(TAG, "GPSClock: sendRequest(): sending request");
       IPAddress ntpServerIP;
       WiFi.hostByName(mServer, ntpServerIP);
       sendNtpPacket(ntpServerIP);  
-    }
   }
 
   bool isResponseReady() const {

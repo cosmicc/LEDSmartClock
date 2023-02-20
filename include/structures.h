@@ -1,13 +1,3 @@
-// second time aliases
-#define T1S 1*1L  // 1 second
-#define T1M 1*60L  // 1 minute
-#define T5M 5*60L  // 5 minutes
-#define T10M 10*60L  // 10 minutes
-#define T1H 1*60*60L  // 1 hour
-#define T2H 2*60*60L  // 2 hours 
-#define T1D 24*60*60L  // 1 day
-#define T1Y 365*24*60*60L  // 1 year
-
 struct GPSData
 {
   bool fix;
@@ -36,60 +26,75 @@ struct HsvColor
     unsigned char v;
 };
 
-struct Weather {
-  String currentIcon;
-  int16_t currentTemp;
-  int16_t currentFeelsLike;
-  uint8_t currentHumidity;
-  String currentDescription;
-  int currentWindSpeed;
-  int currentWindGust;
-  String dayIcon;
-  int16_t dayTempMin;
-  int16_t dayTempMax;
-  //acetime_t daySunrise;
-  //acetime_t daySunset;
-  int dayHumidity;
-  String dayDescription;
-  //double dayMoonPhase;
-  int dayWindSpeed;
-  int dayWindGust;
-  acetime_t lastattempt;
-  acetime_t lastsuccess;
-};
+typedef struct {
+  struct {
+    char icon[4];
+    int16_t temp;
+    int16_t feelsLike;
+    uint8_t humidity;
+    char description[128];
+    uint8_t windSpeed;
+    uint8_t windGust;
+    uint8_t uvi;
+    uint8_t cloudcover;
+  } current;
 
-struct Aqi {
-  uint8_t currentaqi;
-  double cur_carbon_monoxide;
-  double cur_nitrogen_monoxide;
-  double cur_nitrogen_dioxide;
-  double cur_ozone;
-  double cur_sulfer_dioxide;
-  double cur_particulates_small;
-  double cur_particulates_medium;
-  double cur_ammonia;
-  uint8_t dayaqi;
-  double day_carbon_monoxide;
-  double day_nitrogen_monoxide;
-  double day_nitrogen_dioxide;
-  double day_ozone;
-  double day_sulfer_dioxide;
-  double day_particulates_small;
-  double day_particulates_medium;
-  double day_ammonia;
-};
+  struct {
+    char icon[4];
+    int16_t tempMin;
+    int16_t tempMax;
+    acetime_t sunrise;
+    acetime_t sunset;
+    acetime_t moonrise;
+    acetime_t moonset;
+    uint8_t uvi;
+    uint8_t cloudcover;
+    double moonPhase;
+    uint8_t humidity;
+    char description[128];
+    uint8_t windSpeed;
+    uint8_t windGust;
+  } day;
+} WeatherData;
+
+typedef struct {
+  struct {
+    uint8_t aqi;
+    uint16_t color;
+    double co; // carbon monoxide
+    double no; // nitogen monoxide
+    double no2; // nitrogen dioxide
+    double o3; //ozone
+    double so2; // sulfer dioxide
+    double pm10; // particulates small
+    double pm25; // particulates medium
+    double nh3; // ammonia
+} current;
+  struct {
+    uint8_t aqi;
+    uint16_t color;
+    double co;
+    double no;
+    double no2;
+    double o3;
+    double so2;
+    double pm10;
+    double pm25;
+    double nh3;
+  } day;
+} AqiData;
 
 struct Alerts {
   bool active;
   bool inWatch;
   bool inWarning;
-  String status1;
-  String severity1;
-  String certainty1;
-  String urgency1;
-  String event1;
-  String description1;
-  String instruction1;
+  char status1[32];
+  char severity1[32];
+  char certainty1[32];
+  char urgency1[32];
+  char event1[128];
+  char description1[512];
+  char instruction1[512];
   acetime_t lastsuccess;
   acetime_t lastattempt;
   acetime_t timestamp;
@@ -97,21 +102,21 @@ struct Alerts {
 
 struct Ipgeo {
   int tzoffset;
-  String timezone;
+  char timezone[32];
   double lat;
   double lon;
 };
 
 struct Geocode {
-  String city;
-  String state;
-  String country;
+  char city[32];
+  char state[32];
+  char country[32];
 };
 
 struct CheckClass {
   bool ready;
-  bool jsonParsed;
   bool complete;
+  bool firsttime = true;
   uint8_t retries;
   acetime_t lastattempt;
   acetime_t lastsuccess;
@@ -130,8 +135,9 @@ struct Alertflash {
 struct ScrollText {
   bool active;
   bool displayicon;
-  String icon;
-  String message;
+  char icon[4];
+  char message[512];
+  uint16_t size;
   uint16_t color;
   int16_t position;
   uint32_t millis;
@@ -148,8 +154,10 @@ struct ShowReady {
   bool loc;
   bool ip;
   bool cfgupdate;
+  bool sunrise;
+  bool sunset;
   bool apierror;
-  String apierrorname;
+  char apierrorname[32];
 };
 
 struct LastShown {
@@ -190,40 +198,108 @@ struct Current {
   uint16_t oldstatusclr;
   uint16_t oldstatuswclr;
   uint16_t oldaqiclr;
-  String locsource;
-  String city;
-  String state;
-  String country;
+  uint16_t olduvicolor;
+  char locsource[32];
+  char city[32];
+  char state[32];
+  char country[32];
 };
+
+String getHttpCodeName(int code) {
+  switch (code) {
+    case HTTP_CODE_CONTINUE: return "Continue";
+    case HTTP_CODE_SWITCHING_PROTOCOLS: return "Switching Protocols";
+    case HTTP_CODE_PROCESSING: return "Processing";
+    case HTTP_CODE_OK: return "OK";
+    case HTTP_CODE_CREATED: return "Created";
+    case HTTP_CODE_ACCEPTED: return "Accepted";
+    case HTTP_CODE_NON_AUTHORITATIVE_INFORMATION: return "Non-Authoritative Information";
+    case HTTP_CODE_NO_CONTENT: return "No Content";
+    case HTTP_CODE_RESET_CONTENT: return "Reset Content";
+    case HTTP_CODE_PARTIAL_CONTENT: return "Partial Content";
+    case HTTP_CODE_MULTI_STATUS: return "Multi-Status";
+    case HTTP_CODE_ALREADY_REPORTED: return "Already Reported";
+    case HTTP_CODE_IM_USED: return "IM Used";
+    case HTTP_CODE_MULTIPLE_CHOICES: return "Multiple Choices";
+    case HTTP_CODE_MOVED_PERMANENTLY: return "Moved Permanently";
+    case HTTP_CODE_FOUND: return "Found";
+    case HTTP_CODE_SEE_OTHER: return "See Other";
+    case HTTP_CODE_NOT_MODIFIED: return "Not Modified";
+    case HTTP_CODE_USE_PROXY: return "Use Proxy";
+    case HTTP_CODE_TEMPORARY_REDIRECT: return "Temporary Redirect";
+    case HTTP_CODE_PERMANENT_REDIRECT: return "Permanent Redirect";
+    case HTTP_CODE_BAD_REQUEST: return "Bad Request";
+    case HTTP_CODE_UNAUTHORIZED: return "Unauthorized";
+    case HTTP_CODE_PAYMENT_REQUIRED: return "Payment Required";
+    case HTTP_CODE_FORBIDDEN: return "Forbidden";
+    case HTTP_CODE_NOT_FOUND: return "Not Found";
+    case HTTP_CODE_METHOD_NOT_ALLOWED: return "Method Not Allowed";
+    case HTTP_CODE_NOT_ACCEPTABLE: return "Not Acceptable";
+    case HTTP_CODE_PROXY_AUTHENTICATION_REQUIRED: return "Proxy Authentication Required";
+    case HTTP_CODE_REQUEST_TIMEOUT: return "Request Timeout";
+    case HTTP_CODE_CONFLICT: return "Conflict";
+    case HTTP_CODE_GONE: return "Gone";
+    case HTTP_CODE_LENGTH_REQUIRED: return "Length Required";
+    case HTTP_CODE_PRECONDITION_FAILED: return "Precondition Failed";
+    case HTTP_CODE_PAYLOAD_TOO_LARGE: return "Payload Too Large";
+    case HTTP_CODE_URI_TOO_LONG: return "URI Too Long";
+    case HTTP_CODE_UNSUPPORTED_MEDIA_TYPE: return "Unsupported Media Type";
+    case HTTP_CODE_RANGE_NOT_SATISFIABLE: return "Range Not Satisfiable";
+    case HTTP_CODE_EXPECTATION_FAILED: return "Expectation Failed";
+    case HTTP_CODE_MISDIRECTED_REQUEST: return "Misdirected Request";
+    case HTTP_CODE_UNPROCESSABLE_ENTITY: return "Unprocessable Entity";
+    case HTTP_CODE_LOCKED: return "Locked";
+    case HTTP_CODE_FAILED_DEPENDENCY: return "Failed Dependency";
+    case HTTP_CODE_UPGRADE_REQUIRED: return "Upgrade Required";
+    case HTTP_CODE_PRECONDITION_REQUIRED: return "Precondition Required";
+    case HTTP_CODE_TOO_MANY_REQUESTS: return "Too Many Requests";
+    case HTTP_CODE_REQUEST_HEADER_FIELDS_TOO_LARGE: return "Request Header Fields Too Large";
+    case HTTP_CODE_INTERNAL_SERVER_ERROR: return "Internal Server Error";
+    case HTTP_CODE_NOT_IMPLEMENTED: return "Not Implemented";
+    case HTTP_CODE_BAD_GATEWAY: return "Bad Gateway";
+    case HTTP_CODE_SERVICE_UNAVAILABLE: return "Service Unavailable";
+    case HTTP_CODE_GATEWAY_TIMEOUT: return "Gateway Timeout";
+    case HTTP_CODE_HTTP_VERSION_NOT_SUPPORTED: return "HTTP Version Not Supported";
+    case HTTP_CODE_VARIANT_ALSO_NEGOTIATES: return "Variant Also Negotiates";
+    case HTTP_CODE_INSUFFICIENT_STORAGE: return "Insufficient Storage";
+    case HTTP_CODE_LOOP_DETECTED: return "Loop Detected";
+    case HTTP_CODE_NOT_EXTENDED: return "Not Extended";
+    case HTTP_CODE_NETWORK_AUTHENTICATION_REQUIRED: return "Network Authentication Required";
+    case -1: return "Connection refused";
+    case -2: return "Send Header Failed";
+    case -3: return "Send Payload Failed";
+    case -4: return "Not Connected";
+    case -5: return "Connection Lost";
+    case -6: return "No Stream";
+    case -7: return "No HTTP Server";
+    case -8: return "Too Less RAM";
+    case -9: return "Encoding Error";
+    case -10: return "Stream Write Error";
+    case -11: return "Read Timeout";
+    default: return "Unknown Error";
+  }
+}
 
 class DisplayToken
 {
   public:
-    String showTokens() {
-      String buf;
-      if (token1)
-        buf = buf + "Date(1),";
-      if (token2)
-        buf = buf + "CurWeather(2),";
-      if (token3)
-        buf = buf + "Alerts(3),";
-      if (token4)
-        buf = buf + "Misc(4),";
-      if (token5)
-        buf = buf + "5,";
-      if (token6)
-        buf = buf + "AlertFlash(6),";
-      if (token7)
-        buf = buf + "7,";
-      if (token8)
-        buf = buf + "DayWeather(8),";
-      if (token9)
-        buf = buf + "AirQual(9),";
-      if (token10)
-        buf = buf + "Scrolltext(10)";
-      if (buf.length() == 0)
-        buf = "0";
-      return buf;
+    char* showTokens() {
+        const int BUF_LEN = 128;
+        char *buf = (char *)malloc(BUF_LEN);
+        uint8_t len = 0;
+        if (token1) len += snprintf(buf + len, BUF_LEN - len, "Date(1),");
+        if (token2) len += snprintf(buf + len, BUF_LEN - len, "CurWeather(2),");
+        if (token3) len += snprintf(buf + len, BUF_LEN - len, "Alerts(3),");
+        if (token4) len += snprintf(buf + len, BUF_LEN - len, "Misc(4),");
+        if (token5) len += snprintf(buf + len, BUF_LEN - len, "5,");
+        if (token6) len += snprintf(buf + len, BUF_LEN - len, "AlertFlash(6),");
+        if (token7) len += snprintf(buf + len, BUF_LEN - len, "7,");
+        if (token8) len += snprintf(buf + len, BUF_LEN - len, "DayWeather(8),");
+        if (token9) len += snprintf(buf + len, BUF_LEN - len, "AirQual(9),");
+        if (token10) len += snprintf(buf + len, BUF_LEN - len, "Scrolltext(10)");
+        if (len == 0) snprintf(buf, BUF_LEN, "0");
+        else buf[len] = '\0';
+        return buf;
     }
 
     bool getToken(uint8_t position)
@@ -344,7 +420,6 @@ class DisplayToken
 
     bool isReady(uint8_t position)
     {
-        //ESP_LOGD(TAG, "Display token %d is requesting ready, set tokens: [%s]", position, showTokens());
         switch (position)
         {
         case 0:

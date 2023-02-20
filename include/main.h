@@ -8,11 +8,11 @@
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 0
 #define VERSION_PATCH 0
-#define VERSION_CONFIG "10"  //major&minor
+#define VERSION_CONFIG "01"  //major&minor
+
 // WARNING: Not advancing the config version after adding/deleting iotwebconf config options will result in system settings data corruption.  Iotwebconf will erase the config if it sees a different config version to avoid this corruption.
 
-
-#undef COROUTINE_PROFILER          // Enable the coroutine debug profiler
+#define COROUTINE_PROFILER          // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages
 #undef DISABLE_WEATHERCHECK
 #undef DISABLE_AIRCHECK
@@ -28,14 +28,16 @@
 #define NIGHTHUE 175               // 10pm nighttime hue end
 #define LUXMIN 5                   // Lowest brightness min
 #define LUXMAX 100                 // Lowest brightness max
+#define LUX_RANGE (LUXMAX - LUXMIN)
 #define mw 32                      // Width of led matrix
 #define mh 8                       // Hight of led matrix
 #define ANI_BITMAP_CYCLES 8        // Number of animation frames in each weather icon bitmap
-#define ANI_SPEED 80               // Bitmap animation speed in ms (lower is faster)
+#define ANI_SPEED 100               // Bitmap animation speed in ms (lower is faster)
 #define NTPCHECKTIME 60            // NTP server check time in minutes
 #define LIGHT_CHECK_DELAY 100      // delay for each brightness check in ms
 #define STARTSHOWDELAY_LOW 60      // min seconds for startup show delay
 #define STARTSHOWDELAY_HIGH 600    // max seconds for startup show delay
+#define HTTP_MAX_RETRIES 3         // number of consecutive failed http requests before disabling each service
 #define NUMMATRIX (mw*mh)
 // WebIotConf defaults
 #define DEF_CLOCK_COLOR "#FF8800"
@@ -52,6 +54,16 @@
 #define DEF_ALERT_INTERVAL 10  //minutes
 #define DEF_SCROLL_SPEED 5 
 #define DEF_BRIGHTNESS_LEVEL 2
+
+// second aliases
+#define T1S 1*1L  // 1 second
+#define T1M 1*60L  // 1 minute
+#define T5M 5*60L  // 5 minutes
+#define T10M 10*60L  // 10 minutes
+#define T1H 1*60*60L  // 1 hour
+#define T2H 2*60*60L  // 2 hours 
+#define T1D 24*60*60L  // 1 day
+#define T1Y 365*24*60*60L  // 1 year
 
 // Includes
 #include <nvs_flash.h>
@@ -89,15 +101,13 @@ const char* TAG = "CLOCK";                             // ESP Logging tag
 #include "structures.h"
 
 // defs
-static char intervals[][9] = {"31536000", "2592000", "604800", "86400", "3600", "60", "1"};
-static char interval_names[][9] = {"years", "months", "weeks", "days", "hours", "minutes", "seconds"};
-static char air_quality[][12] = {"N/A", "Good", "Fair", "Moderate", "Poor", "Very Poor"};
-static char connection_state[][15] = {"Boot", "NotConfigured", "ApMode", "Connecting", "OnLine", "OffLine"};
-static char imperial_units[][7] = {"\u2109", "Mph", "Feet"};
-static char metric_units[][7] = {"\u2103", "Kph", "Meters"};
-static char clock_status[][12] = {"Success", "Timeout", "Waiting"};
-static char yesno[][4] = {"No", "Yes"};
-static char truefalse[][6] = {"False", "True"};
+const char air_quality[][12] = {"N/A", "Good", "Fair", "Moderate", "Poor", "Very Poor"};
+const char connection_state[][15] = {"Boot", "NotConfigured", "ApMode", "Connecting", "OnLine", "OffLine"};
+const char imperial_units[][7] = {"\u2109", "Mph", "Feet", "°F"};
+const char metric_units[][7] = {"\u2103", "Kph", "Meters", "°C"};
+const char clock_status[][12] = {"Success", "Timeout", "Waiting"};
+const char yesno[][4] = {"No", "Yes"};
+const char truefalse[][6] = {"False", "True"};
 
 // Global Variables & Class Objects
 const char thingName[] = "LEDSMARTCLOCK";              // Default SSID used for new setup
@@ -113,12 +123,12 @@ DNSServer dnsServer;                                   // DNS Server object
 WebServer server(80);                                  // Web server object for IotWebConf and OTA
 HTTPClient request;
 HTTPUpdateServer httpUpdater;
-Weather weather;                                       // weather info data class
+WeatherData weather;                                   // weather info data class
 Alerts alerts;                                         // wweather alerts data class
 Ipgeo ipgeo;                                           // ip geolocation data class
 Geocode geocode;
 GPSData gps;                                           // gps data class
-Aqi aqi;
+AqiData aqi;
 LastShown lastshown;
 ShowReady showready;
 CheckClass checkalerts;
@@ -134,12 +144,14 @@ Current current;
 acetime_t lastntpcheck;
 bool clock_display_offset;                             // Clock display offset for single digit hour
 acetime_t bootTime;                                    // boot time
-String timesource = "none";                            // Primary timeclock source gps/ntp
+char timesource[4] = "n/a";                            // Primary timeclock source gps/ntp
 uint8_t userbrightness;                                // Current saved brightness setting (from iotwebconf)
 bool firsttimefailsafe;
 bool httpbusy;
 
 #include "colors.h"
+const uint32_t AQIColorLookup[] = { GREEN, YELLOW, ORANGE, RED, PURPLE, WHITE };
+const uint32_t alertcolors[] = {RED, YELLOW};
 
 // Function Declarations
 void print_debugData();
@@ -150,30 +162,32 @@ void handleRoot();
 void configSaved();
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper);
 void buildURLs();
-String elapsedTime(uint32_t seconds);
+char *elapsedTime(uint32_t seconds);
 void display_showStatus();
 void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color);
-void fillAlertsFromJson(String payload);
-void fillWeatherFromJson(String payload);
-void fillIpgeoFromJson(String payload);
-void fillGeocodeFromJson(String payload);
-void fillAqiFromJson(String payload);
-void debug_print(String message, bool cr);
+bool fillAlertsFromJson(String payload);
+bool fillWeatherFromJson(String payload);
+bool fillIpgeoFromJson(String payload);
+bool fillGeocodeFromJson(String payload);
+bool fillAqiFromJson(String payload);
 acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds);
-void setTimeSource(String);
+void setTimeSource(const String &inputString);
 void resetLastNtpCheck();
 void printSystemZonedTime();
 void display_temperature();
-void display_weatherIcon(String icon);
+void display_weatherIcon(char* icon);
 void processTimezone();
 acetime_t Now();
-String capString(String str);
-ace_time::ZonedDateTime getSystemZonedTime();
+char* capString(char* str);
 uint16_t calcbright(uint16_t bl);
-String getSystemZonedDateString();
-String getSystemZonedDateTimeString();
+ace_time::ZonedDateTime getSystemZonedTime();
+String getSystemZonedTimestamp();
+String getCustomZonedTimestamp(acetime_t now);
+void getSystemZonedDateString(char* str);
+char *getSystemZonedDateTimeString();
 const char *ordinal_suffix(int n);
-void cleanString(String &str);
+void cleanString(char *str);
+void capitalize(char *str);
 bool httpRequest(uint8_t index);
 bool isHttpReady();
 bool isNextAttemptReady();
@@ -185,6 +199,15 @@ bool isApiValid(char *apikey);
 bool connectAp(const char *apName, const char *password);
 void connectWifi(const char *ssid, const char *password);
 int32_t fromNow(acetime_t ctime);
+void toUpper(char *input);
+String uv_index(uint8_t index);
+acetime_t convert1970Epoch(acetime_t epoch1970);
+String formatLargeNumber(int number);
+String getHttpCodeName(int code);
+bool cmpLocs(char a1[32], char a2[32]);
+bool compareTimes(ZonedDateTime t1, ZonedDateTime t2);
+void startFlash(uint16_t color, uint8_t laps);
+void startScroll(uint16_t color, bool displayicon);
 
 #include "iowebconf.h"
 #include "gpsclock.h"

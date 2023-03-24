@@ -151,7 +151,6 @@ COROUTINE(checkWeather)
         ESP_LOGD(TAG, "Weather http response code: [%d] %s, payload length: [%d]", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.length());
         if (fillWeatherFromJson(reqdata))
         {
-          checkweather.lastsuccess = systemClock.getNow();
           checkweather.retries = 0;
           checkweather.complete = true;
           if (!checkweather.firsttime)
@@ -161,6 +160,7 @@ COROUTINE(checkWeather)
           }
           else
             checkweather.firsttime = false;
+          checkweather.lastsuccess = systemClock.getNow();
           ESP_LOGI(TAG, "New weather data received");
         }
       }
@@ -184,7 +184,7 @@ COROUTINE(checkAlerts)
 {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkalerts.lastsuccess, 5, T1M) && isNextAttemptReady(checkalerts.lastattempt) && checkalerts.retries < HTTP_MAX_RETRIES && isCoordsValid());
+    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkalerts.lastsuccess, alert_interval.value(), T1M) && isNextAttemptReady(checkalerts.lastattempt) && checkalerts.retries < HTTP_MAX_RETRIES && isCoordsValid());
     ESP_LOGI(TAG, "Checking weather alerts...");
     httpbusy = true;
     checkalerts.retries++;
@@ -244,7 +244,7 @@ COROUTINE(showWeather)
     memcpy(speedunit, imperial_units[1], 7);
   else
     memcpy(speedunit, metric_units[1], 7);
-  snprintf(scrolltext.message, 512, "Current %s Humidity:%d%% Wind:%d/%d%s Clouds:%d%% AQi:%s UVi:%s", capString(weather.current.description), weather.current.humidity, weather.current.windSpeed, weather.current.windGust, speedunit, weather.current.cloudcover, air_quality[aqi.current.aqi], uv_index(weather.current.uvi).c_str());
+  snprintf(scrolltext.message, 512, "Current %s Humidity:%d%% Wind:%d/%d%s CloudCover:%d%% AirQuality:%s UVindex:%s", capString(weather.current.description), weather.current.humidity, weather.current.windSpeed, weather.current.windGust, speedunit, weather.current.cloudcover, air_quality[aqi.current.aqi], uv_index(weather.current.uvi).c_str());
   startScroll(hex2rgb(current_weather_color.value()), true);
   memcpy(scrolltext.icon, weather.current.icon, sizeof(weather.current.icon[0]) * 4);
   COROUTINE_AWAIT(!scrolltext.active);
@@ -285,7 +285,7 @@ COROUTINE(showWeatherDaily)
       memcpy(speedunit, metric_units[1], 7);
       memcpy(tempunit, metric_units[3], 7);
     }
-    snprintf(scrolltext.message, 512, "Today %s Hi:%d Lo:%d Humidity:%d%% Wind:%d/%d%s Clouds:%d%% AQi:%s UVi:%s", capString(weather.day.description), weather.day.tempMax, weather.day.tempMin, weather.day.humidity, weather.day.windSpeed, weather.day.windGust, speedunit, weather.day.cloudcover, air_quality[aqi.day.aqi], uv_index(weather.day.uvi).c_str());
+    snprintf(scrolltext.message, 512, "Today %s Hi:%d Lo:%d Humidity:%d%% Wind:%d/%d%s Clouds:%d%% AirQuality:%s UVindex:%s", capString(weather.day.description), weather.day.tempMax, weather.day.tempMin, weather.day.humidity, weather.day.windSpeed, weather.day.windGust, speedunit, weather.day.cloudcover, air_quality[aqi.day.aqi], uv_index(weather.day.uvi).c_str());
     startScroll(hex2rgb(daily_weather_color.value()), true);
     COROUTINE_AWAIT(!scrolltext.active);
     cotimer.millis = millis();
@@ -308,7 +308,7 @@ COROUTINE(showAirquality)
       aqi.current.color = (AQIColorLookup[aqi.current.aqi]);
     startFlash(aqi.current.color, 1);
     COROUTINE_AWAIT(!alertflash.active);
-    snprintf(scrolltext.message, 512, "Air Quality: %s", air_quality[aqi.current.aqi]);
+    snprintf(scrolltext.message, 512, "Air Quality: %s, %s", air_quality[aqi.current.aqi], (aqi.current.description).c_str());
     startScroll(aqi.current.color, false);
     COROUTINE_AWAIT(!scrolltext.active);
     cotimer.millis = millis();
@@ -318,6 +318,8 @@ COROUTINE(showAirquality)
   }
 }
 
+//This code is used to display the NOAA weather alert information.
+//It is only called when the alerts are active and the display is ready.
 COROUTINE(showAlerts) 
 {
   COROUTINE_LOOP() 

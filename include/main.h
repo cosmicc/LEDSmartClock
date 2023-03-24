@@ -47,13 +47,13 @@
 #define DEF_WEATHER_COLOR "#FF8800"
 #define DEF_DAILY_COLOR "#FF8800"
 #define DEF_AQI_COLOR "#FF8800"
-#define DEF_WEATHER_INTERVAL 10  //minutes
-#define DEF_DAILY_INTERVAL 1  //hours
+#define DEF_WEATHER_INTERVAL 90  //minutes
+#define DEF_DAILY_INTERVAL 3  //hours
 #define DEF_DATE_INTERVAL 4  //hours
-#define DEF_AQI_INTERVAL 30  //minutes
-#define DEF_ALERT_INTERVAL 10  //minutes
+#define DEF_AQI_INTERVAL 120  //minutes
+#define DEF_ALERT_INTERVAL 30  //minutes
 #define DEF_SCROLL_SPEED 5 
-#define DEF_BRIGHTNESS_LEVEL 2
+#define DEF_BRIGHTNESS_LEVEL 3
 
 // second aliases
 #define T1S 1*1L  // 1 second
@@ -162,7 +162,7 @@ void handleRoot();
 void configSaved();
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper);
 void buildURLs();
-char *elapsedTime(uint32_t seconds);
+String elapsedTime(uint32_t seconds);
 void display_showStatus();
 void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color);
 bool fillAlertsFromJson(String payload);
@@ -208,6 +208,7 @@ bool cmpLocs(char a1[32], char a2[32]);
 bool compareTimes(ZonedDateTime t1, ZonedDateTime t2);
 void startFlash(uint16_t color, uint8_t laps);
 void startScroll(uint16_t color, bool displayicon);
+void processAqiDescription();
 
 #include "iowebconf.h"
 #include "gpsclock.h"

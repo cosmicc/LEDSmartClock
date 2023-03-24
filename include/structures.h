@@ -61,6 +61,7 @@ typedef struct {
   struct {
     uint8_t aqi;
     uint16_t color;
+    String description;
     double co; // carbon monoxide
     double no; // nitogen monoxide
     double no2; // nitrogen dioxide
@@ -72,6 +73,7 @@ typedef struct {
 } current;
   struct {
     uint8_t aqi;
+    String description;
     uint16_t color;
     double co;
     double no;

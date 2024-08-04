@@ -49,32 +49,34 @@ extern "C" void app_main()
   group2.addItem(&clock_color);
   group2.addItem(&enable_fixed_tz);
   group2.addItem(&fixed_offset);
-  group3.addItem(&show_current_weather);
-  group3.addItem(&current_weather_color);
-  group3.addItem(&current_weather_interval);
   group3.addItem(&enable_temp_color);
   group3.addItem(&temp_color);
-  group4.addItem(&show_daily_weather);
-  group4.addItem(&daily_weather_color);
-  group4.addItem(&daily_weather_interval);
-  group5.addItem(&show_aqi);
-  group5.addItem(&enable_aqi_color);
-  group5.addItem(&aqi_color);
-  group5.addItem(&aqi_interval);
-  group6.addItem(&enable_system_status);
-  group6.addItem(&enable_aqi_status);
-  group6.addItem(&enable_uvi_status);
-  group6.addItem(&green_status);
-  group7.addItem(&show_sunrise);
-  group7.addItem(&sunrise_color);
-  group7.addItem(&sunrise_message);
-  group7.addItem(&show_sunset);
-  group7.addItem(&sunset_color);
-  group7.addItem(&sunset_message);
-  group8.addItem(&show_loc_change);
-  group8.addItem(&enable_fixed_loc);
-  group8.addItem(&fixedLat);
-  group8.addItem(&fixedLon);
+  group3.addItem(&show_current_temp);
+  group3.addItem(&current_temp_interval);
+  group4.addItem(&show_current_weather);
+  group4.addItem(&current_weather_color);
+  group4.addItem(&current_weather_interval);
+  group5.addItem(&show_daily_weather);
+  group5.addItem(&daily_weather_color);
+  group5.addItem(&daily_weather_interval);
+  group6.addItem(&show_aqi);
+  group6.addItem(&enable_aqi_color);
+  group6.addItem(&aqi_color);
+  group6.addItem(&aqi_interval);
+  group7.addItem(&enable_system_status);
+  group7.addItem(&enable_aqi_status);
+  group7.addItem(&enable_uvi_status);
+  group7.addItem(&green_status);
+  group8.addItem(&show_sunrise);
+  group8.addItem(&sunrise_color);
+  group8.addItem(&sunrise_message);
+  group8.addItem(&show_sunset);
+  group8.addItem(&sunset_color);
+  group8.addItem(&sunset_message);
+  group9.addItem(&show_loc_change);
+  group9.addItem(&enable_fixed_loc);
+  group9.addItem(&fixedLat);
+  group9.addItem(&fixedLon);
   iotWebConf.addParameterGroup(&group1);
   iotWebConf.addParameterGroup(&group2);
   iotWebConf.addParameterGroup(&group3);
@@ -82,6 +84,8 @@ extern "C" void app_main()
   iotWebConf.addParameterGroup(&group5);
   iotWebConf.addParameterGroup(&group6);
   iotWebConf.addParameterGroup(&group7);
+  iotWebConf.addParameterGroup(&group8);
+  iotWebConf.addParameterGroup(&group9);
   iotWebConf.getApTimeoutParameter()->visible = true;
   // iotWebConf.setApConnectionHandler(&connectAp);
   iotWebConf.setWifiConnectionHandler(&connectWifi);
@@ -223,6 +227,7 @@ void configSaved()
   firsttimefailsafe = false;
 }
 
+// This function is called when the WiFi module is connected to the network.
 void wifiConnected()
 {
   ESP_LOGI(TAG, "WiFi is now connected.");
@@ -247,9 +252,10 @@ void connectWifi(const char *ssid, const char *password)
 bool isNextShowReady(acetime_t lastshown, uint8_t interval, uint32_t multiplier)
 {
   // Calculate current time in seconds
-  uint32_t now = systemClock.getNow();
+  acetime_t now = systemClock.getNow();
   // Check if the elapsed time since the last show is greater than the interval multiplied by the multiplier
-  return (now - lastshown) > (interval * multiplier);
+  bool showReady = (now - lastshown) > (interval * multiplier);
+  return showReady;
 }
 
 bool isNextAttemptReady(acetime_t lastattempt)
@@ -272,10 +278,9 @@ bool httpRequest(uint8_t index)
   return true;                                                   // Return true to denote successful request
 }
 
-// Function to check if current coordinates are valid
+// Returns true if the current coordinates are valid
 bool isCoordsValid()
 {
-  // Returns true if lat and lon are both not 0
   return (current.lat != 0 && current.lon != 0);
 }
 
@@ -693,7 +698,6 @@ void display_weatherIcon(char *icon)
 void display_temperature()
 {
   int temp = weather.current.feelsLike;
-  ESP_LOGI(TAG, "Showing Temperature: %d", temp);
   bool imperial_setting = imperial.isChecked();
   int tl = (imperial_setting) ? 32 : 0;
   int th = (imperial_setting) ? 104 : 40;

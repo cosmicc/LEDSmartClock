@@ -149,6 +149,7 @@ struct ScrollText {
 struct ShowReady {
   bool alerts;
   bool currentweather;
+  bool currenttemp;
   bool date;
   bool dayweather;
   bool aqi;
@@ -166,6 +167,7 @@ struct LastShown {
   acetime_t date;
   acetime_t alerts;
   acetime_t currentweather;
+  acetime_t currenttemp;
   acetime_t dayweather;
   acetime_t aqi;
 };

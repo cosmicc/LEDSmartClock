@@ -28,7 +28,7 @@ iotwebconf::ParameterGroup group1 = iotwebconf::ParameterGroup("Display", "Displ
   iotwebconf::CheckboxTParameter imperial =
     iotwebconf::Builder<iotwebconf::CheckboxTParameter>("imperial").label("Use imperial units (Instead of metric)").defaultValue(true).build();
   iotwebconf::IntTParameter<int8_t> brightness_level =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("brightness_level").label("Brightness level (1-5)").defaultValue(DEF_BRIGHTNESS_LEVEL).min(1).max(5).step(1).placeholder("1(low)..5(high)").build();
+    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("brightness_level").label("Brightness level (1-10)").defaultValue(DEF_BRIGHTNESS_LEVEL).min(1).max(10).step(1).placeholder("1(low)..10(high)").build();
   iotwebconf::IntTParameter<int8_t> text_scroll_speed =
     iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("text_scroll_speed").label("Text scroll speed (1-10)").defaultValue(DEF_SCROLL_SPEED).min(1).max(10).step(1).placeholder("1(low)..10(high)").build();
   iotwebconf::ColorTParameter system_color =

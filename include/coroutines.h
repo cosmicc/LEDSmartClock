@@ -272,7 +272,7 @@ COROUTINE(showTemp)
   displaytoken.setToken(2);
   cotimer.millis = millis();
   ESP_LOGI(TAG, "Showing Temperature");
-  while (millis() - cotimer.millis < 10000)
+  while (millis() - cotimer.millis < 15000)
   {
     matrix->clear();
     display_temperature();

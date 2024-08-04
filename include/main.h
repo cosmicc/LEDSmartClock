@@ -4,10 +4,10 @@
 #define FASTLED_ESP32_SPI_BUS HSPI
 
 // Versioning
-#define VERSION "LED SmartClock v1.3.1"
+#define VERSION "LED SmartClock v1.3.2"
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 3
-#define VERSION_PATCH 1
+#define VERSION_PATCH 2
 #define VERSION_CONFIG "13"  //major&minor
 
 // WARNING: Not advancing the config version after adding/deleting iotwebconf config options will result in system settings data corruption.  Iotwebconf will erase the config if it sees a different config version to avoid this corruption.

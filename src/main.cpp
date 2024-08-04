@@ -49,9 +49,9 @@ extern "C" void app_main()
   group2.addItem(&clock_color);
   group2.addItem(&enable_fixed_tz);
   group2.addItem(&fixed_offset);
+  group3.addItem(&show_current_temp);
   group3.addItem(&enable_temp_color);
   group3.addItem(&temp_color);
-  group3.addItem(&show_current_temp);
   group3.addItem(&current_temp_interval);
   group4.addItem(&show_current_weather);
   group4.addItem(&current_weather_color);
@@ -1410,17 +1410,32 @@ uint16_t calcbright(uint16_t bl)
     retVal = 0;
     break;
   case 2:
-    retVal = 5;
+    retVal = 1;
     break;
   case 3:
-    retVal = 10;
+    retVal = 2;
     break;
   case 4:
-    retVal = 20;
+    retVal = 4;
     break;
   case 5:
-    retVal = 30;
+    retVal = 8;
     break;
+  case 6:
+    retVal = 10;
+    break;
+  case 7:
+    retVal = 15;
+    break;
+  case 8:
+    retVal = 20;
+    break;
+  case 9:
+    retVal = 25;
+    break;
+  case 10:
+    retVal = 30;
+    break;    
   default:
     retVal = 0;
     break;

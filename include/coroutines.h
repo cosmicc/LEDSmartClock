@@ -134,7 +134,7 @@ COROUTINE(checkWeather)
 {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkweather.lastsuccess, current_weather_interval.value(), T1M) && isNextAttemptReady(checkweather.lastattempt)  && isApiValid(weatherapi.value()) && checkweather.retries < HTTP_MAX_RETRIES && isCoordsValid() && !firsttimefailsafe);
+    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkweather.lastsuccess, current_temp_interval.value(), T1M) && isNextAttemptReady(checkweather.lastattempt)  && isApiValid(weatherapi.value()) && checkweather.retries < HTTP_MAX_RETRIES && isCoordsValid() && !firsttimefailsafe);
     ESP_LOGI(TAG, "Checking weather forecast...");
     httpbusy = true;
     checkweather.retries++;
@@ -151,7 +151,6 @@ COROUTINE(checkWeather)
         ESP_LOGD(TAG, "Weather http response code: [%d] %s, payload length: [%d]", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.length());
         if (fillWeatherFromJson(reqdata))
         {
-          checkweather.lastsuccess = systemClock.getNow();
           checkweather.retries = 0;
           checkweather.complete = true;
           if (!checkweather.firsttime)
@@ -161,6 +160,7 @@ COROUTINE(checkWeather)
           }
           else
             checkweather.firsttime = false;
+          checkweather.lastsuccess = systemClock.getNow();
           ESP_LOGI(TAG, "New weather data received");
         }
       }
@@ -184,7 +184,7 @@ COROUTINE(checkAlerts)
 {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkalerts.lastsuccess, 5, T1M) && isNextAttemptReady(checkalerts.lastattempt) && checkalerts.retries < HTTP_MAX_RETRIES && isCoordsValid());
+    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkalerts.lastsuccess, alert_interval.value(), T1M) && isNextAttemptReady(checkalerts.lastattempt) && checkalerts.retries < HTTP_MAX_RETRIES && isCoordsValid());
     ESP_LOGI(TAG, "Checking weather alerts...");
     httpbusy = true;
     checkalerts.retries++;
@@ -220,7 +220,7 @@ COROUTINE(showDate)
 {
   COROUTINE_LOOP() 
   {
-  COROUTINE_AWAIT(isNextShowReady(lastshown.date, date_interval.value(), T1H) && show_date.isChecked() && iotWebConf.getState() != 1 && displaytoken.isReady(1));
+  COROUTINE_AWAIT(isNextShowReady(lastshown.date, current_temp_interval.value(), T1H) && show_date.isChecked() && iotWebConf.getState() != 1 && displaytoken.isReady(1));
   displaytoken.setToken(1);
   getSystemZonedDateString(scrolltext.message);
   startScroll(hex2rgb(date_color.value()), false);
@@ -235,7 +235,7 @@ COROUTINE(showWeather)
 {
   COROUTINE_LOOP() 
   {
-  COROUTINE_AWAIT(showready.currentweather && show_current_weather.isChecked() && displaytoken.isReady(2));
+  COROUTINE_AWAIT(isNextShowReady(lastshown.currentweather, current_weather_interval.value(), T1H) && checkweather.complete && show_current_weather.isChecked() && displaytoken.isReady(2));
   displaytoken.setToken(2);
   startFlash(hex2rgb(current_weather_color.value()), 1);
   COROUTINE_AWAIT(!alertflash.active);
@@ -264,11 +264,34 @@ COROUTINE(showWeather)
   }
 }
 
+COROUTINE(showTemp)
+{
+  COROUTINE_LOOP()
+  {
+  COROUTINE_AWAIT(isNextShowReady(lastshown.currenttemp, current_temp_interval.value(), T1M) && checkweather.complete && show_current_weather.isChecked() && displaytoken.isReady(2));
+  displaytoken.setToken(2);
+  cotimer.millis = millis();
+  ESP_LOGI(TAG, "Showing Temperature");
+  while (millis() - cotimer.millis < 15000)
+  {
+    matrix->clear();
+    display_temperature();
+    display_showStatus();
+    display_weatherIcon(weather.current.icon);
+    matrix->show();
+    COROUTINE_DELAY(50);
+  }
+  lastshown.currenttemp = systemClock.getNow();
+  showready.currenttemp = false;
+  displaytoken.resetToken(2);
+  }
+}
+
 COROUTINE(showWeatherDaily) 
 {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(showready.dayweather && show_daily_weather.isChecked() && displaytoken.isReady(8));
+    COROUTINE_AWAIT(isNextShowReady(lastshown.dayweather, daily_weather_interval.value(), T1H) && checkweather.complete  && show_daily_weather.isChecked() && displaytoken.isReady(8));
     displaytoken.setToken(8);
     startFlash(hex2rgb(daily_weather_color.value()), 1);
     memcpy(scrolltext.icon, weather.day.icon, sizeof(weather.day.icon[0]) * 4);
@@ -308,7 +331,7 @@ COROUTINE(showAirquality)
       aqi.current.color = (AQIColorLookup[aqi.current.aqi]);
     startFlash(aqi.current.color, 1);
     COROUTINE_AWAIT(!alertflash.active);
-    snprintf(scrolltext.message, 512, "Air Quality: %s", air_quality[aqi.current.aqi]);
+    snprintf(scrolltext.message, 512, "Air Quality: %s, %s", air_quality[aqi.current.aqi], (aqi.current.description).c_str());
     startScroll(aqi.current.color, false);
     COROUTINE_AWAIT(!scrolltext.active);
     cotimer.millis = millis();
@@ -318,6 +341,8 @@ COROUTINE(showAirquality)
   }
 }
 
+//This code is used to display the NOAA weather alert information.
+//It is only called when the alerts are active and the display is ready.
 COROUTINE(showAlerts) 
 {
   COROUTINE_LOOP() 
@@ -359,7 +384,7 @@ COROUTINE(serialInput)
         case 's':  // Display coroutines states
             CoroutineScheduler::list(Serial);
             break;
-        case 'r':  // Force display of current air quality
+        case 'a':  // Force display of current air quality
             lastshown.aqi = systemClock.getNow() - (aqi_interval.value() * 60);
             showready.aqi = true;
             break;
@@ -387,10 +412,29 @@ COROUTINE(serialInput)
           LogBinTableRenderer::printTo(Serial, 2 /*startBin*/, 13 /*endBin*/, false /*clear*/);
           break;
         #endif
-        case 'a':
+        case 'l':
           printf("Log level changed to DEBUG\n");
           esp_log_level_set(TAG, ESP_LOG_DEBUG);
           break;
+        case 'r':
+          printf("Rebooting...\n");
+          ESP.restart();
+          break;
+        case 'h':
+           printf("Help:\n");
+           printf("  d: Display debug data\n");
+           printf("  s: Display coroutines states\n");
+           printf("  a: Force display of current air quality\n");
+           printf("  w: Force display of current weather\n");
+           printf("  e: Display the current date\n");
+           printf("  q: Force display of day weather\n");
+           printf("  c: Display current main task stack size remaining (bytes)\n");
+           printf("  t: Test alertflash\n");
+           printf("  f: Display coroutine execution time table (Profiler)\n");
+           printf("  l: Change log level to DEBUG\n");
+           printf("  r: Reboot clock\n");
+           printf("  h: Display this help\n");
+           break;
         default:
           printf("Unknown command: %c\n", input);
           break;
@@ -585,7 +629,6 @@ COROUTINE(coroutineManager)
     showClock.resume();
     ESP_LOGD(TAG, "Show Clock Coroutine Resumed");
   }
-    
   if (serialdebug.isChecked() && serialInput.isSuspended())
   {
     serialInput.resume();
@@ -596,18 +639,45 @@ COROUTINE(coroutineManager)
     serialInput.suspend();
    ESP_LOGD(TAG, "Serial Input Coroutine Suspended"); 
   }
-    
-  if (show_date.isChecked() && showDate.isSuspended())
+    #ifndef DISABLE_WEATHERCHECK         
+  // Weather couroutine management
+  if ((show_current_temp.isChecked() || show_current_weather.isChecked() || show_daily_weather.isChecked()) && checkWeather.isSuspended() && isCoordsValid() && isApiValid(weatherapi.value()) && iotWebConf.getState() == 4 && checkweather.retries < 10)
   {
-    showDate.resume();
-   ESP_LOGD(TAG, "Show Date Coroutine Resumed"); 
+    checkWeather.reset();
+    checkWeather.resume();
+    ESP_LOGD(TAG, "Check Weather Coroutine Resumed");
   }
-  else if (!show_date.isChecked() && !showDate.isSuspended())
+  else if ((!show_current_weather.isChecked() && !show_daily_weather.isChecked() && !checkWeather.isSuspended()) && (iotWebConf.getState() != 4 || !isCoordsValid() || !isApiValid(weatherapi.value())))
   {
-    showDate.suspend();
-    ESP_LOGD(TAG, "Show Date Coroutine Suspended");
+    checkWeather.suspend();
+    ESP_LOGD(TAG, "Check Weather Coroutine Suspended"); 
   }
-    
+  #endif
+  // Alerts coroutine management
+  #ifndef DISABLE_ALERTCHECK
+  if (checkAlerts.isSuspended() && iotWebConf.getState() == 4 && checkalerts.retries < HTTP_MAX_RETRIES) 
+  {
+    checkAlerts.reset();
+    checkAlerts.resume();
+    ESP_LOGD(TAG, "Check Alerts Coroutine Resumed");
+  }
+  else if (!checkAlerts.isSuspended() && iotWebConf.getState() != 4)
+  {
+    checkAlerts.suspend();
+    ESP_LOGD(TAG, "Check Alerts Coroutine Suspended");
+  }
+  #endif
+  if (show_current_temp.isChecked() && showTemp.isSuspended())
+  {
+    showTemp.resume();
+    ESP_LOGD(TAG, "Show Current Temp Coroutine Resumed");
+  }
+  else if ((!show_current_temp.isChecked() && !showTemp.isSuspended()))
+  {
+    showTemp.suspend();
+    ESP_LOGD(TAG, "Show Current Temp Coroutine Suspended");
+  }
+
   if (show_current_weather.isChecked() && showWeather.isSuspended())
   {
     showWeather.resume();
@@ -640,34 +710,6 @@ COROUTINE(coroutineManager)
     showAirquality.suspend();
     ESP_LOGD(TAG, "Show Air Quality Coroutine Suspended");
   }
-  #ifndef DISABLE_WEATHERCHECK         
-  // Weather couroutine management
-  if ((show_current_weather.isChecked() || show_daily_weather.isChecked()) && checkWeather.isSuspended() && isCoordsValid() && isApiValid(weatherapi.value()) && iotWebConf.getState() == 4 && checkweather.retries < 10) 
-  {
-    checkWeather.reset();
-    checkWeather.resume();
-    ESP_LOGD(TAG, "Check Weather Coroutine Resumed");
-  }
-  else if ((!show_current_weather.isChecked() && !show_daily_weather.isChecked() && !checkWeather.isSuspended()) && (iotWebConf.getState() != 4 || !isCoordsValid() || !isApiValid(weatherapi.value())))
-  {
-    checkWeather.suspend();
-    ESP_LOGD(TAG, "Check Weather Coroutine Suspended"); 
-  }
-  #endif
-  // Alerts coroutine management
-  #ifndef DISABLE_ALERTCHECK
-  if (checkAlerts.isSuspended() && iotWebConf.getState() == 4 && checkalerts.retries < HTTP_MAX_RETRIES) 
-  {
-    checkAlerts.reset();
-    checkAlerts.resume();
-    ESP_LOGD(TAG, "Check Alerts Coroutine Resumed");
-  }
-  else if (!checkAlerts.isSuspended() && iotWebConf.getState() != 4)
-  {
-    checkAlerts.suspend();
-    ESP_LOGD(TAG, "Check Alerts Coroutine Suspended");
-  }
-  #endif
   //AQI coroutine management
   #ifndef DISABLE_AQICHECK         
   if ((checkAirquality.isSuspended() && iotWebConf.getState() == 4 && isCoordsValid() && isApiValid(weatherapi.value())) && checkaqi.retries < HTTP_MAX_RETRIES && (show_current_weather.isChecked() || show_daily_weather.isChecked() || show_aqi.isChecked())) 
@@ -682,6 +724,16 @@ COROUTINE(coroutineManager)
     ESP_LOGD(TAG, "Check Air Quality Coroutine Suspended");
            }
   #endif
+    if (show_date.isChecked() && showDate.isSuspended())
+  {
+    showDate.resume();
+   ESP_LOGD(TAG, "Show Date Coroutine Resumed"); 
+  }
+  else if (!show_date.isChecked() && !showDate.isSuspended())
+  {
+    showDate.suspend();
+    ESP_LOGD(TAG, "Show Date Coroutine Suspended");
+  }
   if (checkipgeo.complete && !checkIpgeo.isSuspended())
   {
     checkIpgeo.suspend();    

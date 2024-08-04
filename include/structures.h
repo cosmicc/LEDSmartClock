@@ -61,6 +61,7 @@ typedef struct {
   struct {
     uint8_t aqi;
     uint16_t color;
+    String description;
     double co; // carbon monoxide
     double no; // nitogen monoxide
     double no2; // nitrogen dioxide
@@ -72,6 +73,7 @@ typedef struct {
 } current;
   struct {
     uint8_t aqi;
+    String description;
     uint16_t color;
     double co;
     double no;
@@ -147,6 +149,7 @@ struct ScrollText {
 struct ShowReady {
   bool alerts;
   bool currentweather;
+  bool currenttemp;
   bool date;
   bool dayweather;
   bool aqi;
@@ -164,6 +167,7 @@ struct LastShown {
   acetime_t date;
   acetime_t alerts;
   acetime_t currentweather;
+  acetime_t currenttemp;
   acetime_t dayweather;
   acetime_t aqi;
 };

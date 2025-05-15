@@ -1234,7 +1234,7 @@ void buildURLs()
     strcpy(units, "metric");
   char url[256];
   // Weather forecast url
-  snprintf(url, 256, "https://api.openweathermap.org/data/2.5/onecall?units=%s&exclude=minutely&appid=%s&lat=%f&lon=%f&lang=en",
+  snprintf(url, 256, "https://api.openweathermap.org/data/3.0/onecall?units=%s&exclude=minutely&appid=%s&lat=%f&lon=%f&lang=en",
            units, weatherapi.value(), current.lat, current.lon);
   strncpy(urls[0], url, 256);
   // Weather alert url

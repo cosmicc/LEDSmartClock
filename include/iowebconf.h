@@ -1,210 +1,145 @@
-// WARNING: Not advancing the config version in main.h after adding/deleting iotwebconf config options will result in system settings data corruption.  Iotwebconf will erase the config if it sees a different config version to avoid this corruption.
+#pragma once
 
-IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, VERSION_CONFIG);
-// SYSTEM GROUP
-  iotwebconf::TextTParameter<12> savedlat =
-    iotwebconf::Builder<iotwebconf::TextTParameter<12>>("savedlat").label("Saved Latitude").defaultValue("0").build();
-  iotwebconf::TextTParameter<12> savedlon =
-    iotwebconf::Builder<iotwebconf::TextTParameter<12>>("savedlon").label("Saved Longitude").defaultValue("0").build();
-  iotwebconf::IntTParameter<int8_t> savedtzoffset =   
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("tzoffset").label("Saved TZ Offset").defaultValue(0).min(-12).max(12).step(1).placeholder("-12...12").build();
-  iotwebconf::TextTParameter<32> savedcity =
-    iotwebconf::Builder<iotwebconf::TextTParameter<32>>("savedcity").label("Saved City").defaultValue("0").build();
-  iotwebconf::TextTParameter<32> savedstate =
-    iotwebconf::Builder<iotwebconf::TextTParameter<32>>("savedstate").label("Saved State").defaultValue("0").build();
-  iotwebconf::TextTParameter<32> savedcountry =
-    iotwebconf::Builder<iotwebconf::TextTParameter<32>>("savedcountry").label("Saved Country").defaultValue("0").build();
-  iotwebconf::CheckboxTParameter resetdefaults =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("resetdefaults").label("Reset to Defaults (AP mode)").defaultValue(false).build();
-  iotwebconf::CheckboxTParameter serialdebug =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("serialdebug").label("Enable serial debug output (for debugging)").defaultValue(false).build();
-  iotwebconf::TextTParameter<33> ipgeoapi =
-    iotwebconf::Builder<iotwebconf::TextTParameter<33>>("ipgeoapi").label("IPGeolocation.io API key").defaultValue("").build();
-  iotwebconf::TextTParameter<33> weatherapi =
-    iotwebconf::Builder<iotwebconf::TextTParameter<33>>("weatherapi").label("Openweathermap.org API Key").defaultValue("").build();
+/** Shared IotWebConf application instance that owns the configuration UI. */
+extern IotWebConf iotWebConf;
 
-// GROUP 1 DISPLAY CONFIG
-iotwebconf::ParameterGroup group1 = iotwebconf::ParameterGroup("Display", "Display Settings");
-  iotwebconf::CheckboxTParameter imperial =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("imperial").label("Use imperial units (Instead of metric)").defaultValue(true).build();
-  iotwebconf::IntTParameter<int8_t> brightness_level =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("brightness_level").label("Brightness level (1-10)").defaultValue(DEF_BRIGHTNESS_LEVEL).min(1).max(10).step(1).placeholder("1(low)..10(high)").build();
-  iotwebconf::IntTParameter<int8_t> text_scroll_speed =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("text_scroll_speed").label("Text scroll speed (1-10)").defaultValue(DEF_SCROLL_SPEED).min(1).max(10).step(1).placeholder("1(low)..10(high)").build();
-  iotwebconf::ColorTParameter system_color =
-    iotwebconf::Builder<iotwebconf::ColorTParameter>("system_color").label("Choose system messages text color").defaultValue(DEF_SYSTEM_COLOR).build();
-  iotwebconf::CheckboxTParameter show_date =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_date").label("Display the current date").defaultValue(true).build();
-  iotwebconf::ColorTParameter date_color =
-    iotwebconf::Builder<iotwebconf::ColorTParameter>("date_color").label("Choose date color").defaultValue(DEF_DATE_COLOR).build();
-  iotwebconf::IntTParameter<int8_t> date_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("date_interval").label("Display date interval in hours (1-24)").defaultValue(DEF_DATE_INTERVAL).min(1).max(24).step(1).placeholder("1..24(hours)").build();
-  iotwebconf::CheckboxTParameter enable_alertflash =  
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_alertflash").label("Enable screen flashes before notifications").defaultValue(true).build();
+/** Wires parameters, callbacks, OTA support, and the themed config portal. */
+void setupIotWebConf();
 
-//GROUP 2 CLOCK CONFIG
-iotwebconf::ParameterGroup group2 = iotwebconf::ParameterGroup("Clock", "Clock Settings");
-  iotwebconf::CheckboxTParameter twelve_clock=
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("twelve_clock").label("Use 12 Hour Clock").defaultValue(true).build();
-  iotwebconf::CheckboxTParameter enable_fixed_tz =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_fixed_tz").label("Use custom timezone (Disables auto timezone)").defaultValue(false).build();
-  iotwebconf::IntTParameter<int8_t> fixed_offset =   
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("fixed_offset").label("Custom timezone GMT offset hours").defaultValue(0).min(-12).max(12).step(1).placeholder("-12...12").build();
-  iotwebconf::CheckboxTParameter colonflicker =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("colonflicker").label("Enable clock colon flash").defaultValue(true).build();
-  iotwebconf::CheckboxTParameter flickerfast =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("flickerfast").label("Fast clock colon flash (Only works if \"enable colon flash\" is enabled above)").defaultValue(false).build();
-  iotwebconf::CheckboxTParameter enable_clock_color=
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_clock_color").label("Use custom clock color (Disables auto color)").defaultValue(false).build();
-  iotwebconf::ColorTParameter clock_color =
-    iotwebconf::Builder<iotwebconf::ColorTParameter>("clock_color").label("Custom clock color").defaultValue(DEF_CLOCK_COLOR).build();
+/** Last persisted latitude used before live location services update it. */
+extern iotwebconf::TextTParameter<12> savedlat;
+/** Last persisted longitude used before live location services update it. */
+extern iotwebconf::TextTParameter<12> savedlon;
+/** Last persisted timezone offset used as a local fallback. */
+extern iotwebconf::IntTParameter<int8_t> savedtzoffset;
+/** Last persisted city name used during startup and offline operation. */
+extern iotwebconf::TextTParameter<32> savedcity;
+/** Last persisted state or province used during startup and offline operation. */
+extern iotwebconf::TextTParameter<32> savedstate;
+/** Last persisted country used during startup and offline operation. */
+extern iotwebconf::TextTParameter<32> savedcountry;
+/** Requests a factory reset when the next configuration save completes. */
+extern iotwebconf::CheckboxTParameter resetdefaults;
+/** Enables verbose serial logging intended for maintenance and debugging. */
+extern iotwebconf::CheckboxTParameter serialdebug;
+/** API key for the ipgeolocation.io location/timezone fallback service. */
+extern iotwebconf::TextTParameter<33> ipgeoapi;
+/** API key for OpenWeather weather, geocode, and AQI services. */
+extern iotwebconf::TextTParameter<33> weatherapi;
 
-// GROUP 3 CURRENT TEMP CONFIG
-iotwebconf::ParameterGroup group3 = iotwebconf::ParameterGroup("CurrentTemp", "Current Temp");
-  iotwebconf::CheckboxTParameter show_current_temp =
-      iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_current_temp").label("Display current temperature").defaultValue(true).build();
-  iotwebconf::CheckboxTParameter enable_temp_color =  
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_temp_color").label("Use custom temperature color (Disables auto color)").defaultValue(false).build();
-  iotwebconf::ColorTParameter temp_color =
-    iotwebconf::Builder<iotwebconf::ColorTParameter>("temp_color").label("Custom temperature color").defaultValue(DEF_TEMP_COLOR).build();
-  iotwebconf::IntTParameter<int8_t> current_temp_interval =
-      iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("current_temp_interval").label("Current temperature display interval in minutes (1-120)").defaultValue(DEF_TEMP_INTERVAL).min(1).max(120).step(1).placeholder("1(min)..120(min)").build();
+/** Display-related configuration section shown on the web settings page. */
+extern iotwebconf::ParameterGroup group1;
+/** Selects imperial units instead of metric units. */
+extern iotwebconf::CheckboxTParameter imperial;
+/** User-selected brightness bias applied on top of ambient-light control. */
+extern iotwebconf::IntTParameter<int8_t> brightness_level;
+/** Base scroll speed for ticker-style text messages. */
+extern iotwebconf::IntTParameter<int8_t> text_scroll_speed;
+/** Default text color used by system and maintenance messages. */
+extern iotwebconf::ColorTParameter system_color;
+/** Enables rotating date messages in the display schedule. */
+extern iotwebconf::CheckboxTParameter show_date;
+/** Text color used for date messages. */
+extern iotwebconf::ColorTParameter date_color;
+/** Interval between date-message presentations. */
+extern iotwebconf::IntTParameter<int8_t> date_interval;
+/** Enables fullscreen flashes before selected notifications. */
+extern iotwebconf::CheckboxTParameter enable_alertflash;
 
-// GROUP 4 CURRENT WEATHER CONFIG
-iotwebconf::ParameterGroup group4 = iotwebconf::ParameterGroup("CurrentWeather", "Current Weather");
-  iotwebconf::CheckboxTParameter show_current_weather =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_current_weather").label("Display current weather conditions").defaultValue(true).build();
-  iotwebconf::ColorTParameter current_weather_color =
-    iotwebconf::Builder<iotwebconf::ColorTParameter>("current_weather_color").label("Current conditions text color").defaultValue(DEF_WEATHER_COLOR).build();
-  iotwebconf::IntTParameter<int8_t> current_weather_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("current_weather_interval").label("Current conditions display interval in hours (1-24)").defaultValue(DEF_WEATHER_INTERVAL).min(1).max(24).step(1).placeholder("1(min)..24(hours)").build();
+/** Clock-related configuration section shown on the web settings page. */
+extern iotwebconf::ParameterGroup group2;
+/** Selects 12-hour clock formatting instead of 24-hour time. */
+extern iotwebconf::CheckboxTParameter twelve_clock;
+/** Forces a fixed timezone offset instead of automatic timezone detection. */
+extern iotwebconf::CheckboxTParameter enable_fixed_tz;
+/** User-selected timezone offset used when fixed timezone mode is enabled. */
+extern iotwebconf::IntTParameter<int8_t> fixed_offset;
+/** Enables blinking of the colon between the clock digits. */
+extern iotwebconf::CheckboxTParameter colonflicker;
+/** Speeds up the colon blink cadence when blinking is enabled. */
+extern iotwebconf::CheckboxTParameter flickerfast;
+/** Locks the clock digits to a custom color instead of auto hue logic. */
+extern iotwebconf::CheckboxTParameter enable_clock_color;
+/** Custom color used by the clock digits when auto hue is disabled. */
+extern iotwebconf::ColorTParameter clock_color;
 
-  // GROUP 5 DAY WEATHER CONFIG
-  iotwebconf::ParameterGroup group5 = iotwebconf::ParameterGroup("DailyWeather", "Daily Weather");
-  iotwebconf::CheckboxTParameter show_daily_weather =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_daily_weather").label("Display daily weather conditions").defaultValue(true).build();
-  iotwebconf::ColorTParameter daily_weather_color =
-    iotwebconf::Builder<iotwebconf::ColorTParameter>("daily_weather_color").label("Daily conditions text color").defaultValue(DEF_DAILY_COLOR).build();
-  iotwebconf::IntTParameter<int8_t> daily_weather_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("daily_weather_interval").label("Daily conditions display interval in hours (1-24)").defaultValue(DEF_DAILY_INTERVAL).min(1).max(24).step(1).placeholder("1(hour)..24(hours)").build();
+/** Current-temperature configuration section. */
+extern iotwebconf::ParameterGroup group3;
+/** Enables the standalone current-temperature display block. */
+extern iotwebconf::CheckboxTParameter show_current_temp;
+/** Locks temperature rendering to a custom color instead of auto hue logic. */
+extern iotwebconf::CheckboxTParameter enable_temp_color;
+/** Custom color used by temperature rendering when auto hue is disabled. */
+extern iotwebconf::ColorTParameter temp_color;
+/** Interval between current-temperature displays. */
+extern iotwebconf::IntTParameter<int8_t> current_temp_interval;
+/** Duration that the current-temperature block remains visible once shown. */
+extern iotwebconf::IntTParameter<int8_t> current_temp_duration;
 
-// GROUP 6 AIR QUALITY CONFIG
-iotwebconf::ParameterGroup group6 = iotwebconf::ParameterGroup("AQI", "Air Quality");
-  iotwebconf::CheckboxTParameter show_aqi =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_aqi").label("Display air quality details").defaultValue(true).build();
-  iotwebconf::ColorTParameter aqi_color =
-    iotwebconf::Builder<iotwebconf::ColorTParameter>("aqi_color").label("Custom air quality color").defaultValue(DEF_AQI_COLOR).build();
-  iotwebconf::CheckboxTParameter enable_aqi_color =  
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_aqi_color").label("Use custom air quality color (Disables auto color)").defaultValue(false).build();
-  iotwebconf::IntTParameter<int8_t> aqi_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("aqi_interval").label("Air quality display interval in minutes (1-120)").defaultValue(DEF_AQI_INTERVAL).min(1).max(120).step(1).placeholder("1(min)..120(min)").build();
-  iotwebconf::IntTParameter<int8_t> alert_interval =
-    iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("alert_interval").label("Weather alert display interval in minutes (1-60)").defaultValue(DEF_ALERT_INTERVAL).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
+/** Current-weather configuration section. */
+extern iotwebconf::ParameterGroup group4;
+/** Enables the current-conditions weather summary. */
+extern iotwebconf::CheckboxTParameter show_current_weather;
+/** Text color used by current-conditions weather messages. */
+extern iotwebconf::ColorTParameter current_weather_color;
+/** Interval between current-weather presentations. */
+extern iotwebconf::IntTParameter<int8_t> current_weather_interval;
 
-// GROUP 7 STATUS LEDS
-iotwebconf::ParameterGroup group7 = iotwebconf::ParameterGroup("Status", "Status LEDs");
-  iotwebconf::CheckboxTParameter enable_system_status =  
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_system_status").label("Enable system status LED (Bottom left)").defaultValue(true).build();
-  iotwebconf::CheckboxTParameter enable_aqi_status =  
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_aqi_status").label("Enable Air Quality status LED (Top Left)").defaultValue(true).build();
-  iotwebconf::CheckboxTParameter enable_uvi_status =  
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_uvi_status").label("Enable UV Index status LED (Top Right)").defaultValue(true).build();
-  iotwebconf::CheckboxTParameter green_status =  
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("green_status").label("Use green instead of black/off for good/low status leds").defaultValue(false).build();
+/** Daily-weather configuration section. */
+extern iotwebconf::ParameterGroup group5;
+/** Enables the daily forecast summary display. */
+extern iotwebconf::CheckboxTParameter show_daily_weather;
+/** Text color used by daily forecast messages. */
+extern iotwebconf::ColorTParameter daily_weather_color;
+/** Interval between daily forecast presentations. */
+extern iotwebconf::IntTParameter<int8_t> daily_weather_interval;
 
-// GROUP 7 SUN CONFIG
-iotwebconf::ParameterGroup group8 = iotwebconf::ParameterGroup("Sun", "Sunrise/Sunset");
-  iotwebconf::CheckboxTParameter show_sunrise =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_sunrise").label("Display message on sunrise").defaultValue(true).build();
-  iotwebconf::ColorTParameter sunrise_color =
-    iotwebconf::Builder<iotwebconf::ColorTParameter>("sunrise_color").label("Sunrise message color").defaultValue(DEF_AQI_COLOR).build();
-  iotwebconf::TextTParameter<128> sunrise_message =
-    iotwebconf::Builder<iotwebconf::TextTParameter<128>>("sunrise_message").label("Message to display at sunrise").defaultValue("Good morning, the sun has risen").build();
-  iotwebconf::CheckboxTParameter show_sunset =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_sunset").label("Display message on sunset").defaultValue(true).build();
-  iotwebconf::ColorTParameter sunset_color =
-    iotwebconf::Builder<iotwebconf::ColorTParameter>("sunset_color").label("Sunset message color").defaultValue(DEF_AQI_COLOR).build();
-  iotwebconf::TextTParameter<128> sunset_message =
-    iotwebconf::Builder<iotwebconf::TextTParameter<128>>("sunset_message").label("Message to display at sunset").defaultValue("Good evening, the sun has set").build();
+/** Air-quality configuration section. */
+extern iotwebconf::ParameterGroup group6;
+/** Enables the air-quality summary display. */
+extern iotwebconf::CheckboxTParameter show_aqi;
+/** Custom text color used by AQI messages when auto color is disabled. */
+extern iotwebconf::ColorTParameter aqi_color;
+/** Locks AQI rendering to a custom color instead of AQI bucket colors. */
+extern iotwebconf::CheckboxTParameter enable_aqi_color;
+/** Interval between air-quality presentations. */
+extern iotwebconf::IntTParameter<int8_t> aqi_interval;
+/** Interval between alert-display opportunities. */
+extern iotwebconf::IntTParameter<int8_t> alert_interval;
 
-// GROUP 8 LOCATION CONFIG
-iotwebconf::ParameterGroup group9 = iotwebconf::ParameterGroup("Location", "Location Settings");
-  iotwebconf::CheckboxTParameter show_loc_change =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_loc_change").label("Display new location on major location change").defaultValue(true).build();
-  iotwebconf::CheckboxTParameter enable_fixed_loc =
-    iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_fixed_loc").label("Use custom location (Disables auto location)").defaultValue(false).build();
-  iotwebconf::TextTParameter<12> fixedLat =
-    iotwebconf::Builder<iotwebconf::TextTParameter<12>>("fixedLat").label("Custom latitude").defaultValue("").build();
-  iotwebconf::TextTParameter<12> fixedLon =
-    iotwebconf::Builder<iotwebconf::TextTParameter<12>>("fixedLon").label("Custom longitude").defaultValue("").build();
+/** Status-LED configuration section. */
+extern iotwebconf::ParameterGroup group7;
+/** Enables the lower-left system-state status pixel. */
+extern iotwebconf::CheckboxTParameter enable_system_status;
+/** Enables the upper-left AQI status pixel. */
+extern iotwebconf::CheckboxTParameter enable_aqi_status;
+/** Enables the upper-right UV-index status pixel. */
+extern iotwebconf::CheckboxTParameter enable_uvi_status;
+/** Uses green instead of off for good/low status conditions. */
+extern iotwebconf::CheckboxTParameter green_status;
 
-// IotWebConf User custom settings reference
-// String savedlat;
-// String savedlon;
-// int8_t savedtzoffset;
-// String savedcity;
-// String savedstate;
-// String savedcountry;
-// bool debugserial
-// String weatherapi;                  // OpenWeather API Key
-// String ipgeoapi                     // IP Geolocation API
+/** Sunrise and sunset notification section. */
+extern iotwebconf::ParameterGroup group8;
+/** Enables a message when the local sunrise time is reached. */
+extern iotwebconf::CheckboxTParameter show_sunrise;
+/** Text color used by sunrise notifications. */
+extern iotwebconf::ColorTParameter sunrise_color;
+/** Message text shown when sunrise occurs. */
+extern iotwebconf::TextTParameter<128> sunrise_message;
+/** Enables a message when the local sunset time is reached. */
+extern iotwebconf::CheckboxTParameter show_sunset;
+/** Text color used by sunset notifications. */
+extern iotwebconf::ColorTParameter sunset_color;
+/** Message text shown when sunset occurs. */
+extern iotwebconf::TextTParameter<128> sunset_message;
 
-// GROUP 1 (Display)
-// uint8_t brightness_level;           // 1 low - 3 high
-// uint8_t text_scroll_speed;          // 1 slow - 10 fast
-// color systemcolor;                  // system messages color
-// bool imperial                       // use imperial units
-// bool enable_alertflash              // disable alertflash
-// bool show_date;                     // show date
-// color datecolor                     // date color
-// int8_t show_date_interval;          // show date interval in hours
-// uint8_t alert_show_interval;        // Time between weather alert displays
-
-// GROUP 2 (Clock)
-// bool twelve_clock                   // enable 12 hour clock
-// bool colonflicker;                  // flicker the colon ;)
-// bool flickerfast;                   // flicker fast
-// bool use_fixed_clockcolor           // use fixed clock color
-// color fixed_clockcolor              // fixed clock color
-// bool used_fixed_tz;                 // Use fixed Timezone
-// String fixedTz;                     // Fixed Timezone
-
-// GROUP 3 (Curent Weather)
-// bool show_current_weather;          // Show current weather toggle
-// color weather_color                 // Weather text color
-// bool use_fixed_tempcolor            // used fixed temp color
-// color fixed_tempcolor               // fixed temp color
-// uint8_t weather_show_interval;      // Time between current weather displays
-
-// GROUP 4 (Day Weather)
-// bool show_weather_daily
-// color weather_color_daily           // Weather text color
-// uint8_t weather_show_daily_interval;// Time between day weather displays
-
-// GROUP 5 (Air Quality)
-// bool show_airquality                // display aqi details
-// bool use_fixed_aqicolor
-// color airquality_color              // aqi detail text color
-// uint8_t airquality_show_interval;   // Time between aqi detail displays
-
-// GROUP 6 (Status LEDS)
-// bool enable_system_status            // enable status bottom left
-// bool enable_aqi_status               // enable aqi top left
-// bool enable_uvi_status               // enable uvi top right
-// bool green_status                    // enable green for good/low status (istead of off/black)
-
-// GROUP 7 (Sunrise/Sunset)
-// bool enable_sunrise
-// color sunrise_color
-// char sunrise message
-// bool enable_sunset
-// color sunset_color
-// char sunset message
-
-
-// GROUP 8 (Location)
-// bool display_loc_change;            // Display location on major change
-// bool used_fixed_loc;                // Use fixed GPS coordinates
-// String fixedLat;                    // Fixed GPS latitude
-// String fixedLon;                    // Fixed GPS Longitude
-
+/** Location-override configuration section. */
+extern iotwebconf::ParameterGroup group9;
+/** Shows a notification when the detected location changes significantly. */
+extern iotwebconf::CheckboxTParameter show_loc_change;
+/** Forces a fixed latitude/longitude instead of automatic location updates. */
+extern iotwebconf::CheckboxTParameter enable_fixed_loc;
+/** User-entered latitude used when fixed-location mode is enabled. */
+extern iotwebconf::TextTParameter<12> fixedLat;
+/** User-entered longitude used when fixed-location mode is enabled. */
+extern iotwebconf::TextTParameter<12> fixedLon;

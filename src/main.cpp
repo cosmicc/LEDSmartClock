@@ -6,6 +6,49 @@
 // DO NOT USE DELAYS OR SLEEPS EVER! This breaks systemclock (Everything is coroutines now)
 
 #include "main.h"
+#include "bitmaps.h"
+#include "coroutines.h"
+
+namespace
+{
+/** Formats the remaining time until the next scheduled display for debug output. */
+String nextShowDebug(acetime_t now, acetime_t lastShown, uint32_t intervalSeconds)
+{
+  acetime_t nextDue = lastShown + static_cast<acetime_t>(intervalSeconds);
+  if (nextDue <= now)
+    return F("Ready now");
+
+  return String(F("in ")) + elapsedTime(static_cast<uint32_t>(nextDue - now));
+}
+
+/** Returns a bounded random startup offset so hourly jobs do not align exactly. */
+uint32_t getStartupShowStaggerSeconds(uint32_t intervalSeconds)
+{
+  if (intervalSeconds < T1M)
+    return 0;
+
+  uint32_t staggerCap = intervalSeconds / 4U;
+  staggerCap = min(staggerCap, 15U * 60U);
+  staggerCap = max(staggerCap, 30U);
+  return esp_random() % (staggerCap + 1U);
+}
+
+/** Seeds a display schedule so the first run waits a full interval plus a small stagger. */
+acetime_t seedLastShown(acetime_t bootTime, uint32_t intervalSeconds)
+{
+  return bootTime + static_cast<acetime_t>(getStartupShowStaggerSeconds(intervalSeconds));
+}
+
+/** Initializes the non-clock display schedules after boot. */
+void seedDisplaySchedules()
+{
+  lastshown.date = seedLastShown(runtimeState.bootTime, static_cast<uint32_t>(date_interval.value()) * T1H);
+  lastshown.currenttemp = seedLastShown(runtimeState.bootTime, static_cast<uint32_t>(current_temp_interval.value()) * T1M);
+  lastshown.currentweather = seedLastShown(runtimeState.bootTime, static_cast<uint32_t>(current_weather_interval.value()) * T1H);
+  lastshown.dayweather = seedLastShown(runtimeState.bootTime, static_cast<uint32_t>(daily_weather_interval.value()) * T1H);
+  lastshown.aqi = seedLastShown(runtimeState.bootTime, static_cast<uint32_t>(aqi_interval.value()) * T1M);
+}
+} // namespace
 
 extern "C" void app_main()
 {
@@ -23,86 +66,10 @@ extern "C" void app_main()
   gpsClock.setup();
   printSystemZonedTime();
   ESP_EARLY_LOGD(TAG, "Initializing IotWebConf...");
-  iotWebConf.addSystemParameter(&serialdebug);
-  iotWebConf.addSystemParameter(&resetdefaults);
-  iotWebConf.addSystemParameter(&ipgeoapi);
-  iotWebConf.addSystemParameter(&weatherapi);
-  iotWebConf.addHiddenParameter(&savedtzoffset);
-  iotWebConf.addHiddenParameter(&savedlat);
-  iotWebConf.addHiddenParameter(&savedlon);
-  iotWebConf.addHiddenParameter(&savedcity);
-  iotWebConf.addHiddenParameter(&savedstate);
-  iotWebConf.addHiddenParameter(&savedcountry);
-  group1.addItem(&brightness_level);
-  group1.addItem(&text_scroll_speed);
-  group1.addItem(&system_color);
-  group1.addItem(&imperial);
-  group1.addItem(&alert_interval);
-  group1.addItem(&enable_alertflash);
-  group1.addItem(&show_date);
-  group1.addItem(&date_color);
-  group1.addItem(&date_interval);
-  group2.addItem(&twelve_clock);
-  group2.addItem(&colonflicker);
-  group2.addItem(&flickerfast);
-  group2.addItem(&enable_clock_color);
-  group2.addItem(&clock_color);
-  group2.addItem(&enable_fixed_tz);
-  group2.addItem(&fixed_offset);
-  group3.addItem(&show_current_temp);
-  group3.addItem(&enable_temp_color);
-  group3.addItem(&temp_color);
-  group3.addItem(&current_temp_interval);
-  group4.addItem(&show_current_weather);
-  group4.addItem(&current_weather_color);
-  group4.addItem(&current_weather_interval);
-  group5.addItem(&show_daily_weather);
-  group5.addItem(&daily_weather_color);
-  group5.addItem(&daily_weather_interval);
-  group6.addItem(&show_aqi);
-  group6.addItem(&enable_aqi_color);
-  group6.addItem(&aqi_color);
-  group6.addItem(&aqi_interval);
-  group7.addItem(&enable_system_status);
-  group7.addItem(&enable_aqi_status);
-  group7.addItem(&enable_uvi_status);
-  group7.addItem(&green_status);
-  group8.addItem(&show_sunrise);
-  group8.addItem(&sunrise_color);
-  group8.addItem(&sunrise_message);
-  group8.addItem(&show_sunset);
-  group8.addItem(&sunset_color);
-  group8.addItem(&sunset_message);
-  group9.addItem(&show_loc_change);
-  group9.addItem(&enable_fixed_loc);
-  group9.addItem(&fixedLat);
-  group9.addItem(&fixedLon);
-  iotWebConf.addParameterGroup(&group1);
-  iotWebConf.addParameterGroup(&group2);
-  iotWebConf.addParameterGroup(&group3);
-  iotWebConf.addParameterGroup(&group4);
-  iotWebConf.addParameterGroup(&group5);
-  iotWebConf.addParameterGroup(&group6);
-  iotWebConf.addParameterGroup(&group7);
-  iotWebConf.addParameterGroup(&group8);
-  iotWebConf.addParameterGroup(&group9);
-  iotWebConf.getApTimeoutParameter()->visible = true;
-  // iotWebConf.setApConnectionHandler(&connectAp);
-  iotWebConf.setWifiConnectionHandler(&connectWifi);
-  iotWebConf.setWifiConnectionCallback(&wifiConnected);
-  iotWebConf.setConfigSavedCallback(&configSaved);
-  iotWebConf.setFormValidator(&formValidator);
-  iotWebConf.setStatusPin(STATUS_PIN);
-  iotWebConf.setConfigPin(CONFIG_PIN);
-  iotWebConf.setupUpdateServer(
-      [](const char *updatePath)
-      { httpUpdater.setup(&server, updatePath); },
-      [](const char *userName, char *password)
-      { httpUpdater.updateCredentials(userName, password); });
-  iotWebConf.init();
+  setupIotWebConf();
   ESP_EARLY_LOGD(TAG, "Initializing Light Sensor...");
-  userbrightness = calcbright(brightness_level.value());
-  current.brightness = userbrightness;
+  runtimeState.userBrightness = calcbright(brightness_level.value());
+  current.brightness = runtimeState.userBrightness;
   Wire.begin(TSL2561_SDA, TSL2561_SCL);
   Tsl.begin();
   while (!Tsl.available())
@@ -144,35 +111,28 @@ extern "C" void app_main()
 #endif
   ipgeo.tzoffset = 127;
   processTimezone();
-  server.on("/", handleRoot);
-  server.on("/config", []
-            { iotWebConf.handleConfig(); });
-  server.onNotFound([]()
-                    { iotWebConf.handleNotFound(); });
+  registerWebRoutes();
   cotimer.scrollspeed = map(text_scroll_speed.value(), 1, 10, 100, 10);
   ESP_EARLY_LOGD(TAG, "IotWebConf initilization is complete. Web server is ready.");
   ESP_EARLY_LOGD(TAG, "Setting class timestamps...");
-  bootTime = systemClock.getNow();
-  lastntpcheck = systemClock.getNow() - 3601;
+  runtimeState.bootTime = systemClock.getNow();
+  runtimeState.lastNtpCheck = systemClock.getNow() - 3601;
   cotimer.icontimer = millis(); // reset all delay timers
-  gps.timestamp = bootTime - T1Y + 60;
-  gps.lastcheck = bootTime - T1Y + 60;
-  gps.lockage = bootTime - T1Y + 60;
-  checkweather.lastsuccess = bootTime - T1Y + 60;
-  checkalerts.lastsuccess = bootTime - T1Y + 60;
-  checkipgeo.lastsuccess = bootTime - T1Y + 60;
-  checkaqi.lastsuccess = bootTime - T1Y + 60;
-  checkgeocode.lastsuccess = bootTime - T1Y + 60;
-  checkalerts.lastattempt = bootTime - T1Y + 60;
-  checkweather.lastattempt = bootTime - T1Y + 60;
-  checkipgeo.lastattempt = bootTime - T1Y + 60;
-  checkaqi.lastattempt = bootTime - T1Y + 60;
-  checkgeocode.lastattempt = bootTime - T1Y + 60;
-  lastshown.alerts = bootTime - T1Y + 60;
-  lastshown.dayweather = bootTime;
-  lastshown.date = bootTime;
-  lastshown.currentweather = bootTime;
-  lastshown.aqi = bootTime;
+  gps.timestamp = runtimeState.bootTime - T1Y + 60;
+  gps.lastcheck = runtimeState.bootTime - T1Y + 60;
+  gps.lockage = runtimeState.bootTime - T1Y + 60;
+  checkweather.lastsuccess = runtimeState.bootTime - T1Y + 60;
+  checkalerts.lastsuccess = runtimeState.bootTime - T1Y + 60;
+  checkipgeo.lastsuccess = runtimeState.bootTime - T1Y + 60;
+  checkaqi.lastsuccess = runtimeState.bootTime - T1Y + 60;
+  checkgeocode.lastsuccess = runtimeState.bootTime - T1Y + 60;
+  checkalerts.lastattempt = runtimeState.bootTime - T1Y + 60;
+  checkweather.lastattempt = runtimeState.bootTime - T1Y + 60;
+  checkipgeo.lastattempt = runtimeState.bootTime - T1Y + 60;
+  checkaqi.lastattempt = runtimeState.bootTime - T1Y + 60;
+  checkgeocode.lastattempt = runtimeState.bootTime - T1Y + 60;
+  lastshown.alerts = runtimeState.bootTime - T1Y + 60;
+  seedDisplaySchedules();
   scrolltext.position = mw;
   if (enable_fixed_loc.isChecked())
     ESP_EARLY_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
@@ -181,15 +141,10 @@ extern "C" void app_main()
   showclock.fstop = 250;
   if (flickerfast.isChecked())
     showclock.fstop = 20;
-  ESP_EARLY_LOGD(TAG, "Display initalization complete.");
-  ESP_EARLY_LOGD(TAG, "Setup initialization complete: %d ms", (millis() - init_timer));
-  scrolltext.resetmsgtime = millis() - 60000;
-  displaytoken.resetAllTokens();
-  CoroutineScheduler::setup();
   ESP_EARLY_LOGD(TAG, "Initializing the display...");
   FastLED.addLeds<NEOPIXEL, HSPI_MOSI>(leds, NUMMATRIX).setCorrection(TypicalLEDStrip);
   matrix->begin();
-  matrix->setBrightness(userbrightness);
+  matrix->setBrightness(runtimeState.userBrightness);
   matrix->setTextWrap(false);
   ESP_EARLY_LOGD(TAG, "Display initalization complete.");
   ESP_EARLY_LOGD(TAG, "Setup initialization complete: %d ms", (millis() - init_timer));
@@ -213,18 +168,18 @@ void configSaved()
 {
   updateCoords();
   processTimezone();
-  buildURLs();
+  rebuildApiUrls();
   showclock.fstop = 250;
   if (flickerfast.isChecked())
     showclock.fstop = 20;
   cotimer.scrollspeed = map(text_scroll_speed.value(), 1, 10, 100, 10);
-  userbrightness = calcbright(brightness_level.value());
+  runtimeState.userBrightness = calcbright(brightness_level.value());
   ESP_LOGI(TAG, "Configuration was updated.");
   if (resetdefaults.isChecked())
     showready.reset = true;
   if (!serialdebug.isChecked())
     printf("Serial debug info has been disabled.\n");
-  firsttimefailsafe = false;
+  runtimeState.firstTimeFailsafe = false;
 }
 
 // This function is called when the WiFi module is connected to the network.
@@ -264,57 +219,40 @@ bool isNextAttemptReady(acetime_t lastattempt)
   return (systemClock.getNow() - lastattempt) > T1M;
 }
 
-bool isHttpReady()
-{
-  // Returns true if httpbusy is false, IotWebConf is in state 4, and displaytoken.isReady(0)
-  return !httpbusy && iotWebConf.getState() == 4 && displaytoken.isReady(0);
-}
-
-// Function for sending HTTP request
-bool httpRequest(uint8_t index)
-{
-  ESP_LOGD(TAG, "Sending request [%d]: %s", index, urls[index]); // Log the request
-  request.begin(urls[index]);                                    // Begin the request
-  return true;                                                   // Return true to denote successful request
-}
-
 // Returns true if the current coordinates are valid
 bool isCoordsValid()
 {
-  return (current.lat != 0 && current.lon != 0);
+  return !(current.lat == 0.0 && current.lon == 0.0);
 }
 
 bool isLocationValid(String source)
 {
+  auto hasLocationText = [](const char *value) {
+    return value[0] != '\0' && !(value[0] == '0' && value[1] == '\0');
+  };
+
   bool result = false;
   if (source == "geocode")
   {
-    if (geocode.city[0] != '\0')
+    if (hasLocationText(geocode.city))
       result = true;
   }
   else if (source == "current")
   {
-    if (current.city[0] != '\0')
+    if (hasLocationText(current.city))
       result = true;
   }
   else if (source == "saved")
   {
-    if (savedcity.value()[0] != '\0')
+    if (hasLocationText(savedcity.value()))
       result = true;
   }
   return result;
 }
 
-// checks if apikey is valid by checking its length
-bool isApiValid(char *apikey)
-{
-  return (apikey[0] != '\0' && strlen(apikey) == 32);
-}
-
 void print_debugData()
 {
   acetime_t now = systemClock.getNow();
-  String dtns = elapsedTime((now - lastshown.date) - (date_interval.value() * 60 * 60));
   char tempunit[7];
   char speedunit[7];
   char distanceunit[7];
@@ -332,7 +270,7 @@ void print_debugData()
   }
   printf("[^----------------------------------------------------------------^]\n");
   printf("Current Time: %s\n", getSystemZonedTimestamp().c_str());
-  printf("Boot Time: %s\n", getCustomZonedTimestamp(bootTime).c_str());
+  printf("Boot Time: %s\n", getCustomZonedTimestamp(runtimeState.bootTime).c_str());
   printf("Sunrise Time: %s\n", getCustomZonedTimestamp(weather.day.sunrise).c_str());
   printf("Sunset Time: %s\n", getCustomZonedTimestamp(weather.day.sunset).c_str());
   printf("Moonrise Time: %s\n", getCustomZonedTimestamp(weather.day.moonrise).c_str());
@@ -343,20 +281,20 @@ void print_debugData()
   else
     printf("Currently not known\n");
   printf("[^----------------------------------------------------------------^]\n");
-  printf("Firmware - Version:v%d.%d.%d | Config:v%s\n", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_CONFIG);
-  printf("System - RawLux:%d | Lux:%d | UsrBright:+%d | Brightness:%d | ClockHue:%d | TempHue:%d | WifiState:%s | HttpReady:%s | IP:%s | Uptime:%s\n", current.rawlux, current.lux, userbrightness, current.brightness, current.clockhue, current.temphue, (connection_state[iotWebConf.getState()]), (yesno[isHttpReady()]), ((WiFi.localIP()).toString()).c_str(), elapsedTime(now - bootTime).c_str());
-  printf("Clock - Status:%s | TimeSource:%s | CurrentTZ:%d | NtpReady:%s | Skew:%d Seconds | LastAttempt:%s | NextAttempt:%s | NextNtp:%s | LastSync:%s\n", clock_status[systemClock.getSyncStatusCode()], timesource, current.tzoffset, yesno[gpsClock.ntpIsReady], systemClock.getClockSkew(), elapsedTime(systemClock.getSecondsSinceSyncAttempt()).c_str(), elapsedTime(systemClock.getSecondsToSyncAttempt()).c_str(), elapsedTime((now - lastntpcheck) - NTPCHECKTIME * 60).c_str(), elapsedTime(now - systemClock.getLastSyncTime()).c_str());
+  printf("Firmware - Version:v%s | ConfigSchema:v%s\n", VERSION_SEMVER, CONFIG_VERSION);
+  printf("System - RawLux:%d | Lux:%d | UsrBright:+%d | Brightness:%d | ClockHue:%d | TempHue:%d | WifiState:%s | HttpReady:%s | IP:%s | Uptime:%s\n", current.rawlux, current.lux, runtimeState.userBrightness, current.brightness, current.clockhue, current.temphue, (connection_state[iotWebConf.getState()]), (yesno[isHttpReady()]), ((WiFi.localIP()).toString()).c_str(), elapsedTime(now - runtimeState.bootTime).c_str());
+  printf("Clock - Status:%s | TimeSource:%s | CurrentTZ:%d | NtpReady:%s | Skew:%d Seconds | LastAttempt:%s | NextAttempt:%s | NextNtp:%s | LastSync:%s\n", clock_status[systemClock.getSyncStatusCode()], runtimeState.timeSource, current.tzoffset, yesno[gpsClock.ntpIsReady], systemClock.getClockSkew(), elapsedTime(systemClock.getSecondsSinceSyncAttempt()).c_str(), elapsedTime(systemClock.getSecondsToSyncAttempt()).c_str(), elapsedTime((now - runtimeState.lastNtpCheck) - NTPCHECKTIME * 60).c_str(), elapsedTime(now - systemClock.getLastSyncTime()).c_str());
   printf("Loc - SavedLat:%.5f | SavedLon:%.5f | CurrentLat:%.5f | CurrentLon:%.5f | LocValid:%s\n", atof(savedlat.value()), atof(savedlon.value()), current.lat, current.lon, yesno[isCoordsValid()]);
   printf("IPGeo - Complete:%s | Lat:%.5f | Lon:%.5f | TZoffset:%d | Timezone:%s | ValidApi:%s | Retries:%d | LastAttempt:%s | LastSuccess:%s\n", yesno[checkipgeo.complete], ipgeo.lat, ipgeo.lon, ipgeo.tzoffset, ipgeo.timezone, yesno[isApiValid(ipgeoapi.value())], checkipgeo.retries, elapsedTime(now - checkipgeo.lastattempt).c_str(), elapsedTime(now - checkipgeo.lastsuccess).c_str());
-  printf("GPS - Chars:%s | With-Fix:%s | Failed:%s | Passed:%s | Sats:%d | Hdop:%d | Elev:%d | Lat:%.5f | Lon:%.5f | FixAge:%s | LocAge:%s\n", formatLargeNumber(GPS.charsProcessed()).c_str(), formatLargeNumber(GPS.sentencesWithFix()).c_str(), formatLargeNumber(GPS.failedChecksum()).c_str(), formatLargeNumber(GPS.passedChecksum()).c_str(), gps.sats, gps.hdop, gps.elevation, gps.lat, gps.lon, elapsedTime(now - gps.timestamp), elapsedTime(now - gps.lockage));
-  printf("Weather Current - Icon:%s | Temp:%d%s | FeelsLike:%d%s | Humidity:%d%% | Clouds:%d%% | Wind:%d/%d%s | UVI:%d(%s) | Desc:%s | ValidApi:%s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", weather.current.icon, weather.current.temp, tempunit, weather.current.feelsLike, tempunit, weather.current.humidity, weather.current.cloudcover, weather.current.windSpeed, weather.current.windGust, speedunit, weather.current.uvi, uv_index(weather.current.uvi).c_str(), weather.current.description, yesno[isApiValid(weatherapi.value())], checkweather.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkweather.lastattempt).c_str(), elapsedTime(now - checkweather.lastsuccess).c_str(), elapsedTime((now - lastshown.currentweather) - (current_weather_interval.value() * 60)).c_str());
-  printf("Weather Day - Icon:%s | LoTemp:%d%s | HiTemp:%d%s | Humidity:%d%% | Clouds:%d%% | Wind: %d/%d%s | UVI:%d(%s) | MoonPhase:%.2f | Desc: %s | NextShow:%s\n", weather.day.icon, weather.day.tempMin, tempunit, weather.day.tempMax, tempunit, weather.day.humidity, weather.day.cloudcover, weather.day.windSpeed, weather.day.windGust, speedunit, weather.day.uvi, uv_index(weather.day.uvi).c_str(), weather.day.moonPhase, weather.current.description, elapsedTime((now - lastshown.dayweather) - (daily_weather_interval.value() * 60 * 60)).c_str());
-  printf("AQI Current - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f | Desc: %s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", air_quality[aqi.current.aqi], aqi.current.co, aqi.current.no, aqi.current.no2, aqi.current.o3, aqi.current.so2, aqi.current.pm10, aqi.current.pm25, aqi.current.nh3, (aqi.current.description).c_str(), checkaqi.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkaqi.lastattempt).c_str(), elapsedTime(now - checkaqi.lastsuccess).c_str(), elapsedTime((now - lastshown.aqi) - (aqi_interval.value() * 60)).c_str());
-  printf("AQI Day - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f\n", air_quality[aqi.day.aqi], aqi.day.co, aqi.day.no, aqi.day.no2, aqi.day.o3, aqi.day.so2, aqi.day.pm10, aqi.day.pm25, aqi.day.nh3);
+  printf("GPS - Chars:%s | With-Fix:%s | Failed:%s | Passed:%s | Sats:%d | Hdop:%d | Elev:%d | Lat:%.5f | Lon:%.5f | FixAge:%s | LocAge:%s\n", formatLargeNumber(GPS.charsProcessed()).c_str(), formatLargeNumber(GPS.sentencesWithFix()).c_str(), formatLargeNumber(GPS.failedChecksum()).c_str(), formatLargeNumber(GPS.passedChecksum()).c_str(), gps.sats, gps.hdop, gps.elevation, gps.lat, gps.lon, elapsedTime(now - gps.timestamp).c_str(), elapsedTime(now - gps.lockage).c_str());
+  printf("Weather Current - Icon:%s | Temp:%d%s | FeelsLike:%d%s | Humidity:%d%% | Clouds:%d%% | Wind:%d/%d%s | UVI:%d(%s) | Desc:%s | ValidApi:%s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", weather.current.icon, weather.current.temp, tempunit, weather.current.feelsLike, tempunit, weather.current.humidity, weather.current.cloudcover, weather.current.windSpeed, weather.current.windGust, speedunit, weather.current.uvi, uv_index(weather.current.uvi).c_str(), weather.current.description, yesno[isApiValid(weatherapi.value())], checkweather.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkweather.lastattempt).c_str(), elapsedTime(now - checkweather.lastsuccess).c_str(), nextShowDebug(now, lastshown.currentweather, static_cast<uint32_t>(current_weather_interval.value()) * T1H).c_str());
+  printf("Weather Day - Icon:%s | LoTemp:%d%s | HiTemp:%d%s | Humidity:%d%% | Clouds:%d%% | Wind: %d/%d%s | UVI:%d(%s) | MoonPhase:%.2f | Desc: %s | NextShow:%s\n", weather.day.icon, weather.day.tempMin, tempunit, weather.day.tempMax, tempunit, weather.day.humidity, weather.day.cloudcover, weather.day.windSpeed, weather.day.windGust, speedunit, weather.day.uvi, uv_index(weather.day.uvi).c_str(), weather.day.moonPhase, weather.current.description, nextShowDebug(now, lastshown.dayweather, static_cast<uint32_t>(daily_weather_interval.value()) * T1H).c_str());
+  printf("AQI Current - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f | Desc: %s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", air_quality[aqi.current.aqi], aqi.current.co, aqi.current.no, aqi.current.no2, aqi.current.o3, aqi.current.so2, aqi.current.pm25, aqi.current.pm10, aqi.current.nh3, (aqi.current.description).c_str(), checkaqi.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkaqi.lastattempt).c_str(), elapsedTime(now - checkaqi.lastsuccess).c_str(), nextShowDebug(now, lastshown.aqi, static_cast<uint32_t>(aqi_interval.value()) * T1M).c_str());
+  printf("AQI Day - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f\n", air_quality[aqi.day.aqi], aqi.day.co, aqi.day.no, aqi.day.no2, aqi.day.o3, aqi.day.so2, aqi.day.pm25, aqi.day.pm10, aqi.day.nh3);
   printf("Alerts - Active:%s | Watch:%s | Warn:%s | Retries:%d | LastAttempt:%s | LastSuccess:%s | LastShown:%s\n", yesno[alerts.active], yesno[alerts.inWatch], yesno[alerts.inWarning], checkalerts.retries, elapsedTime(now - checkalerts.lastattempt).c_str(), elapsedTime(now - checkalerts.lastsuccess).c_str(), elapsedTime(now - lastshown.alerts).c_str());
   printf("[^----------------------------------------------------------------^]\n");
   printf("Main task stack size: %s bytes remaining\n", formatLargeNumber(uxTaskGetStackHighWaterMark(NULL)).c_str());
-  printf("Current Display Tokens: %s\n", displaytoken.showTokens());
+  printf("Current Display Tokens: %s\n", displaytoken.showTokens().c_str());
   printf("[^----------------------------------------------------------------^]\n");
   if (alerts.active)
     printf("*Alert - Status: %s | Severity: %s | Certainty: %s | Urgency: %s | Event: %s | Desc: %s %s\n", alerts.status1, alerts.severity1, alerts.certainty1, alerts.urgency1, alerts.event1, alerts.description1, alerts.instruction1);
@@ -382,37 +320,43 @@ void startScroll(uint16_t color, bool displayicon)
 void processTimezone()
 {
   uint32_t timer = millis();
-  // Get saved offset value
   int16_t savedoffset = savedtzoffset.value();
-  // Check if the user has set a fixed offset in the settings
+  int16_t fixedoffset = fixed_offset.value();
+
+  auto applyTimezoneOffset = [&](int16_t offset, const char *source) {
+    current.tzoffset = offset;
+    current.timezone = TimeZone::forHours(offset);
+    ESP_LOGD(TAG, "Using %s timezone offset: %d", source, offset);
+  };
+
+  auto persistTimezoneOffset = [&](int16_t offset, const char *source) {
+    if (offset == savedoffset)
+      return;
+
+    ESP_LOGI(TAG, "%s timezone [%d] is different than saved timezone [%d], saving new timezone", source, offset, savedoffset);
+    savedtzoffset.value() = offset;
+    savedoffset = offset;
+    iotWebConf.saveConfig();
+  };
+
   if (enable_fixed_tz.isChecked())
   {
-    // If so, save it and set the current timezone with the corresponding TimeZone object
-    current.tzoffset = fixed_offset.value();
-    current.timezone = TimeZone::forHours(fixed_offset.value());
-    ESP_LOGD(TAG, "Using fixed timezone offset: %d", fixed_offset.value());
+    applyTimezoneOffset(fixedoffset, "fixed");
+    persistTimezoneOffset(fixedoffset, "Fixed");
   }
-  // Check if any valid ipgeolocation offset is available
   else if (ipgeo.tzoffset != 127)
   {
-    // If so, save it and set the current timezone with the corresponding TimeZone object
-    current.tzoffset = ipgeo.tzoffset;
-    current.timezone = TimeZone::forHours(ipgeo.tzoffset);
-    ESP_LOGD(TAG, "Using ipgeolocation offset: %d", ipgeo.tzoffset);
-    // Save the new offset to config if it's different from the saved one
-    if (ipgeo.tzoffset != savedoffset)
-    {
-      ESP_LOGI(TAG, "IP Geo timezone [%d] (%s) is different then saved timezone [%d], saving new timezone", ipgeo.tzoffset, ipgeo.timezone, savedoffset);
-      savedtzoffset.value() = ipgeo.tzoffset;
-      iotWebConf.saveConfig();
-    }
+    applyTimezoneOffset(ipgeo.tzoffset, "ip geolocation");
+    persistTimezoneOffset(ipgeo.tzoffset, "IP Geo");
   }
-  // If none of the above conditions is true, we fallback to the saved offset
+  else if (savedoffset != 0 || fixedoffset == 0)
+  {
+    applyTimezoneOffset(savedoffset, "saved");
+  }
   else
   {
-    current.tzoffset = savedoffset;
-    current.timezone = TimeZone::forHours(savedoffset);
-    ESP_LOGD(TAG, "Using saved timezone offset: %d", savedoffset);
+    applyTimezoneOffset(fixedoffset, "configured fallback");
+    persistTimezoneOffset(fixedoffset, "Configured fallback");
   }
   ESP_LOGV(TAG, "Process timezone complete: %lu ms", (millis() - timer));
 }
@@ -450,7 +394,7 @@ void updateLocation()
     ESP_LOGD(TAG, "No valid locations found");
   }
   // Save the new location if needed
-  if ((String)savedcity.value() != current.city)
+  if ((String)savedcity.value() != current.city || (String)savedstate.value() != current.state || (String)savedcountry.value() != current.country)
   {
     ESP_LOGI(TAG, "Location not saved, saving new location: %s, %s, %s", current.city, current.state, current.country);
     // Convert city/state/country to char array and save to savedcity/state/country
@@ -463,6 +407,10 @@ void updateLocation()
 
 void updateCoords()
 {
+  auto coordsUnset = [](double lat, double lon) {
+    return lat == 0.0 && lon == 0.0;
+  };
+
   if (enable_fixed_loc.isChecked())
   {
     gps.lat = strtod(fixedLat.value(), NULL);
@@ -471,14 +419,14 @@ void updateCoords()
     current.lon = strtod(fixedLon.value(), NULL);
     strcpy(current.locsource, "User Defined");
   }
-  else if (gps.lon == 0 && ipgeo.lon == 0 && current.lon == 0)
+  else if (coordsUnset(gps.lat, gps.lon) && coordsUnset(ipgeo.lat, ipgeo.lon) && coordsUnset(current.lat, current.lon))
   {
     // Set coordinates to saved location
     current.lat = strtod(savedlat.value(), NULL);
     current.lon = strtod(savedlon.value(), NULL);
     strcpy(current.locsource, "Previous Saved");
   }
-  else if (gps.lon == 0 && ipgeo.lon != 0 && current.lon == 0)
+  else if (coordsUnset(gps.lat, gps.lon) && !coordsUnset(ipgeo.lat, ipgeo.lon) && coordsUnset(current.lat, current.lon))
   {
     // Set coordinates to ip geolocation
     current.lat = ipgeo.lat;
@@ -486,7 +434,7 @@ void updateCoords()
     strcpy(current.locsource, "IP Geolocation");
     ESP_LOGI(TAG, "Using IPGeo location information: Lat: %lf Lon: %lf", (ipgeo.lat), (ipgeo.lon));
   }
-  else if (gps.lon != 0)
+  else if (!coordsUnset(gps.lat, gps.lon))
   {
     // Set coordinates to gps location
     current.lat = gps.lat;
@@ -506,14 +454,18 @@ void updateCoords()
     iotWebConf.saveConfig();
     checkgeocode.ready = true;
   }
-  // Call buildURLs() to create URLS
-  buildURLs();
+  else if (isCoordsValid() && !isLocationValid("geocode") && !isLocationValid("current"))
+  {
+    checkgeocode.ready = true;
+  }
+  // Rebuild API endpoints after coordinates change.
+  rebuildApiUrls();
 }
 
 void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color)
 {
-  // define the column value based on the position parameter
-  uint8_t pos;
+  // Each digit uses a fixed starting column on the 32x8 matrix.
+  uint8_t pos = 0;
   switch (position)
   {
   case 0:
@@ -528,18 +480,20 @@ void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color)
   case 3:
     pos = 23;
     break; // set to 23 when position is 3
+  default:
+    return;
   }
   // draw the bitmap using column and color parameters
-  matrix->drawBitmap((clock_display_offset) ? (pos - 4) : pos, 0, num[bmp_num], 8, 8, color);
+  matrix->drawBitmap((runtimeState.clockDisplayOffset) ? (pos - 4) : pos, 0, num[bmp_num], 8, 8, color);
 }
 
 void display_showStatus()
 {
-  uint16_t sclr;
-  uint16_t wclr;
-  uint16_t aclr;
-  uint16_t uclr;
-  uint16_t gclr;
+  uint16_t sclr = BLACK;
+  uint16_t wclr = BLACK;
+  uint16_t aclr = BLACK;
+  uint16_t uclr = BLACK;
+  uint16_t gclr = BLACK;
   if (green_status.isChecked())
     gclr = DARKGREEN;
   else
@@ -548,9 +502,9 @@ void display_showStatus()
   // Set the status color
   if (now - systemClock.getLastSyncTime() > (NTPCHECKTIME * 60) + 60)
     sclr = DARKRED;
-  else if (timesource[0] == 'g' && gps.fix && (now - systemClock.getLastSyncTime()) <= 600)
+  else if (runtimeState.timeSource[0] == 'g' && gps.fix && (now - systemClock.getLastSyncTime()) <= 600)
     sclr = BLACK;
-  else if (timesource[0] == 'n' && iotWebConf.getState() == 4)
+  else if (runtimeState.timeSource[0] == 'n' && iotWebConf.getState() == 4)
     sclr = DARKGREEN;
   else if (iotWebConf.getState() <= 2) // boot, apmode, notconfigured
     sclr = DARKMAGENTA;
@@ -715,7 +669,7 @@ void display_temperature()
       current.temphue = NIGHTHUE + (abs(weather.current.feelsLike) / 2);
   }
   tc = hsv2rgb(current.temphue);
-  int xpos;
+  int xpos = 0;
   int digits = (temp == 0) ? 1 : (log10(abs(temp)) + 1);
   bool isneg = false;
   if (temp + abs(temp) == 0)
@@ -731,6 +685,10 @@ void display_temperature()
     xpos = 9;
   xpos = xpos * (digits);
   int score = abs(temp);
+  if (score == 0)
+  {
+    matrix->drawBitmap(xpos, 0, num[0], 8, 8, tc);
+  }
   while (score)
   {
     matrix->drawBitmap(xpos, 0, num[score % 10], 8, 8, tc);
@@ -788,752 +746,33 @@ void getSystemZonedDateString(char *str)
           ldt.day(), ordinal_suffix(ldt.day()), ldt.year());
 }
 
-char *getSystemZonedDateTimeString()
+String getSystemZonedDateTimeString()
 {
-  // Get time from the system
   ZonedDateTime ldt = getSystemZonedTime();
-  // Create buffer for string representation
-  static char buf[100];
-  // Check if 12H format is selected
+  char buf[100];
+
   if (twelve_clock.isChecked())
   {
-    // Get AM/PM notation from the hour
     const char *ap = ldt.hour() > 11 ? "PM" : "AM";
-    // In case of 12H format, adjust the hour
-    uint8_t hour = ldt.hour() > 12 ? ldt.hour() - 12 : ldt.hour();
-    // Construct the string with formatting parameters
+    uint8_t hour = ldt.hour() % 12;
+    if (hour == 0)
+      hour = 12;
+
     sprintf(buf, "%d:%02d%s %s, %s %u%s %04d", hour, ldt.minute(), ap, DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()),
             ldt.day(), ordinal_suffix(ldt.day()), ldt.year());
   }
   else
   {
-    // Construct the string with formatting parameters for 24H formats
     sprintf(buf, "%02d:%02d %s, %s %d%s %04d", ldt.hour(), ldt.minute(), DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()),
             ldt.day(), ordinal_suffix(ldt.day()), ldt.year());
   }
-  // Return the constructed string
-  return buf;
+
+  return String(buf);
 }
 
 uint16_t calcaqi(double c, double i_hi, double i_low, double c_hi, double c_low)
 {
   return (i_hi - i_low) / (c_hi - c_low) * (c - c_low) + i_low;
-}
-
-bool fillAlertsFromJson(String payload)
-{
-  StaticJsonDocument<2048> filter;
-  filter["features"][0]["properties"]["status"] = true;
-  filter["features"][0]["properties"]["severity"] = true;
-  filter["features"][0]["properties"]["certainty"] = true;
-  filter["features"][0]["properties"]["urgency"] = true;
-  filter["features"][0]["properties"]["event"] = true;
-  filter["features"][0]["properties"]["instruction"] = true;
-  filter["features"][0]["properties"]["parameters"]["NWSheadline"] = true;
-  filter["features"][1]["properties"]["status"] = true;
-  filter["features"][1]["properties"]["severity"] = true;
-  filter["features"][1]["properties"]["certainty"] = true;
-  filter["features"][1]["properties"]["urgency"] = true;
-  filter["features"][1]["properties"]["event"] = true;
-  filter["features"][1]["properties"]["instruction"] = true;
-  filter["features"][1]["properties"]["parameters"]["NWSheadline"] = true;
-  filter["features"][2]["properties"]["status"] = true;
-  filter["features"][2]["properties"]["severity"] = true;
-  filter["features"][2]["properties"]["certainty"] = true;
-  filter["features"][2]["properties"]["urgency"] = true;
-  filter["features"][2]["properties"]["event"] = true;
-  filter["features"][2]["properties"]["instruction"] = true;
-  filter["features"][2]["properties"]["parameters"]["NWSheadline"] = true;
-  StaticJsonDocument<8192> doc;
-  DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
-  if (error)
-  {
-    ESP_LOGE(TAG, "Alerts deserializeJson() failed: %s", error.f_str());
-    return false;
-  }
-  JsonObject obj = doc.as<JsonObject>();
-  uint8_t actwatch = 0;
-  uint8_t actwarn = 0;
-  bool result;
-  if (!obj["features"][0].isNull())
-  {
-    if ((obj["features"][0]["properties"]["severity"].as<String>()) != "Unknown")
-    {
-      if ((obj["features"][0]["properties"]["certainty"].as<String>()) == "Observed" || (obj["features"][0]["properties"]["certainty"].as<String>()) == "Likely")
-        actwarn = 1;
-      else if ((obj["features"][0]["properties"]["certainty"].as<String>()) == "Possible")
-        actwatch = 1;
-    }
-    else
-      ESP_LOGD(TAG, "Weather alert 1 received but is of status Unknown, skipping");
-    if (!obj["features"][1].isNull())
-    {
-      if ((obj["features"][1]["properties"]["severity"].as<String>()) != "Unknown")
-      {
-        if ((obj["features"][1]["properties"]["certainty"].as<String>()) == "Observed" || (obj["features"][1]["properties"]["certainty"].as<String>()) == "Likely")
-        {
-          if (actwarn == 0)
-            actwarn = 2;
-        }
-        else if ((obj["features"][1]["properties"]["certainty"].as<String>()) == "Possible")
-          if (actwatch == 0)
-            actwatch = 2;
-      }
-      else
-        ESP_LOGD(TAG, "Weather alert 2 received but is of status Unknown, skipping");
-      if (!obj["features"][2].isNull())
-      {
-        if ((obj["features"][2]["properties"]["severity"].as<String>()) != "Unknown")
-        {
-          if ((obj["features"][2]["properties"]["certainty"].as<String>()) == "Observed" || (obj["features"][2]["properties"]["certainty"].as<String>()) == "Likely")
-          {
-            if (actwarn == 0)
-              actwarn = 3;
-          }
-          else if ((obj["features"][2]["properties"]["certainty"].as<String>()) == "Possible")
-          {
-            if (actwatch == 0)
-              actwatch = 3;
-          }
-        }
-        else
-          ESP_LOGD(TAG, "Weather alert 3 received but is of status Unknown, skipping");
-      }
-    }
-  }
-  if (actwarn > 0)
-  {
-    alerts.inWarning = true;
-    alerts.inWatch = false;
-    alerts.active = true;
-    showready.alerts = true;
-    alerts.timestamp = systemClock.getNow();
-    ESP_LOGI(TAG, "Active weather WARNING alert received");
-  }
-  else if (actwatch > 0)
-  {
-    alerts.inWarning = false;
-    alerts.inWatch = true;
-    alerts.active = true;
-    showready.alerts = true;
-    alerts.timestamp = systemClock.getNow();
-    ESP_LOGI(TAG, "Active weather WATCH alert received");
-  }
-  if (actwarn == 1 || actwatch == 1)
-  {
-    if (!obj["features"][0]["properties"]["status"].isNull())
-    {
-      sprintf(alerts.status1, "%s", (const char *)obj["features"][0]["properties"]["status"]);
-      sprintf(alerts.severity1, "%s", (const char *)obj["features"][0]["properties"]["severity"]);
-      sprintf(alerts.certainty1, "%s", (const char *)obj["features"][0]["properties"]["certainty"]);
-      sprintf(alerts.urgency1, "%s", (const char *)obj["features"][0]["properties"]["urgency"]);
-      sprintf(alerts.event1, "%s", (const char *)obj["features"][0]["properties"]["event"]);
-    }
-    if (!obj["features"][0]["properties"]["parameters"]["NWSheadline"].isNull())
-    {
-      sprintf(alerts.description1, "%s", (const char *)obj["features"][0]["properties"]["parameters"]["NWSheadline"][0]);
-      cleanString(alerts.description1);
-      result = true;
-    }
-    if (!obj["features"][0]["properties"]["instruction"].isNull())
-    {
-      sprintf(alerts.instruction1, "%s", (const char *)obj["features"][0]["properties"]["instruction"]);
-      cleanString(alerts.instruction1);
-    }
-    else
-    {
-      sprintf(alerts.instruction1, "%c", '\0');
-    }
-  }
-  else if (actwarn == 2 || actwatch == 2)
-  {
-    sprintf(alerts.status1, "%s", (const char *)obj["features"][1]["properties"]["status"]);
-    sprintf(alerts.severity1, "%s", (const char *)obj["features"][1]["properties"]["severity"]);
-    sprintf(alerts.certainty1, "%s", (const char *)obj["features"][1]["properties"]["certainty"]);
-    sprintf(alerts.urgency1, "%s", (const char *)obj["features"][1]["properties"]["urgency"]);
-    sprintf(alerts.event1, "%s", (const char *)obj["features"][1]["properties"]["event"]);
-    if (!obj["features"][1]["properties"]["parameters"]["NWSheadline"].isNull())
-    {
-      sprintf(alerts.description1, "%s", (const char *)obj["features"][1]["properties"]["parameters"]["NWSheadline"][0]);
-      cleanString(alerts.description1);
-
-      result = true;
-    }
-    if (!obj["features"][1]["properties"]["instruction"].isNull())
-    {
-      sprintf(alerts.instruction1, "%s", (const char *)obj["features"][1]["properties"]["instruction"]);
-      cleanString(alerts.instruction1);
-    }
-    else
-      sprintf(alerts.instruction1, "%c", '\0');
-  }
-  else if (actwarn == 3 || actwatch == 3)
-  {
-    sprintf(alerts.status1, "%s", (const char *)obj["features"][2]["properties"]["status"]);
-    sprintf(alerts.severity1, "%s", (const char *)obj["features"][2]["properties"]["severity"]);
-    sprintf(alerts.certainty1, "%s", (const char *)obj["features"][2]["properties"]["certainty"]);
-    sprintf(alerts.urgency1, "%s", (const char *)obj["features"][2]["properties"]["urgency"]);
-    sprintf(alerts.event1, "%s", (const char *)obj["features"][2]["properties"]["event"]);
-    if (!obj["features"][2]["properties"]["parameters"]["NWSheadline"].isNull())
-    {
-      sprintf(alerts.description1, "%s", (const char *)obj["features"][2]["properties"]["parameters"]["NWSheadline"][0]);
-      cleanString(alerts.description1);
-      result = true;
-    }
-    if (!obj["features"][2]["properties"]["instruction"].isNull())
-    {
-      sprintf(alerts.instruction1, "%s", (const char *)obj["features"][2]["properties"]["instruction"]);
-      cleanString(alerts.instruction1);
-    }
-    else
-      sprintf(alerts.instruction1, "%c", '\0');
-  }
-  else
-  {
-    alerts.active = false;
-    alerts.inWarning = false;
-    alerts.inWatch = false;
-    ESP_LOGI(TAG, "No current active weather alerts");
-    result = true;
-  }
-  return result;
-}
-
-bool fillWeatherFromJson(String payload)
-{
-  bool result;
-  StaticJsonDocument<2048> filter;
-  filter["current"]["weather"][0]["icon"] = true;
-  filter["current"]["temp"] = true;
-  filter["current"]["feels_like"] = true;
-  filter["current"]["humidity"] = true;
-  filter["current"]["wind_speed"] = true;
-  filter["current"]["uvi"] = true;
-  filter["current"]["clouds"] = true;
-  filter["current"]["weather"][0]["description"] = true;
-  filter["hourly"][0]["wind_gust"] = true;
-  filter["daily"][0]["temp"]["min"] = true;
-  filter["daily"][0]["temp"]["max"] = true;
-  filter["daily"][0]["sunrise"] = true;
-  filter["daily"][0]["sunset"] = true;
-  filter["daily"][0]["moonrise"] = true;
-  filter["daily"][0]["moonset"] = true;
-  filter["daily"][0]["uvi"] = true;
-  filter["daily"][0]["clouds"] = true;
-  filter["daily"][0]["humidity"] = true;
-  filter["daily"][0]["wind_speed"] = true;
-  filter["daily"][0]["wind_gust"] = true;
-  filter["daily"][0]["moon_phase"] = true;
-  filter["daily"][0]["weather"][0]["description"] = true;
-  filter["daily"][0]["weather"][0]["icon"] = true;
-  StaticJsonDocument<8192> doc;
-  DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
-  if (error)
-  {
-    ESP_LOGE(TAG, "Weather deserializeJson() failed: %s", error.f_str());
-    return false;
-  }
-  JsonObject obj = doc.as<JsonObject>();
-  if (!obj["current"]["weather"][0].isNull())
-  {
-    sprintf(weather.current.icon, "%s", (const char *)obj["current"]["weather"][0]["icon"]);
-    weather.current.temp = obj["current"]["temp"];
-    weather.current.feelsLike = obj["current"]["feels_like"];
-    weather.current.humidity = obj["current"]["humidity"];
-    weather.current.windSpeed = obj["current"]["wind_speed"];
-    weather.current.uvi = obj["current"]["uvi"];
-    weather.current.cloudcover = obj["current"]["clouds"];
-    sprintf(weather.current.description, "%s", (const char *)obj["current"]["weather"][0]["description"]);
-    result = true;
-  }
-  weather.current.windGust = obj["hourly"][0]["wind_gust"];
-  if (!obj["daily"][0].isNull())
-  {
-    weather.day.tempMin = obj["daily"][0]["temp"]["min"];
-    weather.day.tempMax = obj["daily"][0]["temp"]["max"];
-    weather.day.humidity = obj["daily"][0]["humidity"];
-    weather.day.windSpeed = obj["daily"][0]["wind_speed"];
-    weather.day.windGust = obj["daily"][0]["wind_gust"];
-    weather.day.uvi = obj["daily"][0]["uvi"];
-    weather.day.cloudcover = obj["daily"][0]["clouds"];
-    weather.day.moonPhase = obj["daily"][0]["moon_phase"];
-    weather.day.sunrise = convert1970Epoch(obj["daily"][0]["sunrise"]);
-    weather.day.sunset = convert1970Epoch(obj["daily"][0]["sunset"]);
-    weather.day.moonrise = convert1970Epoch(obj["daily"][0]["moonrise"]);
-    weather.day.moonset = convert1970Epoch(obj["daily"][0]["moonset"]);
-    sprintf(weather.day.description, "%s", (const char *)obj["daily"][0]["weather"][0]["description"]);
-    sprintf(weather.day.icon, "%s", (const char *)obj["daily"][0]["weather"][0]["icon"]);
-    result = true;
-  }
-  return result;
-}
-
-bool fillIpgeoFromJson(String payload)
-{
-  StaticJsonDocument<2048> doc;
-  DeserializationError error = deserializeJson(doc, payload);
-  if (error)
-  {
-    ESP_LOGE(TAG, "IPGeo deserializeJson() failed: %s", error.f_str());
-    return false;
-  }
-  JsonObject obj = doc.as<JsonObject>();
-  if (!obj["time_zone"].isNull())
-  {
-    sprintf(ipgeo.timezone, "%s", (const char *)obj["time_zone"]["name"]);
-    ipgeo.tzoffset = obj["time_zone"]["offset"];
-    ipgeo.lat = obj["latitude"];
-    ipgeo.lon = obj["longitude"];
-    return true;
-  }
-  return false;
-}
-
-bool fillGeocodeFromJson(String payload)
-{
-  StaticJsonDocument<256> doc;
-  payload = (String) "{data:" + payload + "}";
-  DeserializationError error = deserializeJson(doc, payload);
-  if (error)
-  {
-    ESP_LOGE(TAG, "GEOcode deserializeJson() failed: %s", error.f_str());
-    return false;
-  }
-  JsonObject obj = doc.as<JsonObject>();
-  if (!obj["data"][0].isNull())
-  {
-    sprintf(geocode.city, "%s", (const char *)obj["data"][0]["name"]);
-    sprintf(geocode.state, "%s", (const char *)obj["data"][0]["state"]);
-    sprintf(geocode.country, "%s", (const char *)obj["data"][0]["country"]);
-    return true;
-  }
-  return false;
-}
-
-bool fillAqiFromJson(String payload)
-{
-  bool ready = false;
-  // StaticJsonDocument<2048> filter;
-  // filter["list"][1]["main"] = true;
-  // filter["list"][1]["components"] = true;
-  // filter["list"][1]["components"]["no"] = true;
-  // filter["list"][1]["components"]["no2"] = true;
-  // filter["list"][1]["components"]["o3"] = true;
-  // filter["list"][1]["components"]["so2"] = true;
-  // filter["list"][1]["components"]["pm2_5"] = true;
-  // filter["list"][1]["components"]["pm10"] = true;
-  // filter["list"][1]["components"]["nh3"] = true;
-  // filter["list"][7]["main"] = true;
-  // filter["list"][7]["components"] = true;
-  // filter["list"][7]["components"]["no"] = true;
-  // filter["list"][7]["components"]["no2"] = true;
-  // filter["list"][7]["components"]["o3"] = true;
-  // filter["list"][7]["components"]["so2"] = true;
-  // filter["list"][7]["components"]["pm2_5"] = true;
-  // filter["list"][7]["components"]["pm10"] = true;
-  // filter["list"][7]["components"]["nh3"] = true;
-  StaticJsonDocument<30720> doc;
-  DeserializationError error = deserializeJson(doc, payload);
-  // DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
-  if (error)
-  {
-    ESP_LOGE(TAG, "AQI deserializeJson() failed: %s", error.f_str());
-    return false;
-  }
-  JsonObject obj = doc.as<JsonObject>();
-  Serial.println(obj);
-  // if (!obj["list"][1].isNull())
-  //{
-  aqi.current.aqi = obj["list"][1]["main"]["aqi"];
-  aqi.current.co = obj["list"][1]["components"]["co"];
-  aqi.current.no = obj["list"][1]["components"]["no"];
-  aqi.current.no2 = obj["list"][1]["components"]["no2"];
-  aqi.current.o3 = obj["list"][1]["components"]["o3"];
-  aqi.current.so2 = obj["list"][1]["components"]["so2"];
-  aqi.current.pm10 = obj["list"][1]["components"]["pm2_5"];
-  aqi.current.pm25 = obj["list"][1]["components"]["pm10"];
-  aqi.current.nh3 = obj["list"][1]["components"]["nh3"];
-  ready = true;
-  ESP_LOGD(TAG, "New current air quality data received");
-  processAqiDescription();
-  //}
-  // else
-  //  ESP_LOGE(TAG, "checkAQI error cannot find current aqi data from response");
-  // if (!obj["list"][7].isNull())
-  //{
-  aqi.day.aqi = obj["list"][7]["main"]["aqi"];
-  aqi.day.co = obj["list"][7]["components"]["co"];
-  aqi.day.no = obj["list"][7]["components"]["no"];
-  aqi.day.no2 = obj["list"][7]["components"]["no2"];
-  aqi.day.o3 = obj["list"][7]["components"]["o3"];
-  aqi.day.so2 = obj["list"][7]["components"]["so2"];
-  aqi.day.pm10 = obj["list"][7]["components"]["pm2_5"];
-  aqi.day.pm25 = obj["list"][7]["components"]["pm10"];
-  aqi.day.nh3 = obj["list"][7]["components"]["nh3"];
-  ready = true;
-  ESP_LOGD(TAG, "New daily air quality data received");
-  //}
-  // else
-  //  ESP_LOGE(TAG, "checkAQI error cannot find daily aqi data from response");
-  return ready;
-}
-
-void processAqiDescription()
-{
-  aqi.current.description = "";
-  if (aqi.current.co > 4400)
-    aqi.current.description = "Elevated Carbon Monoxide";
-  if (aqi.current.o3 > 180)
-  {
-    if (aqi.current.description == "")
-      aqi.current.description = "Elevated ";
-    else
-      aqi.current.description += " & ";
-    aqi.current.description += "Ozone";
-  }
-  if (aqi.current.no2 > 40)
-  {
-    if (aqi.current.description == "")
-      aqi.current.description = "Elevated ";
-    else
-      aqi.current.description += " & ";
-    aqi.current.description += "Nitrogen Dioxode";
-  }
-  if (aqi.current.so2 > 20)
-  {
-    if (aqi.current.description == "")
-      aqi.current.description = "Elevated ";
-    else
-      aqi.current.description += " & ";
-    aqi.current.description += "Sulfer Dioxode";
-  }
-  if (aqi.current.pm25 > 10)
-  {
-    if (aqi.current.description == "")
-      aqi.current.description = "Elevated ";
-    else
-      aqi.current.description += " & ";
-    aqi.current.description += "Small Particulates";
-  }
-  if (aqi.current.pm10 > 20)
-  {
-    if (aqi.current.description == "")
-      aqi.current.description = "Elevated ";
-    else
-      aqi.current.description += " & ";
-    aqi.current.description += "Medium Particulates";
-  }
-}
-
-void buildURLs()
-{
-  char units[32];
-  if (imperial.isChecked())
-    strcpy(units, "imperial");
-  else
-    strcpy(units, "metric");
-  char url[256];
-  // Weather forecast url
-  snprintf(url, 256, "https://api.openweathermap.org/data/2.5/onecall?units=%s&exclude=minutely&appid=%s&lat=%f&lon=%f&lang=en",
-           units, weatherapi.value(), current.lat, current.lon);
-  strncpy(urls[0], url, 256);
-  // Weather alert url
-  snprintf(url, 256, "https://api.weather.gov/alerts/active?status=actual&point=%f,%f&limit=1",
-           current.lat, current.lon);
-  strncpy(urls[1], url, 256);
-  // Geocoding url
-  snprintf(url, 256, "https://api.openweathermap.org/geo/1.0/reverse?lat=%f&lon=%f&limit=5&appid=%s",
-           current.lat, current.lon, weatherapi.value());
-  strncpy(urls[2], url, 256);
-  // Air pollution url
-  snprintf(url, 256, "https://api.openweathermap.org/data/2.5/air_pollution/forecast?lat=%f&lon=%f&appid=%s",
-           current.lat, current.lon, weatherapi.value());
-  strncpy(urls[3], url, 256);
-  // ipGeo API Key
-  snprintf(url, 256, "https://api.ipgeolocation.io/ipgeo?apiKey=%s",
-           ipgeoapi.value());
-  strncpy(urls[4], url, 256);
-  // Air pollution forecast url
-  snprintf(url, 256, "notusedyet",
-           current.lat, current.lon, weatherapi.value());
-  strncpy(urls[5], url, 256);
-}
-
-String elapsedTime(uint32_t seconds)
-{
-  String result;
-  if (seconds < 60)
-  {
-    result = String(seconds) + " seconds";
-  }
-  else
-  {
-    uint32_t minutes = seconds / 60;
-    if (minutes < 60)
-    {
-      result = String(minutes) + " minutes, " + String(seconds % 60) + " seconds";
-    }
-    else
-    {
-      uint32_t hours = minutes / 60;
-      if (hours < 24)
-      {
-        result = String(hours) + " hours, " + String(minutes % 60) + " minutes";
-      }
-      else
-      {
-        uint32_t days = hours / 24;
-        if (days < 30)
-        {
-          result = String(days) + " days, " + String(hours % 24) + " hours";
-        }
-        else
-        {
-          uint32_t months = days / 30;
-          if (months < 12)
-          {
-            result = String(months) + " months, " + String(days % 30) + " days";
-          }
-          else
-          {
-            uint32_t years = months / 12;
-            result = "Never";
-          }
-        }
-      }
-    }
-  }
-  return result;
-}
-
-char *capString(char *str)
-{
-  bool capNext = true;
-  for (size_t i = 0; str[i] != '\0'; i++)
-  {
-    if (str[i] >= 'a' && str[i] <= 'z')
-    {
-      if (capNext)
-      {
-        str[i] = str[i] - ('a' - 'A');
-        capNext = false;
-      }
-    }
-    else if (str[i] == ' ')
-    {
-      capNext = true;
-    }
-    else
-    {
-      capNext = false;
-    }
-  }
-  return str;
-}
-
-acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds)
-{
-  constexpr int32_t kDaysToConverterEpochFromNtpEpoch = 36524;
-  int32_t daysToCurrentEpochFromNtpEpoch = Epoch::daysToCurrentEpochFromConverterEpoch();
-  daysToCurrentEpochFromNtpEpoch += kDaysToConverterEpochFromNtpEpoch;
-  uint32_t secondsToCurrentEpochFromNtpEpoch = 86400uL * daysToCurrentEpochFromNtpEpoch;
-  uint32_t epochSeconds = ntpSeconds - secondsToCurrentEpochFromNtpEpoch;
-  return epochSeconds;
-}
-
-acetime_t convert1970Epoch(acetime_t epoch1970)
-{
-  acetime_t epoch2050 = epoch1970 - Epoch::secondsToCurrentEpochFromUnixEpoch64();
-  return epoch2050;
-}
-
-void setTimeSource(const String &inputString)
-{
-  for (int i = 0; i < 4; i++)
-  {
-    if (i < inputString.length())
-    {
-      timesource[i] = inputString.charAt(i);
-    }
-    else
-    {
-      timesource[i] = '\0';
-    }
-  }
-}
-
-acetime_t Now()
-{
-  return systemClock.getNow();
-}
-
-void resetLastNtpCheck()
-{
-  lastntpcheck = systemClock.getNow();
-}
-
-bool compareTimes(ZonedDateTime t1, ZonedDateTime t2)
-{
-  // Get the hour, minute, and second components of the two DateTimes
-  int hour1 = t1.hour();
-  int minute1 = t1.minute();
-  int second1 = t1.second();
-  int hour2 = t2.hour();
-  int minute2 = t2.minute();
-  int second2 = t2.second();
-  // Compare the hour, minute, and second components of the two DateTimes
-  if (hour1 == hour2 && minute1 == minute2 && second1 == second2)
-  {
-    // The times are the same
-    return true;
-  }
-  else
-  {
-    // The times are different
-    return false;
-  }
-}
-
-void toUpper(char *input)
-{
-  int count = strlen(input);
-  for (int i = 0; i < count; i++)
-    input[i] = toupper(input[i]);
-}
-
-uint16_t calcbright(uint16_t bl)
-{
-  uint16_t retVal = 0;
-  switch (bl)
-  {
-  case 1:
-    retVal = 0;
-    break;
-  case 2:
-    retVal = 1;
-    break;
-  case 3:
-    retVal = 2;
-    break;
-  case 4:
-    retVal = 4;
-    break;
-  case 5:
-    retVal = 8;
-    break;
-  case 6:
-    retVal = 10;
-    break;
-  case 7:
-    retVal = 15;
-    break;
-  case 8:
-    retVal = 20;
-    break;
-  case 9:
-    retVal = 25;
-    break;
-  case 10:
-    retVal = 30;
-    break;    
-  default:
-    retVal = 0;
-    break;
-  }
-  return retVal;
-}
-
-const char *ordinal_suffix(int n)
-{
-  // Check if number is divisible by 10
-  int div = n % 10;
-  switch (div)
-  {
-  case 1:
-    return "st";
-  case 2:
-    return "nd";
-  case 3:
-    return "rd";
-  default:
-    return "th";
-  }
-}
-
-void cleanString(char *str)
-{
-  char *src = str;
-  char *dst = str;
-  while (*src)
-  {
-    if (*src != '\n' && *src != '"' && *src != '[' && *src != ']')
-    {
-      *dst++ = *src;
-    }
-    src++;
-  }
-  *dst = '\0';
-}
-
-void capitalize(char *str)
-{
-  while (*str)
-  {
-    *str = toupper(*str);
-    str++;
-  }
-}
-
-// Compares two strings for equality
-bool cmpLocs(char a1[32], char a2[32])
-{
-  return memcmp((const void *)a1, (const void *)a2, sizeof(a1)) == 0;
-}
-
-String uv_index(uint8_t index)
-{
-  if (index <= 2)
-    return "Low";
-  else if (index <= 5)
-    return "Moderate";
-  else if (index <= 7)
-    return "High";
-  else if (index <= 10)
-    return "Very High";
-  else if (index > 10)
-    return "Extreme";
-}
-
-int32_t fromNow(acetime_t ctime)
-{
-  return (systemClock.getNow() - ctime);
-}
-
-String formatLargeNumber(int number)
-{
-  char str[20];
-  String formattedNumber;
-  int i = 0, j = 0;
-  if (number < 0)
-  {
-    str[i++] = '-';
-    number = -number;
-  }
-  do
-  {
-    str[i++] = number % 10 + '0';
-    if (i % 4 == 3 && number / 10 != 0)
-    {
-      str[i++] = ',';
-    }
-    number /= 10;
-  } while (number);
-  str[i] = '\0';
-  for (j = i - 1; j >= 0; j--)
-  {
-    formattedNumber += str[j];
-  }
-  return formattedNumber;
 }
 
 // TODO: web interface cleanup

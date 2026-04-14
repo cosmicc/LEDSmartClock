@@ -3,14 +3,7 @@
 #define FASTLED_ALL_PINS_HARDWARE_SPI
 #define FASTLED_ESP32_SPI_BUS HSPI
 
-// Versioning
-#define VERSION "LED SmartClock v1.3.2"
-#define VERSION_MAJOR 1
-#define VERSION_MINOR 3
-#define VERSION_PATCH 2
-#define VERSION_CONFIG "13"  //major&minor
-
-// WARNING: Not advancing the config version after adding/deleting iotwebconf config options will result in system settings data corruption.  Iotwebconf will erase the config if it sees a different config version to avoid this corruption.
+#include "version.h"
 
 #define COROUTINE_PROFILER          // Enable the coroutine debug profiler
 #undef DEBUG_LIGHT                 // Show light debug serial messages
@@ -47,14 +40,20 @@
 #define DEF_WEATHER_COLOR "#FF8800"
 #define DEF_DAILY_COLOR "#FF8800"
 #define DEF_AQI_COLOR "#FF8800"
-#define DEF_WEATHER_INTERVAL 90  //minutes
+#define DEF_WEATHER_INTERVAL 2   //hours
 #define DEF_DAILY_INTERVAL 3  //hours
 #define DEF_TEMP_INTERVAL 60  //minutes
+#define DEF_TEMP_DISPLAY_DURATION 15  //seconds
 #define DEF_DATE_INTERVAL 4  //hours
 #define DEF_AQI_INTERVAL 120  //minutes
 #define DEF_ALERT_INTERVAL 30  //minutes
 #define DEF_SCROLL_SPEED 5 
 #define DEF_BRIGHTNESS_LEVEL 3
+#define OPENWEATHER_ONECALL_ENDPOINT "https://api.openweathermap.org/data/3.0/onecall"
+#define OPENWEATHER_GEOCODE_ENDPOINT "https://api.openweathermap.org/geo/1.0/reverse"
+#define OPENWEATHER_AQI_ENDPOINT "https://api.openweathermap.org/data/2.5/air_pollution/forecast"
+#define WEATHER_GOV_ALERTS_ENDPOINT "https://api.weather.gov/alerts/active"
+#define IPGEOLOCATION_ENDPOINT "https://api.ipgeolocation.io/ipgeo"
 
 // second aliases
 #define T1S 1*1L  // 1 second
@@ -62,19 +61,20 @@
 #define T5M 5*60L  // 5 minutes
 #define T10M 10*60L  // 10 minutes
 #define T1H 1*60*60L  // 1 hour
-#define T2H 2*60*60L  // 2 hours 
+#define T2H 2*60*60L  // 2 hours
 #define T1D 24*60*60L  // 1 day
 #define T1Y 365*24*60*60L  // 1 year
 
 // Includes
+#include <Arduino.h>
 #include <nvs_flash.h>
 #include <esp_task_wdt.h>
 #include <esp_log.h>
+#include <esp_system.h>
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h>
 #include <IotWebConfTParameter.h>
-#include <IotWebConfESP32HTTPUpdateServer.h>
-#include <AceWire.h> 
+#include <AceWire.h>
 #include <AceCommon.h>
 #include <AceTime.h>
 #include <AceRoutine.h>
@@ -87,7 +87,7 @@
 #include <FastLED.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include "bitmaps.h"
+#include <Update.h>
 
 // AceTime refs
 using namespace ace_routine;
@@ -98,120 +98,139 @@ using ace_time::clock::SystemClockLoop;
 using ace_routine::CoroutineScheduler;
 using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 
-const char* TAG = "CLOCK";                             // ESP Logging tag
 #include "structures.h"
-
-// defs
-const char air_quality[][12] = {"N/A", "Good", "Fair", "Moderate", "Poor", "Very Poor"};
-const char connection_state[][15] = {"Boot", "NotConfigured", "ApMode", "Connecting", "OnLine", "OffLine"};
-const char imperial_units[][7] = {"\u2109", "Mph", "Feet", "°F"};
-const char metric_units[][7] = {"\u2103", "Kph", "Meters", "°C"};
-const char clock_status[][12] = {"Success", "Timeout", "Waiting"};
-const char yesno[][4] = {"No", "Yes"};
-const char truefalse[][6] = {"False", "True"};
-
-// Global Variables & Class Objects
-const char thingName[] = "LEDSMARTCLOCK";              // Default SSID used for new setup
-const char wifiInitialApPassword[] = "ledsmartclock";  // Default AP password for new setup
-char urls[6][256];                                     // Array of URLs
-WireInterface wireInterface(Wire);                     // I2C hardware object
-DS3231Clock<WireInterface> dsClock(wireInterface);     // Hardware DS3231 RTC object
-CRGB leds[NUMMATRIX];                                  // Led matrix array object
-FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(leds, mw, mh, NEO_MATRIX_BOTTOM+NEO_MATRIX_RIGHT+NEO_MATRIX_COLUMNS+NEO_MATRIX_ZIGZAG); // FastLED matrix object
-TinyGPSPlus GPS;                                       // Hardware GPS object
-Tsl2561 Tsl(Wire);                                     // Hardware Lux sensor object
-DNSServer dnsServer;                                   // DNS Server object
-WebServer server(80);                                  // Web server object for IotWebConf and OTA
-HTTPClient request;
-HTTPUpdateServer httpUpdater;
-WeatherData weather;                                   // weather info data class
-Alerts alerts;                                         // wweather alerts data class
-Ipgeo ipgeo;                                           // ip geolocation data class
-Geocode geocode;
-GPSData gps;                                           // gps data class
-AqiData aqi;
-LastShown lastshown;
-ShowReady showready;
-CheckClass checkalerts;
-CheckClass checkweather;
-CheckClass checkipgeo;
-CheckClass checkgeocode;
-CheckClass checkaqi;
-ShowClock showclock;
-CoTimers cotimer;
-ScrollText scrolltext;
-Alertflash alertflash;
-Current current;
-acetime_t lastntpcheck;
-bool clock_display_offset;                             // Clock display offset for single digit hour
-acetime_t bootTime;                                    // boot time
-char timesource[4] = "n/a";                            // Primary timeclock source gps/ntp
-uint8_t userbrightness;                                // Current saved brightness setting (from iotwebconf)
-bool firsttimefailsafe;
-bool httpbusy;
-
 #include "colors.h"
-const uint32_t AQIColorLookup[] = { GREEN, YELLOW, ORANGE, RED, PURPLE, WHITE };
-const uint32_t alertcolors[] = {RED, YELLOW};
+#include "runtime_state.h"
+#include "support.h"
+#include "network_service.h"
+#include "json_service.h"
 
-// Function Declarations
+extern const char TAG[];
+/** Human-readable AQI labels indexed by the provider's AQI bucket. */
+extern const char air_quality[][12];
+/** Human-readable Wi-Fi/web configuration connection states. */
+extern const char connection_state[][15];
+/** Text labels for imperial weather units shown in logs and the web UI. */
+extern const char imperial_units[][7];
+/** Text labels for metric weather units shown in logs and the web UI. */
+extern const char metric_units[][7];
+/** Human-readable AceTime sync-state labels used in diagnostics. */
+extern const char clock_status[][12];
+/** Shared yes/no lookup strings for debug and status output. */
+extern const char yesno[][4];
+/** Shared true/false lookup strings for debug and status output. */
+extern const char truefalse[][6];
+
+/** Hostname and AP SSID used by IotWebConf. */
+extern const char thingName[];
+/** Initial password for the captive-portal access point before reconfiguration. */
+extern const char wifiInitialApPassword[];
+/** Primary I2C bus shared by the RTC and light sensor. */
+extern WireInterface wireInterface;
+/** DS3231 RTC driver bound to the shared I2C interface. */
+extern DS3231Clock<WireInterface> dsClock;
+/** Backing LED buffer for the 32x8 matrix. */
+extern CRGB leds[NUMMATRIX];
+/** Matrix abstraction used by rendering code to draw text and bitmaps. */
+extern FastLED_NeoMatrix *matrix;
+/** TinyGPS parser that consumes sentences from the hardware UART. */
+extern TinyGPSPlus GPS;
+/** Ambient light sensor driver used for automatic brightness control. */
+extern Tsl2561 Tsl;
+/** DNS server used by the captive portal while in AP mode. */
+extern DNSServer dnsServer;
+/** Shared HTTP server for status, config, and OTA endpoints. */
+extern WebServer server;
+/** Latest parsed current and daily weather data. */
+extern WeatherData weather;
+/** Active weather-alert state selected from the latest weather.gov response. */
+extern Alerts alerts;
+/** Latest timezone and coarse location data returned by ipgeolocation.io. */
+extern Ipgeo ipgeo;
+/** Latest reverse-geocoded city/state/country data from OpenWeather. */
+extern Geocode geocode;
+/** Latest GPS fix metadata and timing information. */
+extern GPSData gps;
+/** Latest current and forecast air-quality measurements. */
+extern AqiData aqi;
+/** Timestamps describing when each rotating status item was last displayed. */
+extern LastShown lastshown;
+/** Flags indicating which messages or data blocks should render next. */
+extern ShowReady showready;
+/** Retry and success tracking for the weather-alert service. */
+extern CheckClass checkalerts;
+/** Retry and success tracking for the weather forecast service. */
+extern CheckClass checkweather;
+/** Retry and success tracking for the IP geolocation service. */
+extern CheckClass checkipgeo;
+/** Retry and success tracking for reverse geocoding. */
+extern CheckClass checkgeocode;
+/** Retry and success tracking for the air-quality service. */
+extern CheckClass checkaqi;
+/** Live clock-render state for the main time display coroutine. */
+extern ShowClock showclock;
+/** Shared timers used by multiple rendering coroutines. */
+extern CoTimers cotimer;
+/** Scroll-text renderer state and current message buffer. */
+extern ScrollText scrolltext;
+/** Full-screen flash animation state for attention-grabbing messages. */
+extern Alertflash alertflash;
+/** Current derived state shared across services, display, and web UI. */
+extern Current current;
+/** Color lookup used when AQI colors follow the measured AQI bucket. */
+extern const uint32_t AQIColorLookup[];
+/** Flash colors used for warning and watch alert presentations. */
+extern const uint32_t alertcolors[];
+
+/** Prints the current runtime state to the serial debug console. */
 void print_debugData();
+/** Refreshes the active coordinates used by remote services. */
 void updateCoords();
+/** Recomputes the current location strings from the latest location sources. */
 void updateLocation();
+/** Callback fired after Wi-Fi connects successfully. */
 void wifiConnected();
-void handleRoot();
+/** Callback fired after the web configuration has been saved. */
 void configSaved();
-bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper);
-void buildURLs();
-String elapsedTime(uint32_t seconds);
+/** Draws the status LEDs around the display edge. */
 void display_showStatus();
+/** Draws a single large clock digit bitmap at the selected display position. */
 void display_setclockDigit(uint8_t bmp_num, uint8_t position, uint16_t color);
-bool fillAlertsFromJson(String payload);
-bool fillWeatherFromJson(String payload);
-bool fillIpgeoFromJson(String payload);
-bool fillGeocodeFromJson(String payload);
-bool fillAqiFromJson(String payload);
-acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds);
-void setTimeSource(const String &inputString);
-void resetLastNtpCheck();
+/** Logs the current zoned time to the serial console. */
 void printSystemZonedTime();
+/** Draws the current temperature block on the LED matrix. */
 void display_temperature();
-void display_weatherIcon(char* icon);
+/** Draws the active weather icon animation on the LED matrix. */
+void display_weatherIcon(char *icon);
+/** Rebuilds the active timezone after config or location changes. */
 void processTimezone();
-acetime_t Now();
-char* capString(char* str);
-uint16_t calcbright(uint16_t bl);
+/** Returns the current time converted into the active timezone. */
 ace_time::ZonedDateTime getSystemZonedTime();
+/** Formats the current local time for logs and the web UI. */
 String getSystemZonedTimestamp();
+/** Formats an arbitrary timestamp using the active timezone. */
 String getCustomZonedTimestamp(acetime_t now);
-void getSystemZonedDateString(char* str);
-char *getSystemZonedDateTimeString();
-const char *ordinal_suffix(int n);
-void cleanString(char *str);
-void capitalize(char *str);
-bool httpRequest(uint8_t index);
-bool isHttpReady();
-bool isNextAttemptReady();
-bool isLocValid(String source);
+/** Formats the current date for scrolling text output. */
+void getSystemZonedDateString(char *str);
+/** Formats the current date/time for the web status page. */
+String getSystemZonedDateTimeString();
+/** Returns true when the requested location source contains a valid city. */
+bool isLocationValid(String source);
+/** Returns true when the active coordinates are usable. */
 bool isCoordsValid();
+/** Returns true when a display item has waited long enough to show again. */
 bool isNextShowReady(acetime_t lastshown, uint8_t interval, uint32_t multiplier);
+/** Returns true when enough time has passed since the last HTTP attempt. */
 bool isNextAttemptReady(acetime_t lastattempt);
-bool isApiValid(char *apikey);
+/** IotWebConf AP-mode callback used during first-time setup. */
 bool connectAp(const char *apName, const char *password);
+/** IotWebConf station-mode callback used during normal Wi-Fi connection. */
 void connectWifi(const char *ssid, const char *password);
-int32_t fromNow(acetime_t ctime);
-void toUpper(char *input);
-String uv_index(uint8_t index);
-acetime_t convert1970Epoch(acetime_t epoch1970);
-String formatLargeNumber(int number);
-String getHttpCodeName(int code);
-bool cmpLocs(char a1[32], char a2[32]);
-bool compareTimes(ZonedDateTime t1, ZonedDateTime t2);
+/** Starts a fullscreen alert flash sequence. */
 void startFlash(uint16_t color, uint8_t laps);
+/** Starts the scrolling text renderer with the current message buffer. */
 void startScroll(uint16_t color, bool displayicon);
-void processAqiDescription();
 
 #include "iowebconf.h"
 #include "gpsclock.h"
-#include "coroutines.h"
 #include "html.h"

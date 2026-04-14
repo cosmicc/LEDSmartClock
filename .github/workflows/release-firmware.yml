@@ -1,0 +1,60 @@
+name: Release Firmware Package
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Git tag to package and upload
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve tag name
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "tag_name=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_name=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.vars.outputs.tag_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build firmware
+        run: pio run -e esp32dev
+
+      - name: Package release binaries
+        run: |
+          rm -f firmware.zip
+          zip -j firmware.zip \
+            .pio/build/esp32dev/firmware.bin \
+            .pio/build/esp32dev/bootloader.bin \
+            .pio/build/esp32dev/partitions.bin
+
+      - name: Upload firmware.zip to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag_name }}
+          files: firmware.zip
+          overwrite_files: true

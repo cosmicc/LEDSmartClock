@@ -86,6 +86,11 @@ platformio run
 
 If you use release artifacts instead of building locally:
 
+- `firmware.zip` is the release package intended for downloads from GitHub Releases.
+- `firmware.zip` contains exactly:
+  - `firmware.bin`
+  - `bootloader.bin`
+  - `partitions.bin`
 - `firmware.bin` is suitable for OTA updates after the clock is already installed.
 - First-time USB flashing may also require `bootloader.bin` and `partitions.bin`, depending on your flashing workflow.
 - If you are not sure, prefer a full PlatformIO flash from source for the first install.
@@ -123,6 +128,7 @@ OTA behavior in the current firmware:
 - Typical firmware size is about `2 MB`.
 - The update page now shows upload progress and final success or failure feedback.
 - The device reboots automatically after a successful OTA update.
+- GitHub Releases are intended to include a `firmware.zip` package containing the three flash images with no subdirectories.
 
 Limitations:
 

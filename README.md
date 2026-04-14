@@ -1,168 +1,205 @@
+# LED SmartClock
 
-# LEDSmartClock
-## Summary
+LED SmartClock is an ESP32-based wall clock built around an 8x32 WS2812B LED matrix. It combines a large-format clock display with GPS, NTP, weather, air-quality, and alert data, then exposes everything through a web dashboard, a configuration portal, and OTA firmware updates.
 
-LEDSmartClock is a ESP32 powered GPS/Wifi enabled wall clock with a 8x32 WS2812B LED matrix display. It has many features, including multiple ways to obtain and keep accurate date & time, timezone, location, local weather conditions, local weather alerts, and outdoor air quality. It has a web interface to display additional information, and many configuration options. It utilizes free subscriptions from openweathermap.org and ipgeolocation.io to obtain location and forecast information over the Internet.
+Version `2.2.3` is the current rewrite baseline. It introduces a cleaner internal structure, a redesigned web interface, and a themed OTA update flow with progress feedback.
 
-## Features
+## What It Does
 
-- Auto time/date synchronization with GPS and NTP.
-- Large Font 12/24 Hour LED Clock
-- Clock color can be automatic based on time of day (yellow morning to blue night) or custom fixed color.
-- Automatic timezone based on IP Geolocation or custom fixed timezone.
-- Automatic location based on GPS coordinates and IP Geolocation.
-- Automatic LED brightness based on room brightness with adjustable high/med/low settings.
-- Current & daily weather forecast based on automatic location: Conditions, Temp, Hi/Lo, Humidity, Wind, Air Quality
-- Weather Temperature color can be automatic (purple freezing to red hot) or custom fixed color.
-- Weather forecast display includes animated icons based on conditions.
-- Weather watch and warning alert display
-- All display intervals and colors can be customized.
-- Adjustable text scroll speed.
-- AP mode for initial setup.
-- Reset button to reset lost password and force clock in AP mode.
-- Full web interface to change settings, view additional info, and OTA wifi firmware updates.
+- Displays a large 12-hour or 24-hour clock on an 8x32 LED matrix.
+- Keeps time from GPS, NTP, and the onboard DS3231 RTC.
+- Resolves timezone automatically from IP geolocation or uses a fixed manual offset.
+- Resolves location from GPS, reverse geocoding, or fixed coordinates.
+- Shows rotating data blocks for date, current temperature, current weather, daily forecast, AQI, and weather alerts.
+- Adjusts brightness automatically from ambient light, with user bias controls.
+- Exposes a status dashboard and a full configuration portal over Wi-Fi.
+- Supports OTA updates from the web interface using `firmware.bin`.
 
-## Download
+## Web Interface
 
-If this is a first time installation, you must flash your ESP32 over USB. Please follow the instructions in the *Installation* section below.
+The firmware serves two main pages:
 
-Latest version can be downloaded in the [Releases](https://github.com/cosmicc/LEDSmartClock/releases) section. Firmware in the releases section can only be applied directly via the web interface after initial installation.
+- `Status page`
+  - Current time source, timezone source, uptime, location, weather, AQI, and alert state.
+  - Reboot action.
+  - Link to the firmware update page.
+- `Configuration page`
+  - Grouped settings for connectivity, display, clock behavior, weather, AQI, sun events, and location.
+  - Cancel and reboot actions.
+  - Firmware update entry point.
 
-## Components
+The OTA update page now matches the rest of the UI and shows upload progress while the browser transfers the image.
 
-1. ESP32-S3 **30 Pin Version!** (NOT the 38 Pin Version) | Link: https://tinyurl.com/4nxevwau
-2. 8x32 (256 Pixel) WS2812B LED Matrix | Link: https://tinyurl.com/4wyw3hsw
-3. DS3231 RTC Module | Link: https://tinyurl.com/3mbe5wsn
-4. TSL2561 Light Luminosiy Sensor | Link: https://tinyurl.com/3jmt8h34
-5. NEO-6M GPS Module | Link: https://tinyurl.com/4wyw3hsw
-6. 5v (2amp minimum) Power Supply | Link: https://tinyurl.com/2xem9tnv
+## Required Services
 
-## Circuit Board & Schematics
+Some features depend on external services:
 
-A schematic and circuit board will be created with KiCad and shared here so you can order your own board from PCBWay to connect all the components.
+- `OpenWeather`
+  - Used for current weather, forecast, AQI, and reverse geocoding.
+  - Requires an API key with access to `One Call 3.0`.
+- `ipgeolocation.io`
+  - Used for automatic timezone and coarse location fallback.
+  - Requires an API key.
+- `weather.gov`
+  - Used for alert data.
+  - No API key required.
 
-## Enclosure
+Without API keys, the clock still works as a clock, but weather, AQI, reverse geocoding, and automatic timezone/location features will be limited.
 
-3D Printing STL files will also be created and shared here for enclosures.
+## Hardware
 
-## Installation
+The project currently assumes these core parts:
 
-Because your ESP32 does not have the web interface on it yet to do over the air updates, you must flash your ESP32 over USB.  You can clone the `main` branch and use platformio to flash your ESP32, you can use Avrdude to flash the release firmware binary over USB, or you can download the Espressif Flash tool and flash the release firmware binary over USB without platformio, or even the arduino-ide.  The Espressif flash tool is by far the easiest way:
-1. Download the Espressif Flash tool here: [https://www.espressif.com/en/support/download/other-tools](https://www.espressif.com/en/support/download/other-tools)
-2. Download the latest LEDSmartClock release in the [Releases](https://github.com/cosmicc/LEDSmartClock/releases) section
-3. Unzip and Run the Espressif Flash tool.
-4. Select Chip Type: `ESP32-S3`,  WorkMode: `Develop`, LoadMode: `USB`. Click `OK`
-5. Under SPI Speed Select `80Mhz`, SPI Mode: `QIO`
-6. At the top, click the first checkbox, and the click the file explorer button and select the release bin you downloaded.
-7. Enter `0x10000` as the start address (to the right of the @)
-8. Select the COM port of your connected ESP32 and click the green `Start` button
+- ESP32 development board
+- 8x32 WS2812B LED matrix
+- DS3231 RTC module
+- TSL2561 light sensor
+- NEO-6M GPS module
+- 5V power supply sized for the LED matrix
 
-## Configuration
-**Required Configuration**
+Important:
 
-- All settings are changed through the web interface over the network or directly, when the clock is in AP mode.
-- Initial configuration is done by connecting to the clock's wifi hotspot with the name `LEDSMARTCLOCK` using the wifi password `ledsmartclock`.
-- After connecting to the clock's `LEDSMARTCLOCK` wifi hotspot, you will be taken to the clock's web interface configuration page automatically.
-- Required settings you must change are:
-- `AP Password` - This password will be the admin password for the web interface, and the new Wifi hotspot password when the clock is in AP mode
-- `Wifi SSID` - This is the name of your wireless network (SSID) that the clock will use to get Internet access.
-- `Wifi Password` - This password of your wireless network that the clock will use to get Internet access.
-- Click `Apply` at the bottom of the configuration page and disconnect from the clock's wifi hotspot to continue.
-- The clock will now disable its wifi hotspot, and connect to the wireless network with the information you provided. It will scroll the IP address it obtained across the display upon successful connection.
-- You can then connect to the web interface again to continue configuration, but now over the network with he IP address that was displayed, instead of directly to the clock's wifi hotspot as before.
+- The original hardware notes referenced an `ESP32-S3` board.
+- The current PlatformIO project is configured for `esp32dev` in [platformio.ini](platformio.ini).
+- Confirm the board target for your hardware before flashing or changing pin assignments.
 
-**Optional Configuration**
+## First-Time Installation
 
-In order to get all the features of the smartclock (weather, geolocation, air quality), you will need sign up for some API keys:
-- LEDSmartClock uses [https://app.ipgeolocation.io](https://app.ipgeolocation.io) for location services. Sign up for their free service to obtain an API key, and enter that key in the configuration page. The clock will then be able to automatically determine your timezone and location. These features will not work without an API key.
-- LEDSmartClock also uses [https://openweathermap.org](https://openweathermap.org/) for weather conditions, forecast, and air quality. The clock will then be able to get weather and air quality information. These features will not work without an API key.
-- All other configuration settings are fairly self explanatory. Change display colors, notification intervals, etc.
-- The `clock colon` can be set to always on, normal blink, and fast blink.
-- The `Alert Flash` is a full screen led display flash before any notification.
+For a first install, use USB flashing.
 
-## Upgrading
-You can either use the ESP32 flash tool as used in the initial installation (which requires you to plug in via USB), or the much easier uploading of the firmware directly to the clock "over the air":
-1. Download the new firmware in the [Releases](https://github.com/cosmicc/LEDSmartClock/releases) section.
-2. Connect to the web interface of the LEDSmartClock (Either over the network or directly in AP mode)
-3. Click on the Configure Settings link to navigate to the configure settings page.
-4. At the bottom of the configure setting page, click browse and select the new firmware file downloaded from releases.
-5. Click the update button to upload the new firmware, and begin the upgrade process. The clock will reboot when finished.
-6. Connect to the web interface after it reboots to verify the new firmware version.
+The safest path is to build and flash from source with PlatformIO so the bootloader, partitions, and firmware stay aligned with the current project configuration.
 
-*The current firmware version running on the clock is displayed on the web interface's info page.*
+### Build From Source
 
-> WARNING: Some new major and minor versions may require you to reconfigure the settings on your clock. This will be fairly infrequent (only if new configuration settings are added in the release) and will be clearly announced if the upgrade will cause the settings will be reset.
+1. Install PlatformIO.
+2. Clone this repository.
+3. Review [platformio.ini](platformio.ini) and confirm the selected board matches your hardware.
+4. Build the firmware:
+
+```bash
+platformio run
+```
+
+5. Flash over USB using your normal PlatformIO upload workflow or your preferred ESP32 flashing tool.
+
+### Prebuilt Release Notes
+
+If you use release artifacts instead of building locally:
+
+- `firmware.bin` is suitable for OTA updates after the clock is already installed.
+- First-time USB flashing may also require `bootloader.bin` and `partitions.bin`, depending on your flashing workflow.
+- If you are not sure, prefer a full PlatformIO flash from source for the first install.
+
+## First Boot And Setup
+
+On first boot, or whenever the device is forced back into AP mode, the clock exposes a Wi-Fi access point:
+
+- SSID: `LEDSMARTCLOCK`
+- Password: `ledsmartclock`
+
+Initial setup flow:
+
+1. Connect to the `LEDSMARTCLOCK` access point.
+2. Open the configuration portal.
+3. Set the following first:
+   - `AP Password`
+   - `Wi-Fi SSID`
+   - `Wi-Fi Password`
+   - `OpenWeather API key`
+   - `ipgeolocation.io API key`
+4. Save the configuration.
+5. Let the clock connect to your normal Wi-Fi network.
+6. Open the status page on the device IP address to verify time sync, location, weather, and AQI.
+
+If GPS is unavailable, the clock can still work with fixed coordinates and a manual timezone offset.
+
+## OTA Updates
+
+After the first USB install, updates can be applied from the browser.
+
+OTA behavior in the current firmware:
+
+- Upload `firmware.bin` only.
+- Typical firmware size is about `2 MB`.
+- The update page now shows upload progress and final success or failure feedback.
+- The device reboots automatically after a successful OTA update.
+
+Limitations:
+
+- OTA does not replace `bootloader.bin`.
+- OTA does not replace `partitions.bin`.
+- If a future release changes the bootloader or partition layout, update over USB instead of OTA.
+
+## Configuration Notes
+
+The firmware stores settings through IotWebConf. Firmware version and configuration schema are tracked separately:
+
+- Firmware version: `2.2.3`
+- Config schema: `16`
+
+The config schema must increase whenever the stored IotWebConf field mapping changes. When that happens, older saved settings may be reset instead of being reused.
 
 ## Status Indicators
 
-- The display uses the lower left corner LED as a system status indicator that can be disabled in the settings.
-- The top left corner LED is the air quality status indicator.
-- During a weather alert, 2 LED's in the middle of each side of the clock will illuminate yellow for an active watch, and red for an active warning. The watch/warning details will scroll across the display at set intervals.
+The display includes configurable status LEDs that summarize runtime state:
 
-*The overall idea here was if everything is working optimally, no alerts are active, and air quality is good, then all status LED's are off.*
+- System status
+- Air quality status
+- UV / upper-corner status
+- Alert indicators for active watches and warnings
 
-***Air Quality Status LED colors:***
-*OFF/BLACK* - Air Quality (AQI) "Good"
-*YELLOW* - Air Quality (AQI) "Fair"
-*ORANGE* - Air Quality (AQI) "Moderate"
-*RED* - Air Quality (AQI) "Poor"
-*PURPLE* - Air Quality (AQI) ""
+The status page in the web UI is the best source of detail when diagnosing why a service is not updating.
 
-***System Status LED colors:***
-*RED* - Wifi offline, or no NTP or GPS source available (Last sync over an hour)
-*MAGENTA* - AP mode. Connect to LEDSmartClock SSID with ledsmartclock password (or the password you have set)
-*YELLOW* - Connecting to wifi
-*BLUEGREEN* - Wifi connected, no NTP or GPS time sync (Last sync under an hour)
-*GREEN* - NTP sync (Last sync under an hour)
-*PURPLE* - No GPS fix (Last GPS sync over 10 minutes)
-*BLUE* - No GPS fix (Last GPS sync under 10 minutes)
-*OFF/BLACK* - GPS fix (Last GPS sync under 10 minutes)
+## Repository Layout
 
-*When the status LED is disabled, it will still show red if time is not updated by any source in over an hour*
-  
-## TODO / Feature Requests
+- `src/`
+  - Application code
+- `include/`
+  - Public headers, data models, and shared interfaces
+- `docs/rewrite-roadmap.md`
+  - Notes on the version 2 rewrite direction
 
-Feel free to suggest any new features, changes, and ideas in the [discussions](https://github.com/cosmicc/LEDSmartClock/discussions) section.
+## Development Notes
 
- - [ ] Add sunrise and sunset information and options.  Ability to enable text scroll notification to announce these events.
- - [ ] Add moon phase information and options.   Possible new top right status icon for moon phase information.  Maybe scroll moon phase information, new moon, full moon, waxing, waning, etc.
- - [ ] Look into adding other information like equinox, solstice, UV index, etc.
+- `main` is the current release branch.
+- `rewrite-foundation` contains the main version 2 rewrite work that has now been merged into `main`.
+- `legacy` and `pre-coroutine` are older archive branches.
 
-## Known Issues
+Useful development commands:
 
-Please post any issues in the [issues](https://github.com/cosmicc/LEDSmartClock/issues) section.
+```bash
+platformio run
+```
 
-## Developers / Contributions
+```bash
+platformio run -t upload
+```
 
-I create raspberry-pi and micro-controller projects as a hobby, and far from being a decent embedded programmer. (Python was my normal go-to, but I'm creating projects like this to learn C to use in all my future projects)
-PLEASE, feel free to contribute any bug fixes, code optimizations, updates, security fixes, etc. Your contributions will be much appreciated and you will be included in the project credits.  
+If serial debug output is enabled in the configuration, runtime diagnostics are emitted over USB serial.
 
--The `dev` branch for development and pull requests. The `main` branch is only for merges from `dev` for new version releases.  
+## Known Caveats
 
--The `legacy` and `pre-coroutine` branches are archives of early rewrites during development and are locked.  
+- The current PlatformIO target is `esp32dev`, while earlier project notes referenced `ESP32-S3` hardware. Verify your board choice before flashing.
+- OTA updates only cover `firmware.bin`.
+- Weather and geolocation features depend on valid external API keys and network access.
 
--Release version numbers are formatted Major.Minor.Patch. Some major and minor versions may require the LEDSmartClock settings to be reconfigured as all settings will be lost after upgrading due to IotWebConf options updates and the IotWebConf config version changing.  
+## Roadmap
 
--images that were used to create the animated bitmaps are located in the `icons` directory.  
+The rewrite is still in progress. The architecture and migration goals are tracked in [docs/rewrite-roadmap.md](docs/rewrite-roadmap.md).
 
--A Jtag connection will be available on the circuit board for easy debugging.  
+## Contributing
 
--An extra I2C connection will be available on the circuit board for optional expansion.  
+Bug reports, hardware notes, cleanup patches, and UI improvements are welcome. If you open an issue or pull request, include:
 
--If `debug to serial` is checked in settings, debug information will be sent to the USB serial port. Make sure `DCORE_DEBUG_LEVEL` is set to `4` in platformio.txt for full debug log output.  
-
--Single character commands can be sent to the Serial to get debug information:
-`d` - Displays all current debug information
-`s` - Displays all coroutine states
-`f` - Displays all coroutine execution times (Only if `#define COROUTINE_PROFILER` is set in main.h)
-`r` - Forces air quality to check and display
-`w` - Forces current weather to check and display
-`q` - Forces daily weather to check and display
-`e` - Forces date to display
+- The hardware variant you are using
+- Whether GPS is connected
+- Whether API keys are configured
+- Whether the problem occurs in AP mode, normal Wi-Fi mode, or both
+- Any relevant serial debug output
 
 ## Credits
 
- - LEDSmartClock was created by Ian Perry (cosmicc) https://github.com/cosmicc
- - Thanks to Brian Parks (bxparks) https://github.com/bxparks for creating some amazing AceTime, AceTimeClock, and AceRoutines libraries.
- - Thanks to Balázs Kelemen (prampec) https://github.com/prampec for the wonderful IotWebConf library.
- - Thanks to Marc Merlin (marcmerlin) https://github.com/marcmerlin for creating the great FastLED NeoMatrix library, making interfacing with the LED matrix incredibly easy.
+- Project author: Ian Perry ([cosmicc](https://github.com/cosmicc))
+- AceTime, AceTimeClock, AceRoutine: Brian Parks ([bxparks](https://github.com/bxparks))
+- IotWebConf: Balazs Kelemen ([prampec](https://github.com/prampec))
+- FastLED NeoMatrix: Marc Merlin ([marcmerlin](https://github.com/marcmerlin))

@@ -12,6 +12,58 @@ void copyJsonString(char (&dest)[N], JsonVariantConst value)
   const char *text = value.isNull() ? "" : value.as<const char *>();
   snprintf(dest, N, "%s", text == nullptr ? "" : text);
 }
+
+/** Clears all stored details for the current active alert. */
+void clearAlertDetails()
+{
+  alerts.status1[0] = '\0';
+  alerts.severity1[0] = '\0';
+  alerts.certainty1[0] = '\0';
+  alerts.urgency1[0] = '\0';
+  alerts.event1[0] = '\0';
+  alerts.description1[0] = '\0';
+  alerts.instruction1[0] = '\0';
+}
+
+/** Copies, sanitizes, and reports whether a JSON string produced visible text. */
+template <size_t N>
+bool copyJsonStringClean(char (&dest)[N], JsonVariantConst value)
+{
+  copyJsonString(dest, value);
+  cleanString(dest);
+  return hasVisibleText(dest);
+}
+
+/** Copies the selected feature into the shared alert fields using safe fallbacks. */
+void loadAlertDetails(JsonVariantConst feature)
+{
+  JsonVariantConst properties = feature["properties"];
+  copyJsonStringClean(alerts.status1, properties["status"]);
+  copyJsonStringClean(alerts.severity1, properties["severity"]);
+  copyJsonStringClean(alerts.certainty1, properties["certainty"]);
+  copyJsonStringClean(alerts.urgency1, properties["urgency"]);
+  copyJsonStringClean(alerts.event1, properties["event"]);
+
+  const char *descriptionSource = "empty";
+  if (copyJsonStringClean(alerts.description1, properties["parameters"]["NWSheadline"][0]))
+    descriptionSource = "parameters.NWSheadline";
+  else if (copyJsonStringClean(alerts.description1, properties["headline"]))
+    descriptionSource = "headline";
+  else if (copyJsonStringClean(alerts.description1, properties["event"]))
+    descriptionSource = "event";
+  else if (copyJsonStringClean(alerts.description1, properties["description"]))
+    descriptionSource = "description";
+  else
+    alerts.description1[0] = '\0';
+
+  if (!copyJsonStringClean(alerts.instruction1, properties["instruction"]))
+    alerts.instruction1[0] = '\0';
+
+  ESP_LOGI(TAG, "Selected alert text source: %s | Event: %s | Description: %s",
+           descriptionSource,
+           alerts.event1,
+           hasVisibleText(alerts.description1) ? alerts.description1 : "(empty)");
+}
 } // namespace
 
 bool fillAlertsFromJson(const String &payload)
@@ -22,6 +74,8 @@ bool fillAlertsFromJson(const String &payload)
   filter["features"][0]["properties"]["certainty"] = true;
   filter["features"][0]["properties"]["urgency"] = true;
   filter["features"][0]["properties"]["event"] = true;
+  filter["features"][0]["properties"]["headline"] = true;
+  filter["features"][0]["properties"]["description"] = true;
   filter["features"][0]["properties"]["instruction"] = true;
   filter["features"][0]["properties"]["parameters"]["NWSheadline"] = true;
   filter["features"][1]["properties"]["status"] = true;
@@ -29,6 +83,8 @@ bool fillAlertsFromJson(const String &payload)
   filter["features"][1]["properties"]["certainty"] = true;
   filter["features"][1]["properties"]["urgency"] = true;
   filter["features"][1]["properties"]["event"] = true;
+  filter["features"][1]["properties"]["headline"] = true;
+  filter["features"][1]["properties"]["description"] = true;
   filter["features"][1]["properties"]["instruction"] = true;
   filter["features"][1]["properties"]["parameters"]["NWSheadline"] = true;
   filter["features"][2]["properties"]["status"] = true;
@@ -36,6 +92,8 @@ bool fillAlertsFromJson(const String &payload)
   filter["features"][2]["properties"]["certainty"] = true;
   filter["features"][2]["properties"]["urgency"] = true;
   filter["features"][2]["properties"]["event"] = true;
+  filter["features"][2]["properties"]["headline"] = true;
+  filter["features"][2]["properties"]["description"] = true;
   filter["features"][2]["properties"]["instruction"] = true;
   filter["features"][2]["properties"]["parameters"]["NWSheadline"] = true;
   StaticJsonDocument<8192> doc;
@@ -46,56 +104,34 @@ bool fillAlertsFromJson(const String &payload)
     return false;
   }
   JsonObject obj = doc.as<JsonObject>();
-  uint8_t actwatch = 0;
-  uint8_t actwarn = 0;
-  bool result = false;
-  if (!obj["features"][0].isNull())
+  clearAlertDetails();
+  uint8_t selectedWatch = 0;
+  uint8_t selectedWarning = 0;
+
+  for (uint8_t index = 0; index < 3; ++index)
   {
-    if ((obj["features"][0]["properties"]["severity"].as<String>()) != "Unknown")
+    JsonVariantConst feature = obj["features"][index];
+    if (feature.isNull())
+      continue;
+
+    String severity = feature["properties"]["severity"] | "";
+    if (severity == "Unknown")
     {
-      if ((obj["features"][0]["properties"]["certainty"].as<String>()) == "Observed" || (obj["features"][0]["properties"]["certainty"].as<String>()) == "Likely")
-        actwarn = 1;
-      else if ((obj["features"][0]["properties"]["certainty"].as<String>()) == "Possible")
-        actwatch = 1;
+      ESP_LOGD(TAG, "Weather alert %d received but is of severity Unknown, skipping", index + 1);
+      continue;
     }
+
+    String certainty = feature["properties"]["certainty"] | "";
+    if ((certainty == "Observed" || certainty == "Likely") && selectedWarning == 0)
+      selectedWarning = index + 1;
+    else if (certainty == "Possible" && selectedWatch == 0)
+      selectedWatch = index + 1;
     else
-      ESP_LOGD(TAG, "Weather alert 1 received but is of status Unknown, skipping");
-    if (!obj["features"][1].isNull())
-    {
-      if ((obj["features"][1]["properties"]["severity"].as<String>()) != "Unknown")
-      {
-        if ((obj["features"][1]["properties"]["certainty"].as<String>()) == "Observed" || (obj["features"][1]["properties"]["certainty"].as<String>()) == "Likely")
-        {
-          if (actwarn == 0)
-            actwarn = 2;
-        }
-        else if ((obj["features"][1]["properties"]["certainty"].as<String>()) == "Possible")
-          if (actwatch == 0)
-            actwatch = 2;
-      }
-      else
-        ESP_LOGD(TAG, "Weather alert 2 received but is of status Unknown, skipping");
-      if (!obj["features"][2].isNull())
-      {
-        if ((obj["features"][2]["properties"]["severity"].as<String>()) != "Unknown")
-        {
-          if ((obj["features"][2]["properties"]["certainty"].as<String>()) == "Observed" || (obj["features"][2]["properties"]["certainty"].as<String>()) == "Likely")
-          {
-            if (actwarn == 0)
-              actwarn = 3;
-          }
-          else if ((obj["features"][2]["properties"]["certainty"].as<String>()) == "Possible")
-          {
-            if (actwatch == 0)
-              actwatch = 3;
-          }
-        }
-        else
-          ESP_LOGD(TAG, "Weather alert 3 received but is of status Unknown, skipping");
-      }
-    }
+      ESP_LOGD(TAG, "Weather alert %d certainty [%s] did not map to warning/watch selection", index + 1, certainty.c_str());
   }
-  if (actwarn > 0)
+
+  const uint8_t selectedAlert = selectedWarning > 0 ? selectedWarning : selectedWatch;
+  if (selectedWarning > 0)
   {
     alerts.inWarning = true;
     alerts.inWatch = false;
@@ -104,7 +140,7 @@ bool fillAlertsFromJson(const String &payload)
     alerts.timestamp = systemClock.getNow();
     ESP_LOGI(TAG, "Active weather WARNING alert received");
   }
-  else if (actwatch > 0)
+  else if (selectedWatch > 0)
   {
     alerts.inWarning = false;
     alerts.inWatch = true;
@@ -113,83 +149,26 @@ bool fillAlertsFromJson(const String &payload)
     alerts.timestamp = systemClock.getNow();
     ESP_LOGI(TAG, "Active weather WATCH alert received");
   }
-  if (actwarn == 1 || actwatch == 1)
-  {
-    if (!obj["features"][0]["properties"]["status"].isNull())
-    {
-      copyJsonString(alerts.status1, obj["features"][0]["properties"]["status"]);
-      copyJsonString(alerts.severity1, obj["features"][0]["properties"]["severity"]);
-      copyJsonString(alerts.certainty1, obj["features"][0]["properties"]["certainty"]);
-      copyJsonString(alerts.urgency1, obj["features"][0]["properties"]["urgency"]);
-      copyJsonString(alerts.event1, obj["features"][0]["properties"]["event"]);
-    }
-    if (!obj["features"][0]["properties"]["parameters"]["NWSheadline"].isNull())
-    {
-      copyJsonString(alerts.description1, obj["features"][0]["properties"]["parameters"]["NWSheadline"][0]);
-      cleanString(alerts.description1);
-      result = true;
-    }
-    if (!obj["features"][0]["properties"]["instruction"].isNull())
-    {
-      copyJsonString(alerts.instruction1, obj["features"][0]["properties"]["instruction"]);
-      cleanString(alerts.instruction1);
-    }
-    else
-    {
-      alerts.instruction1[0] = '\0';
-    }
-  }
-  else if (actwarn == 2 || actwatch == 2)
-  {
-    copyJsonString(alerts.status1, obj["features"][1]["properties"]["status"]);
-    copyJsonString(alerts.severity1, obj["features"][1]["properties"]["severity"]);
-    copyJsonString(alerts.certainty1, obj["features"][1]["properties"]["certainty"]);
-    copyJsonString(alerts.urgency1, obj["features"][1]["properties"]["urgency"]);
-    copyJsonString(alerts.event1, obj["features"][1]["properties"]["event"]);
-    if (!obj["features"][1]["properties"]["parameters"]["NWSheadline"].isNull())
-    {
-      copyJsonString(alerts.description1, obj["features"][1]["properties"]["parameters"]["NWSheadline"][0]);
-      cleanString(alerts.description1);
-      result = true;
-    }
-    if (!obj["features"][1]["properties"]["instruction"].isNull())
-    {
-      copyJsonString(alerts.instruction1, obj["features"][1]["properties"]["instruction"]);
-      cleanString(alerts.instruction1);
-    }
-    else
-      alerts.instruction1[0] = '\0';
-  }
-  else if (actwarn == 3 || actwatch == 3)
-  {
-    copyJsonString(alerts.status1, obj["features"][2]["properties"]["status"]);
-    copyJsonString(alerts.severity1, obj["features"][2]["properties"]["severity"]);
-    copyJsonString(alerts.certainty1, obj["features"][2]["properties"]["certainty"]);
-    copyJsonString(alerts.urgency1, obj["features"][2]["properties"]["urgency"]);
-    copyJsonString(alerts.event1, obj["features"][2]["properties"]["event"]);
-    if (!obj["features"][2]["properties"]["parameters"]["NWSheadline"].isNull())
-    {
-      copyJsonString(alerts.description1, obj["features"][2]["properties"]["parameters"]["NWSheadline"][0]);
-      cleanString(alerts.description1);
-      result = true;
-    }
-    if (!obj["features"][2]["properties"]["instruction"].isNull())
-    {
-      copyJsonString(alerts.instruction1, obj["features"][2]["properties"]["instruction"]);
-      cleanString(alerts.instruction1);
-    }
-    else
-      alerts.instruction1[0] = '\0';
-  }
   else
   {
     alerts.active = false;
     alerts.inWarning = false;
     alerts.inWatch = false;
     ESP_LOGI(TAG, "No current active weather alerts");
-    result = true;
+    return true;
   }
-  return result;
+
+  if (selectedAlert > 0)
+  {
+    loadAlertDetails(obj["features"][selectedAlert - 1]);
+    if (!hasVisibleText(alerts.description1) && hasVisibleText(alerts.event1))
+    {
+      strlcpy(alerts.description1, alerts.event1, sizeof(alerts.description1));
+      ESP_LOGW(TAG, "Alert description was empty after parsing, falling back to event title");
+    }
+  }
+
+  return true;
 }
 
 bool fillWeatherFromJson(const String &payload)
@@ -264,8 +243,14 @@ bool fillWeatherFromJson(const String &payload)
 
 bool fillIpgeoFromJson(const String &payload)
 {
-  StaticJsonDocument<2048> doc;
-  DeserializationError error = deserializeJson(doc, payload);
+  StaticJsonDocument<128> filter;
+  filter["time_zone"]["name"] = true;
+  filter["time_zone"]["offset"] = true;
+  filter["latitude"] = true;
+  filter["longitude"] = true;
+
+  StaticJsonDocument<768> doc;
+  DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
   if (error)
   {
     ESP_LOGE(TAG, "IPGeo deserializeJson() failed: %s", error.c_str());
@@ -275,9 +260,9 @@ bool fillIpgeoFromJson(const String &payload)
   if (!obj["time_zone"].isNull())
   {
     copyJsonString(ipgeo.timezone, obj["time_zone"]["name"]);
-    ipgeo.tzoffset = obj["time_zone"]["offset"];
-    ipgeo.lat = obj["latitude"];
-    ipgeo.lon = obj["longitude"];
+    ipgeo.tzoffset = obj["time_zone"]["offset"] | 127;
+    ipgeo.lat = obj["latitude"] | 0.0;
+    ipgeo.lon = obj["longitude"] | 0.0;
     return true;
   }
   return false;

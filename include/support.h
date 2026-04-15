@@ -15,8 +15,10 @@ ace_time::acetime_t convert1970Epoch(ace_time::acetime_t epoch1970);
 void setTimeSource(const String &inputString);
 /** Convenience wrapper around the system clock. */
 ace_time::acetime_t Now();
-/** Stores the timestamp of the latest successful NTP/GPS sync. */
+/** Stores the timestamp of the latest successful external time sync using the current system clock. */
 void resetLastNtpCheck();
+/** Stores the timestamp of the latest successful external time sync using a known synced time value. */
+void resetLastNtpCheck(ace_time::acetime_t syncedTime);
 /** Returns the ordinal suffix for a day number. */
 const char *ordinal_suffix(int n);
 /** Uppercases a mutable C string in-place. */
@@ -27,6 +29,8 @@ uint16_t calcbright(uint16_t bl);
 void cleanString(char *str);
 /** Uppercases an entire mutable C string in-place. */
 void capitalize(char *str);
+/** Returns true when a mutable C string contains at least one non-space character. */
+bool hasVisibleText(const char *text);
 /** Compares two fixed-width location strings for exact equality. */
 bool cmpLocs(const char a1[32], const char a2[32]);
 /** Converts a numeric UV index into a descriptive label. */

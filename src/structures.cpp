@@ -69,6 +69,18 @@ bool DisplayToken::getToken(uint8_t position) const
 
 void DisplayToken::setToken(uint8_t position)
 {
+  if (position == 0 || position > 10)
+  {
+    ESP_LOGW(TAG, "Ignoring invalid display token request: %d", position);
+    return;
+  }
+
+  if (getToken(position))
+  {
+    ESP_LOGW(TAG, "Display token already held: %s(%d)", name[position], position);
+    return;
+  }
+
   ESP_LOGD(TAG, "Setting display token: %s(%d)", name[position], position);
 
   switch (position)
@@ -110,6 +122,12 @@ void DisplayToken::setToken(uint8_t position)
 
 void DisplayToken::resetToken(uint8_t position)
 {
+  if (position == 0 || position > 10)
+  {
+    ESP_LOGW(TAG, "Ignoring invalid display token release: %d", position);
+    return;
+  }
+
   ESP_LOGD(TAG, "Releasing display token: %s(%d)", name[position], position);
 
   switch (position)
@@ -168,27 +186,17 @@ bool DisplayToken::isReady(uint8_t position) const
   switch (position)
   {
   case 0:
-    return !(token1 || token2 || token3 || token4 || token5 || token6 || token7 || token8 || token9 || token10);
   case 1:
-    return !(token2 || token3 || token4 || token5 || token6 || token7 || token8 || token9 || token10);
   case 2:
-    return !(token1 || token3 || token4 || token5 || token6 || token7 || token8 || token9 || token10);
   case 3:
-    return !(token1 || token2 || token4 || token5 || token6 || token7 || token8 || token9 || token10);
   case 4:
-    return !(token1 || token2 || token3 || token5 || token6 || token7 || token8 || token9 || token10);
   case 5:
-    return !(token1 || token2 || token3 || token4 || token6 || token7 || token8 || token9 || token10);
   case 6:
-    return !(token1 || token2 || token3 || token4 || token5 || token7 || token8 || token9 || token10);
   case 7:
-    return !(token1 || token2 || token3 || token4 || token5 || token6 || token8 || token9 || token10);
   case 8:
-    return !(token1 || token2 || token3 || token4 || token5 || token6 || token7 || token9 || token10);
   case 9:
-    return !(token1 || token2 || token3 || token4 || token5 || token6 || token7 || token8 || token10);
   case 10:
-    return !(token1 || token2 || token3 || token4 || token5 || token6 || token7 || token8 || token9);
+    return !(token1 || token2 || token3 || token4 || token5 || token6 || token7 || token8 || token9 || token10);
   default:
     return false;
   }

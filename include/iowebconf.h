@@ -4,7 +4,9 @@
 extern IotWebConf iotWebConf;
 
 /** Wires parameters, callbacks, OTA support, and the themed config portal. */
-void setupIotWebConf();
+bool setupIotWebConf();
+/** Repairs out-of-range or legacy config values currently loaded in memory. */
+void normalizeLoadedConfigValues();
 
 /** Last persisted latitude used before live location services update it. */
 extern iotwebconf::TextTParameter<12> savedlat;
@@ -54,6 +56,10 @@ extern iotwebconf::CheckboxTParameter twelve_clock;
 extern iotwebconf::CheckboxTParameter enable_fixed_tz;
 /** User-selected timezone offset used when fixed timezone mode is enabled. */
 extern iotwebconf::IntTParameter<int8_t> fixed_offset;
+/** Preferred NTP hostname used when DHCP does not supply a server or override is enabled. */
+extern iotwebconf::TextTParameter<64> ntp_server;
+/** Forces the preferred NTP server even when DHCP offers its own NTP server. */
+extern iotwebconf::CheckboxTParameter override_dhcp_ntp;
 /** Enables blinking of the colon between the clock digits. */
 extern iotwebconf::CheckboxTParameter colonflicker;
 /** Speeds up the colon blink cadence when blinking is enabled. */

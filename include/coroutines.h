@@ -7,6 +7,34 @@ COROUTINE(sysClock)
   }
 }
 
+/** Returns the fastest enabled weather-driven refresh interval in minutes. */
+static uint32_t weatherRefreshIntervalMinutes()
+{
+  uint32_t refreshMinutes = static_cast<uint32_t>(current_temp_interval.value());
+
+  if (show_current_weather.isChecked())
+    refreshMinutes = min(refreshMinutes, static_cast<uint32_t>(current_weather_interval.value()) * 60U);
+
+  if (show_daily_weather.isChecked())
+    refreshMinutes = min(refreshMinutes, static_cast<uint32_t>(daily_weather_interval.value()) * 60U);
+
+  return refreshMinutes;
+}
+
+/** Returns the fastest enabled AQI-driven refresh interval in minutes. */
+static uint32_t aqiRefreshIntervalMinutes()
+{
+  uint32_t refreshMinutes = static_cast<uint32_t>(aqi_interval.value());
+
+  if (show_current_weather.isChecked())
+    refreshMinutes = min(refreshMinutes, static_cast<uint32_t>(current_weather_interval.value()) * 60U);
+
+  if (show_daily_weather.isChecked())
+    refreshMinutes = min(refreshMinutes, static_cast<uint32_t>(daily_weather_interval.value()) * 60U);
+
+  return refreshMinutes;
+}
+
 COROUTINE(IotWebConf) 
 {
   COROUTINE_LOOP() 
@@ -87,8 +115,7 @@ COROUTINE(checkAirquality)
 {
   COROUTINE_LOOP() 
   {
-    //  || isNextShowReady(checkweather.lastsuccess, current_weather_interval.value(), T1M)
-    COROUTINE_AWAIT(isHttpReady() && (isNextShowReady(checkaqi.lastsuccess, aqi_interval.value(), T1M)) && isNextAttemptReady(checkaqi.lastattempt) && isApiValid(weatherapi.value()) && checkaqi.retries < HTTP_MAX_RETRIES && isCoordsValid() && !runtimeState.firstTimeFailsafe);
+    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkaqi.lastsuccess, aqiRefreshIntervalMinutes(), T1M) && isNextAttemptReady(checkaqi.lastattempt) && isApiValid(weatherapi.value()) && checkaqi.retries < HTTP_MAX_RETRIES && isCoordsValid() && !runtimeState.firstTimeFailsafe);
     ESP_LOGI(TAG, "Checking air quality conditions...");
     checkaqi.retries++;
     IotWebConf.suspend();
@@ -139,7 +166,7 @@ COROUTINE(checkWeather)
 {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkweather.lastsuccess, current_temp_interval.value(), T1M) && isNextAttemptReady(checkweather.lastattempt)  && isApiValid(weatherapi.value()) && checkweather.retries < HTTP_MAX_RETRIES && isCoordsValid() && !runtimeState.firstTimeFailsafe);
+    COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkweather.lastsuccess, weatherRefreshIntervalMinutes(), T1M) && isNextAttemptReady(checkweather.lastattempt)  && isApiValid(weatherapi.value()) && checkweather.retries < HTTP_MAX_RETRIES && isCoordsValid() && !runtimeState.firstTimeFailsafe);
     ESP_LOGI(TAG, "Checking weather forecast...");
     checkweather.retries++;
     IotWebConf.suspend();
@@ -213,7 +240,10 @@ COROUTINE(checkAlerts)
         }
       }
       else
-        ESP_LOGE(TAG, "Alerts ERROR: [%d] %s", httpCode, getHttpCodeName(httpCode).c_str());
+      {
+        reqdata = networkService.client.getString();
+        ESP_LOGE(TAG, "Alerts ERROR: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.c_str());
+      }
     }
     else
     {
@@ -232,10 +262,10 @@ COROUTINE(showDate)
   {
   COROUTINE_AWAIT((showready.date || isNextShowReady(lastshown.date, date_interval.value(), T1H)) && show_date.isChecked() && iotWebConf.getState() != 1 && displaytoken.isReady(1));
   displaytoken.setToken(1);
+  lastshown.date = systemClock.getNow();
   getSystemZonedDateString(scrolltext.message);
   startScroll(hex2rgb(date_color.value()), false);
   COROUTINE_AWAIT(!scrolltext.active);
-  lastshown.date = systemClock.getNow();
   showready.date = false;
   displaytoken.resetToken(1);
   }
@@ -247,6 +277,7 @@ COROUTINE(showWeather)
   {
   COROUTINE_AWAIT((showready.currentweather || isNextShowReady(lastshown.currentweather, current_weather_interval.value(), T1H)) && checkweather.complete && show_current_weather.isChecked() && displaytoken.isReady(2));
   displaytoken.setToken(2);
+  lastshown.currentweather = systemClock.getNow();
   startFlash(hex2rgb(current_weather_color.value()), 1);
   COROUTINE_AWAIT(!alertflash.active);
   char speedunit[7];
@@ -268,7 +299,6 @@ COROUTINE(showWeather)
     matrix->show();
     COROUTINE_DELAY(50);
   }
-  lastshown.currentweather = systemClock.getNow();
   showready.currentweather = false;
   displaytoken.resetToken(2);
   }
@@ -280,6 +310,10 @@ COROUTINE(showTemp)
   {
   COROUTINE_AWAIT(isNextShowReady(lastshown.currenttemp, current_temp_interval.value(), T1M) && checkweather.complete && show_current_temp.isChecked() && displaytoken.isReady(2));
   displaytoken.setToken(2);
+  // Suspend the clock immediately so the temperature panel cannot race the
+  // next clock redraw while it owns the display token.
+  showClock.suspend();
+  lastshown.currenttemp = systemClock.getNow();
   cotimer.millis = millis();
   ESP_LOGI(TAG, "Showing Temperature");
   while (millis() - cotimer.millis < static_cast<uint32_t>(current_temp_duration.value()) * 1000U)
@@ -291,7 +325,6 @@ COROUTINE(showTemp)
     matrix->show();
     COROUTINE_DELAY(50);
   }
-  lastshown.currenttemp = systemClock.getNow();
   showready.currenttemp = false;
   displaytoken.resetToken(2);
   }
@@ -303,6 +336,7 @@ COROUTINE(showWeatherDaily)
   {
     COROUTINE_AWAIT((showready.dayweather || isNextShowReady(lastshown.dayweather, daily_weather_interval.value(), T1H)) && checkweather.complete && show_daily_weather.isChecked() && displaytoken.isReady(8));
     displaytoken.setToken(8);
+    lastshown.dayweather = systemClock.getNow();
     startFlash(hex2rgb(daily_weather_color.value()), 1);
     memcpy(scrolltext.icon, weather.day.icon, sizeof(weather.day.icon[0]) * 4);
     COROUTINE_AWAIT(!alertflash.active);
@@ -322,7 +356,6 @@ COROUTINE(showWeatherDaily)
     startScroll(hex2rgb(daily_weather_color.value()), true);
     COROUTINE_AWAIT(!scrolltext.active);
     cotimer.millis = millis();
-    lastshown.dayweather = systemClock.getNow();
     showready.dayweather = false;
     displaytoken.resetToken(8);
   }
@@ -334,6 +367,7 @@ COROUTINE(showAirquality)
   {
     COROUTINE_AWAIT((showready.aqi || isNextShowReady(lastshown.aqi, aqi_interval.value(), T1M)) && checkaqi.complete && show_aqi.isChecked() && displaytoken.isReady(9));
     displaytoken.setToken(9);
+    lastshown.aqi = systemClock.getNow();
     // set color using lookup value and bit-shift if enable_aqi_color.isChecked() is false
     if (enable_aqi_color.isChecked())
       aqi.current.color = hex2rgb(aqi_color.value());
@@ -345,7 +379,6 @@ COROUTINE(showAirquality)
     startScroll(aqi.current.color, false);
     COROUTINE_AWAIT(!scrolltext.active);
     cotimer.millis = millis();
-    lastshown.aqi = systemClock.getNow();
     showready.aqi = false;
     displaytoken.resetToken(9);
   }
@@ -364,8 +397,9 @@ COROUTINE(showAlerts)
       startFlash(alertcolors[alerts.inWatch], 3);
       COROUTINE_AWAIT(!alertflash.active);
       char *inst = alerts.instruction1;
+      const char *alertMessage = hasVisibleText(alerts.description1) ? alerts.description1 : alerts.event1;
       capitalize(inst);
-      strlcpy(scrolltext.message, alerts.description1, sizeof(scrolltext.message));
+      strlcpy(scrolltext.message, alertMessage, sizeof(scrolltext.message));
       if (inst[0] != '\0')
       {
         strlcat(scrolltext.message, ". ", sizeof(scrolltext.message));
@@ -887,12 +921,20 @@ COROUTINE_LOOP() {
     COROUTINE_AWAIT(millis() - scrolltext.millis >= cotimer.scrollspeed-1);
     // Get a token if not already set
     if (!displaytoken.getToken(10)) {
-        displaytoken.setToken(10);
-        scrolltext.size = strlen(scrolltext.message) * 6 - 1;
-        ESP_LOGI(TAG, "Scrolltext(): Scrolling message - Chars:%d Width:%d \"%s\"", strlen(scrolltext.message), scrolltext.size, scrolltext.message);
+        if (!hasVisibleText(scrolltext.message)) {
+            scrolltext.active = false;
+            scrolltext.displayicon = false;
+            scrolltext.position = mw - 1;
+            scrolltext.size = 0;
+            ESP_LOGW(TAG, "Scrolltext(): skipping empty scroll message");
+        } else {
+            displaytoken.setToken(10);
+            scrolltext.size = strlen(scrolltext.message) * 6 - 1;
+            ESP_LOGI(TAG, "Scrolltext(): Scrolling message - Chars:%d Width:%d \"%s\"", strlen(scrolltext.message), scrolltext.size, scrolltext.message);
+        }
     }
     // Scroll and display message if position within bounds
-    if (scrolltext.position >= -scrolltext.size) {
+    if (scrolltext.active && scrolltext.position >= -scrolltext.size) {
         matrix->clear();
         matrix->setCursor(scrolltext.position, 0);
         matrix->setTextColor(scrolltext.color);
@@ -905,7 +947,7 @@ COROUTINE_LOOP() {
         scrolltext.position--;
         scrolltext.millis = millis();
     // Otherwise stop scrolling
-    } else {
+    } else if (scrolltext.active) {
         scrolltext.active = false;
         scrolltext.position = mw-1;
         scrolltext.displayicon = false;

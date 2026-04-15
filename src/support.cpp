@@ -89,15 +89,17 @@ ace_time::acetime_t convert1970Epoch(ace_time::acetime_t epoch1970)
 
 void setTimeSource(const String &inputString)
 {
-  for (int i = 0; i < 4; i++)
+  const size_t capacity = sizeof(runtimeState.timeSource);
+  for (size_t i = 0; i < capacity; i++)
   {
-    if (i < inputString.length())
+    if (i + 1 < capacity && i < static_cast<size_t>(inputString.length()))
     {
-      runtimeState.timeSource[i] = inputString.charAt(i);
+      runtimeState.timeSource[i] = inputString.charAt(static_cast<unsigned int>(i));
     }
     else
     {
       runtimeState.timeSource[i] = '\0';
+      break;
     }
   }
 }
@@ -109,7 +111,12 @@ ace_time::acetime_t Now()
 
 void resetLastNtpCheck()
 {
-  runtimeState.lastNtpCheck = systemClock.getNow();
+  resetLastNtpCheck(systemClock.getNow());
+}
+
+void resetLastNtpCheck(ace_time::acetime_t syncedTime)
+{
+  runtimeState.lastNtpCheck = syncedTime;
 }
 
 bool compareTimes(ace_time::ZonedDateTime t1, ace_time::ZonedDateTime t2)
@@ -211,6 +218,21 @@ void capitalize(char *str)
     *str = toupper(static_cast<unsigned char>(*str));
     str++;
   }
+}
+
+bool hasVisibleText(const char *text)
+{
+  if (text == nullptr)
+    return false;
+
+  while (*text != '\0')
+  {
+    if (!isspace(static_cast<unsigned char>(*text)))
+      return true;
+    ++text;
+  }
+
+  return false;
 }
 
 bool cmpLocs(const char a1[32], const char a2[32])

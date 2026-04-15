@@ -14,12 +14,14 @@ namespace clock
 class GPSClock : public Clock
 {
 private:
-  static const uint8_t kNtpPacketSize = 48;
-  const char *const mServer = "172.25.150.1";
-  uint16_t const mLocalPort = 2390;
-  uint16_t const mRequestTimeout = 1000;
-  mutable WiFiUDP mUdp;
-  mutable uint8_t mPacketBuffer[kNtpPacketSize];
+  /** Maximum time to wait for a fresh SNTP sync event during a forced sync. */
+  uint16_t const mRequestTimeout = 5000;
+  /** SNTP sync generation visible at the start of the active request. */
+  mutable uint32_t mPendingSntpSyncCount = 0;
+  /** Millisecond timestamp when the current SNTP request was started. */
+  mutable uint32_t mRequestStartMillis = 0;
+  /** True while the clock is waiting for a fresh SNTP sync callback. */
+  mutable bool mWaitingForNtpSync = false;
 
 public:
   mutable bool ntpIsReady = false;
@@ -32,18 +34,20 @@ public:
   void setup();
   /** Re-enables the NTP transport after Wi-Fi comes online. */
   void ntpReady();
-  /** Initializes the UDP socket used for NTP polling. */
+  /** Configures SNTP server selection before Wi-Fi starts DHCP negotiation. */
+  void prepareServerSelection();
+  /** Re-evaluates the preferred NTP server and any DHCP-provided override. */
+  void refreshNtpServer();
+  /** Marks the SNTP transport as available after Wi-Fi comes online. */
   void setupNTP();
-  /** Returns the current time from GPS or the latest NTP response. */
+  /** Returns the current time from GPS, SNTP, or RTC fallback. */
   acetime_t getNow() const override;
-  /** Sends an NTP request when the clock is due for resynchronization. */
+  /** Starts a fresh SNTP sync when one is due. */
   void sendRequest() const;
-  /** Returns true when either GPS data or an NTP response is available. */
+  /** Returns true when GPS, fresh SNTP, or a usable fallback time is available. */
   bool isResponseReady() const;
-  /** Consumes either GPS time data or an NTP response packet. */
+  /** Consumes GPS, SNTP, or RTC fallback time data. */
   acetime_t readResponse() const;
-  /** Formats and sends a raw NTP packet. */
-  void sendNtpPacket(const IPAddress &address) const;
 };
 } // namespace clock
 } // namespace ace_time

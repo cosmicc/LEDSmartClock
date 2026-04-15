@@ -1,10 +1,27 @@
 #include "main.h"
+#include "config_backup.h"
 
 namespace
 {
 constexpr char kFirmwareUpdatePath[] = "/firmware";
+constexpr char kConfigExportPath[] = "/config/export";
+constexpr char kConfigImportPath[] = "/config/import";
+constexpr size_t kMaxConfigImportBytes = 24U * 1024U;
+
+/** Tracks whether the current config-import upload request passed auth checks. */
+bool configImportAuthenticated = false;
+/** Tracks whether a config backup upload has started successfully. */
+bool configImportStarted = false;
+/** Holds the fatal error message for the current config-import request. */
+String configImportError;
+/** Accumulates the uploaded JSON backup body before it is parsed and applied. */
+String configImportPayload;
+
+/** Tracks whether the current firmware upload request passed auth checks. */
 bool firmwareUploadAuthenticated = false;
+/** Tracks whether a firmware upload has started successfully. */
 bool firmwareUploadStarted = false;
+/** Holds the fatal error message for the current firmware-upload request. */
 String firmwareUploadError;
 
 const char kWebThemeCss[] PROGMEM = R"clockcss(
@@ -573,6 +590,7 @@ button{
 const char kConfigPortalScript[] PROGMEM = R"clockjs(
 document.addEventListener('DOMContentLoaded', function () {
   var nav = document.getElementById('portal-nav-links');
+  var runtimeMeta = document.getElementById('portal-runtime');
   var sectionNotes = {
     iwcSys: 'Network identity, credentials, API keys, and maintenance controls.',
     Display: 'Brightness, scrolling, colors, and date messaging.',
@@ -585,6 +603,11 @@ document.addEventListener('DOMContentLoaded', function () {
     Sun: 'Sunrise and sunset messages based on local solar events.',
     Location: 'Coordinate overrides and location-change messaging.'
   };
+
+  if (runtimeMeta && runtimeMeta.dataset.ntpServer) {
+    sectionNotes.Clock += ' Currently using ' + runtimeMeta.dataset.ntpServer +
+      ' via ' + (runtimeMeta.dataset.ntpSource || 'the current selection') + '.';
+  }
 
   function buildFieldCard(node) {
     var card = document.createElement('div');
@@ -1059,9 +1082,15 @@ String activeAddressLabel()
 String timeSourceLabel()
 {
   String rendered(runtimeState.timeSource);
-  if (rendered.length() == 0)
-    rendered = F("n/a");
-  rendered.toUpperCase();
+  rendered.toLowerCase();
+  if (rendered == "gps")
+    rendered = F("GPS");
+  else if (rendered == "ntp")
+    rendered = F("NTP");
+  else if (rendered == "rtc")
+    rendered = F("RTC Chip");
+  else
+    rendered = F("None");
   return htmlEscape(rendered);
 }
 
@@ -1077,6 +1106,18 @@ String timezoneSourceLabel()
   if (fixed_offset.value() != 0)
     return F("Configured fallback");
   return F("GMT default");
+}
+
+/** Formats the active NTP server label shown on the dashboard and config portal. */
+String ntpServerLabel()
+{
+  return safeText(String(runtimeState.ntpServer), DEFAULT_NTP_SERVER);
+}
+
+/** Formats the source of the active NTP server selection. */
+String ntpServerSourceLabel()
+{
+  return safeText(String(runtimeState.ntpServerSource), "Unknown");
 }
 
 /** Returns the current temperature unit as safe inline HTML. */
@@ -1180,6 +1221,16 @@ String currentWeatherDescription()
   return safeText(capString(weather.current.description), "Waiting for weather");
 }
 
+/** Formats the active alert description with a fallback to the alert title. */
+String currentAlertDescription()
+{
+  if (hasVisibleText(alerts.description1))
+    return htmlEscape(String(alerts.description1));
+  if (hasVisibleText(alerts.event1))
+    return htmlEscape(String(alerts.event1));
+  return F("No active alert");
+}
+
 /** Returns the current firmware-upload target path. */
 String firmwareUpdatePathLabel()
 {
@@ -1192,6 +1243,15 @@ void resetFirmwareUploadState()
   firmwareUploadAuthenticated = false;
   firmwareUploadStarted = false;
   firmwareUploadError = "";
+}
+
+/** Resets the per-request JSON config-import state tracked by the backup page. */
+void resetConfigImportState()
+{
+  configImportAuthenticated = false;
+  configImportStarted = false;
+  configImportError = "";
+  configImportPayload = "";
 }
 
 /** Formats the current AQI description with a fallback based on the AQI bucket. */
@@ -1315,11 +1375,13 @@ void appendSetupPage(String &html)
   html += VERSION_SEMVER;
   html += F(".</p><div class='action-row'>");
   html += F("<a class='button-link primary' href='/config'>Open Configuration</a>");
+  html += F("<a class='button-link secondary' href='");
+  html += kConfigImportPath;
+  html += F("'>Import Backup</a>");
   html += F("</div><div class='portal-chip-row'>");
   appendStatusChip(html, "State", htmlEscape(currentConnectionStateLabel()));
   appendStatusChip(html, "Access Point", htmlEscape(String(thingName)));
   appendStatusChip(html, "Portal Address", activeAddressLabel());
-  appendStatusChip(html, "Config Schema", htmlEscape(String(CONFIG_VERSION)));
   html += F("</div><div class='metric-grid'>");
   appendMetricCard(html, "Firmware", htmlEscape(String(VERSION_SEMVER)), "tone-neutral");
   appendMetricCard(html, "Wi-Fi Mode", F("Captive Portal"), "tone-warn");
@@ -1328,12 +1390,13 @@ void appendSetupPage(String &html)
   html += F("</div></header>");
 
   appendNotice(html, "notice-warn", F("The landing page switches to the live status dashboard once Wi-Fi and the basic configuration are in place."));
+  appendNotice(html, "notice-good", F("Already have a backup from another clock or older firmware? Import it before editing settings so Wi-Fi, API keys, and display preferences can be restored in one step."));
 
   html += F("<section class='setup-steps'>");
   html += F("<article class='setup-step'><h3>1. Join the clock</h3><p>Connect to the <strong>");
   html += htmlEscape(String(thingName));
-  html += F("</strong> access point, then open the configuration page.</p></article>");
-  html += F("<article class='setup-step'><h3>2. Enter the essentials</h3><p>Save the Wi-Fi network, admin password, AP password, and your API keys so the clock can resolve time, weather, and location data.</p></article>");
+  html += F("</strong> access point, then open the configuration page or import an existing backup.</p></article>");
+  html += F("<article class='setup-step'><h3>2. Restore or enter the essentials</h3><p>Either import a previous JSON backup or save the Wi-Fi network, admin password, AP password, and API keys so the clock can resolve time, weather, and location data.</p></article>");
   html += F("<article class='setup-step'><h3>3. Finish the display setup</h3><p>Tune brightness, date, alerts, AQI, and sunrise or sunset behavior once the device joins your normal network.</p></article>");
   html += F("</section></div></body></html>");
 }
@@ -1364,9 +1427,16 @@ void appendFirmwareUpdatePage(String &html, const char *noticeToneClass, const S
 
   html += F("<main class='content-grid'>");
 
+  appendCardStart(html, "Back Up Configuration First", "Firmware updates are safer when you keep a current JSON backup of the clock settings before flashing.");
+  appendKeyValueRow(html, "Recommended Action", String(F("<a class='button-link primary' href='")) + kConfigExportPath + F("'>Download Config Backup</a>"));
+  appendKeyValueRow(html, "What It Includes", F("Wi-Fi credentials, portal password, API keys, display preferences, location overrides, and saved fallback state"));
+  appendKeyValueRow(html, "Restore Path", String(F("<a class='button-link ghost' href='")) + kConfigImportPath + F("'>Open Backup & Restore</a>"));
+  appendCardEnd(html);
+
   appendCardStart(html, "Before You Upload", "Use the OTA application image only. This screen does not replace the bootloader or partition table.");
   appendKeyValueRow(html, "Required File", F("<code>firmware.bin</code>"));
   appendKeyValueRow(html, "Typical Location", F("<code>.pio/build/esp32dev/firmware.bin</code>"));
+  appendKeyValueRow(html, "Release Download", F("Download <code>firmware.zip</code> from GitHub Releases, then extract and upload <code>firmware.bin</code>"));
   appendKeyValueRow(html, "Typical Size", F("Approximately 2 MB"));
   appendKeyValueRow(html, "Do Not Upload", F("<code>bootloader.bin</code> or <code>partitions.bin</code>"));
   appendCardEnd(html);
@@ -1384,6 +1454,8 @@ void appendFirmwareUpdatePage(String &html, const char *noticeToneClass, const S
   }
 
   html += F("<ul class='upload-list'>");
+  html += F("<li>Download a JSON configuration backup before installing a new firmware so Wi-Fi, API keys, and display settings can be restored quickly if needed.</li>");
+  html += F("<li>Get updates from the project GitHub Releases page. If you download <code>firmware.zip</code>, extract it first and upload only <code>firmware.bin</code> here.</li>");
   html += F("<li>Upload the same <code>firmware.bin</code> you would normally flash to the OTA app partition.</li>");
   html += F("<li>Keep the browser open until the transfer completes and the success message appears.</li>");
   html += F("<li>If a release changes <code>bootloader.bin</code> or <code>partitions.bin</code>, install those over USB instead of this page.</li>");
@@ -1395,6 +1467,56 @@ void appendFirmwareUpdatePage(String &html, const char *noticeToneClass, const S
     html += F("</script>");
   }
   html += F("</div></body></html>");
+}
+
+/** Renders the configuration backup and restore page used by setup and maintenance flows. */
+void appendConfigBackupPage(String &html, const char *noticeToneClass, const String &noticeMessage, bool showForm)
+{
+  appendDocumentHead(html, "LED Smart Clock Backup & Restore", false);
+
+  html += F("<div class='shell'><header class='hero'>");
+  html += F("<p class='eyebrow'>LED Smart Clock Maintenance</p>");
+  html += F("<h1>Backup & Restore</h1>");
+  html += F("<p class='lede'>Download a JSON snapshot of the current configuration or restore one from another clock or older firmware. Import matches fields by key so older backups can seed newer builds without depending on storage order.</p><div class='action-row'>");
+  html += F("<a class='button-link primary' href='/config'>Configuration</a>");
+  html += F("<a class='button-link secondary' href='/'>Dashboard</a>");
+  html += F("</div><div class='portal-chip-row'>");
+  appendStatusChip(html, "Firmware", htmlEscape(String(VERSION_SEMVER)));
+  appendStatusChip(html, "Address", activeAddressLabel());
+  html += F("</div><div class='metric-grid'>");
+  appendMetricCard(html, "Backup Format", F("JSON"), "tone-neutral");
+  appendMetricCard(html, "Migration Style", F("Key-Based"), "tone-good");
+  appendMetricCard(html, "Includes Secrets", F("Yes"), "tone-warn");
+  html += F("</div></header>");
+
+  if (noticeToneClass != nullptr && noticeMessage.length() > 0)
+    appendNotice(html, noticeToneClass, noticeMessage);
+
+  html += F("<main class='content-grid'>");
+
+  appendCardStart(html, "Export Configuration", "Download a backup before firmware changes, resets, or experimenting with settings so the full setup can be restored quickly.");
+  appendKeyValueRow(html, "Download", String(F("<a class='button-link primary' href='")) + kConfigExportPath + F("'>Download Config Backup</a>"));
+  appendKeyValueRow(html, "Filename", htmlEscape(configBackupDownloadFileName()));
+  appendKeyValueRow(html, "Contains", F("Wi-Fi credentials, portal password, API keys, display settings, location overrides, and saved fallback values"));
+  appendKeyValueRow(html, "Handle Carefully", F("The backup includes secrets, so store it privately."));
+  appendCardEnd(html);
+
+  html += F("<section class='card upload-panel'><div class='card-header'><h2>Import Configuration</h2><p class='card-subtitle'>Upload a previously exported <code>.json</code> backup to restore recognized settings. Missing fields keep their current values, and obsolete fields are ignored so older backups can still be used after firmware upgrades.</p></div>");
+
+  if (showForm)
+  {
+    html += F("<form class='upload-form' method='POST' action='");
+    html += kConfigImportPath;
+    html += F("' enctype='multipart/form-data'>");
+    html += F("<section class='upload-field'><h3>Select Backup File</h3><p>Choose the exported configuration <code>.json</code> file. A successful restore will save the imported settings and reboot the clock so network and portal changes take effect cleanly.</p><input id='config-upload' type='file' name='config' accept='.json,application/json' required></section>");
+    html += F("<div class='upload-actions'><button type='submit'>Import Configuration</button><a class='button-link ghost' href='/'>Cancel</a></div></form>");
+  }
+
+  html += F("<ul class='upload-list'>");
+  html += F("<li>Backups are portable across firmware versions because restore looks up settings by stable IDs instead of raw EEPROM positions.</li>");
+  html += F("<li>Unknown fields from older or newer firmware are ignored instead of breaking the restore.</li>");
+  html += F("<li>After a successful import, the clock reboots so Wi-Fi credentials, portal credentials, and derived state all restart together.</li>");
+  html += F("</ul></section></main></div></body></html>");
 }
 
 /** Renders the main status dashboard shown during normal operation. */
@@ -1419,7 +1541,10 @@ void appendStatusPage(String &html)
   appendStatusChip(html, "Location", currentLocationLabel());
   html += F("</div><div class='metric-grid'>");
   appendMetricCard(html, "Uptime", htmlEscape(elapsedTime(static_cast<uint32_t>(now - runtimeState.bootTime))), "tone-neutral");
-  appendMetricCard(html, "Time Source", timeSourceLabel(), strcmp(runtimeState.timeSource, "gps") == 0 ? "tone-good" : "tone-neutral");
+  appendMetricCard(html, "Time Source", timeSourceLabel(),
+                   (strcmp(runtimeState.timeSource, "gps") == 0 || strcmp(runtimeState.timeSource, "ntp") == 0)
+                       ? "tone-good"
+                       : "tone-neutral");
   appendMetricCard(html, "Brightness", brightnessPercentLabel(), "tone-neutral");
   appendMetricCard(html, "Air Quality", htmlEscape(String(air_quality[aqi.current.aqi])), aqiTone());
   appendMetricCard(html, "Weather Alerts", alerts.active ? F("Active") : F("Clear"), alertTone());
@@ -1436,12 +1561,13 @@ void appendStatusPage(String &html)
 
   appendCardStart(html, "System", "Core firmware identity, connectivity, and synchronization.");
   appendKeyValueRow(html, "Firmware Version", htmlEscape(String(VERSION_SEMVER)));
-  appendKeyValueRow(html, "Config Schema", htmlEscape(String(CONFIG_VERSION)));
   appendKeyValueRow(html, "Connection State", htmlEscape(currentConnectionStateLabel()));
   appendKeyValueRow(html, "Current Address", activeAddressLabel());
   appendKeyValueRow(html, "Uptime", htmlEscape(elapsedTime(static_cast<uint32_t>(now - runtimeState.bootTime))));
   appendKeyValueRow(html, "Last Time Sync", formatAgo(now, systemClock.getLastSyncTime()));
   appendKeyValueRow(html, "Time Source", timeSourceLabel());
+  appendKeyValueRow(html, "NTP Server", ntpServerLabel());
+  appendKeyValueRow(html, "NTP Source", ntpServerSourceLabel());
   appendKeyValueRow(html, "Timezone Source", timezoneSourceLabel());
   appendKeyValueRow(html, "Timezone Offset", htmlEscape(String(current.tzoffset)));
   appendCardEnd(html);
@@ -1492,6 +1618,7 @@ void appendStatusPage(String &html)
   appendKeyValueRow(html, "Warning Count", htmlEscape(String(alerts.inWarning)));
   appendKeyValueRow(html, "Watch Count", htmlEscape(String(alerts.inWatch)));
   appendKeyValueRow(html, "Current Event", safeText(String(alerts.event1), "No active alert"));
+  appendKeyValueRow(html, "Alert Description", currentAlertDescription());
   appendKeyValueRow(html, "Alert Success", formatAgo(now, checkalerts.lastsuccess));
   appendKeyValueRow(html, "Last Alert Shown", formatAgo(now, lastshown.alerts));
   appendCardEnd(html);
@@ -1525,16 +1652,25 @@ public:
 
   String getBodyInner() override
   {
-    String html;
-    html.reserve(1800);
-    html += F("<div class='portal-shell'><header class='portal-hero'>");
+  String html;
+  html.reserve(1800);
+  html += F("<div class='portal-shell'><header class='portal-hero'>");
     html += F("<p class='portal-eyebrow'>Firmware v");
     html += VERSION_SEMVER;
     html += F("</p><h1>Configuration</h1><p class='portal-lede'>Tune Wi-Fi, display behavior, weather services, alerts, and location rules from a single cohesive control surface.</p><div class='portal-chip-row'>");
-    appendStatusChip(html, "State", htmlEscape(currentConnectionStateLabel()));
-    appendStatusChip(html, "Address", activeAddressLabel());
-    appendStatusChip(html, "Config Schema", htmlEscape(String(CONFIG_VERSION)));
-    html += F("</div></header><nav class='portal-nav' id='portal-nav-links'></nav>");
+  appendStatusChip(html, "State", htmlEscape(currentConnectionStateLabel()));
+  appendStatusChip(html, "Address", activeAddressLabel());
+  html += F("</div></header><div id='portal-runtime' hidden data-ntp-server='");
+  html += ntpServerLabel();
+  html += F("' data-ntp-source='");
+  html += ntpServerSourceLabel();
+  html += F("'></div><nav class='portal-nav' id='portal-nav-links'></nav>");
+    html += F("<section class='portal-card portal-intro'><div class='card-header'><h2>Backup & Restore</h2><p class='card-subtitle'>Download a JSON backup before firmware work or major changes, then use restore to seed this clock from a previous setup. Import matches fields by stable IDs, so older backups can still restore the settings this firmware recognizes.</p></div><div class='action-row'>");
+    html += F("<a class='button-link primary' href='");
+    html += kConfigExportPath;
+    html += F("'>Download Config Backup</a><a class='button-link secondary' href='");
+    html += kConfigImportPath;
+    html += F("'>Restore From Backup</a></div><p>The backup file includes Wi-Fi credentials, portal passwords, and API keys, so store it privately.</p></section>");
     html += F("<section class='portal-card portal-intro'><div class='card-header'><h2>Before You Save</h2><p class='card-subtitle'>Changes are written to flash when you apply them. Wi-Fi or API edits can briefly interrupt online services while the clock reconnects and refreshes its derived state.</p></div>");
     html += F("<p>Use the status page at <a href='/'>/</a> to confirm time sync, weather refreshes, AQI updates, and alert health after saving.</p></section>");
     html += F("<section class='portal-card portal-surface'>");
@@ -1556,10 +1692,7 @@ public:
     return F("<div class='portal-meta'><a class='portal-inline-action' href='{u}'>Open Firmware Update</a><p class='portal-meta-note'>Web updates can flash the compiled <code>firmware.bin</code> image into the OTA application slot. If a release changes the partition table or bootloader, those images still need to be flashed over USB.</p></div>");
   }
 
-  String getConfigVer() override
-  {
-    return F("<div class='portal-meta portal-meta-muted'>Config schema v{v}</div>");
-  }
+  String getConfigVer() override { return String(); }
 
   String getEnd() override
   {
@@ -1695,6 +1828,145 @@ void handleFirmwareUpload()
 
   delay(0);
 }
+
+/** Streams the current configuration as a downloadable JSON attachment. */
+void handleConfigExport()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!authorizeAdminRequest())
+    return;
+
+  String json;
+  String error;
+  if (!exportConfigurationBackup(json, error))
+  {
+    String html;
+    html.reserve(9000);
+    appendConfigBackupPage(html, "notice-bad", htmlEscape(error), true);
+    server.send(500, "text/html; charset=UTF-8", html);
+    return;
+  }
+
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Content-Disposition", String(F("attachment; filename=\"")) + configBackupDownloadFileName() + F("\""));
+  server.send(200, "application/json; charset=UTF-8", json);
+}
+
+/** Renders the GET view for the configuration backup and restore page. */
+void handleConfigImport()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!authorizeAdminRequest())
+    return;
+
+  resetConfigImportState();
+  String html;
+  html.reserve(9000);
+  appendConfigBackupPage(html, "notice-warn", F("Download a fresh backup before firmware work, then use this page to restore a previous setup when you want to seed a new build or recover from a reset."), true);
+  server.send(200, "text/html; charset=UTF-8", html);
+}
+
+/** Finalizes a posted configuration backup and applies it if the upload was valid. */
+void handleConfigImportPost()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!authorizeAdminRequest())
+    return;
+
+  String html;
+  html.reserve(9000);
+
+  if (!configImportStarted || !configImportAuthenticated || configImportError.length() > 0)
+  {
+    String message = configImportError.length() > 0
+                         ? configImportError
+                         : String(F("Configuration restore did not start. Choose an exported JSON backup and try again."));
+    appendConfigBackupPage(html, "notice-bad", htmlEscape(message), true);
+    server.send(400, "text/html; charset=UTF-8", html);
+    resetConfigImportState();
+    return;
+  }
+
+  ConfigImportResult importResult;
+  if (!importConfigurationBackup(configImportPayload, importResult))
+  {
+    appendConfigBackupPage(html, "notice-bad", htmlEscape(importResult.error), true);
+    server.send(400, "text/html; charset=UTF-8", html);
+    resetConfigImportState();
+    return;
+  }
+
+  runtimeState.rebootRequested = true;
+  runtimeState.rebootRequestMillis = millis();
+
+  String message = importResult.summary + F(" The clock is rebooting now so restored Wi-Fi, portal, and runtime settings all restart together.");
+  appendConfigBackupPage(html, importResult.hasWarnings ? "notice-warn" : "notice-good", htmlEscape(message), false);
+  server.send(200, "text/html; charset=UTF-8", html);
+  resetConfigImportState();
+}
+
+/** Collects the uploaded configuration JSON file so it can be restored after auth succeeds. */
+void handleConfigImportUpload()
+{
+  HTTPUpload &upload = server.upload();
+
+  if (upload.status == UPLOAD_FILE_START)
+  {
+    resetConfigImportState();
+    configImportAuthenticated = (iotWebConf.getState() != iotwebconf::OnLine) ||
+                                server.authenticate(IOTWEBCONF_ADMIN_USER_NAME, iotWebConf.getApPasswordParameter()->valueBuffer);
+
+    if (!configImportAuthenticated)
+    {
+      configImportError = F("Authentication failed before the configuration import could start.");
+      return;
+    }
+
+    if (upload.name != "config")
+    {
+      configImportError = F("Unexpected upload field. Choose an exported JSON backup and try again.");
+      return;
+    }
+
+    if (!upload.filename.endsWith(".json"))
+    {
+      configImportError = F("Only exported JSON configuration backups are supported on this page.");
+      return;
+    }
+
+    configImportStarted = true;
+    configImportPayload.reserve(kMaxConfigImportBytes);
+  }
+  else if (configImportAuthenticated && upload.status == UPLOAD_FILE_WRITE && configImportError.length() == 0)
+  {
+    if (configImportPayload.length() + upload.currentSize > kMaxConfigImportBytes)
+    {
+      configImportError = F("The uploaded backup file is too large. Expected a compact JSON export from the clock.");
+      configImportStarted = false;
+      configImportPayload = "";
+      return;
+    }
+
+    if (!configImportPayload.concat(reinterpret_cast<const char *>(upload.buf), upload.currentSize))
+    {
+      configImportError = F("The clock ran out of memory while receiving the uploaded backup.");
+      configImportStarted = false;
+      configImportPayload = "";
+    }
+  }
+  else if (upload.status == UPLOAD_FILE_ABORTED)
+  {
+    configImportError = F("Configuration import was aborted before completion.");
+    configImportStarted = false;
+    configImportPayload = "";
+  }
+
+  delay(0);
+}
 } // namespace
 
 void configureWebUi()
@@ -1705,6 +1977,9 @@ void configureWebUi()
 void registerWebRoutes()
 {
   server.on("/", handleRoot);
+  server.on(kConfigExportPath, HTTP_GET, handleConfigExport);
+  server.on(kConfigImportPath, HTTP_GET, handleConfigImport);
+  server.on(kConfigImportPath, HTTP_POST, handleConfigImportPost, handleConfigImportUpload);
   server.on(kFirmwareUpdatePath, HTTP_GET, handleFirmwareUpdate);
   server.on(kFirmwareUpdatePath, HTTP_POST, handleFirmwareUpdatePost, handleFirmwareUpload);
   server.on("/config", []()

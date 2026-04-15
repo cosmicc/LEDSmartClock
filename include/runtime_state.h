@@ -62,12 +62,16 @@ struct RuntimeState
 {
   /** Timestamp of the last NTP check scheduling decision. */
   ace_time::acetime_t lastNtpCheck = 0;
+  /** Hostname or IP address of the NTP server currently selected for sync. */
+  char ntpServer[64] = DEFAULT_NTP_SERVER;
+  /** Short label describing where the active NTP server came from, such as DHCP slot 2. */
+  char ntpServerSource[32] = "Default fallback";
   /** Shifts the clock left when temperature or status pixels need the extra columns. */
   bool clockDisplayOffset = false;
   /** Timestamp captured during boot and reused for uptime reporting. */
   ace_time::acetime_t bootTime = 0;
-  /** Short tag describing the active time source, such as gps or ntp. */
-  char timeSource[4] = "n/a";
+  /** Short tag describing the active time source, such as gps, ntp, rtc, or none. */
+  char timeSource[8] = "none";
   /** User-selected brightness bias added on top of ambient-light control. */
   uint8_t userBrightness = 0;
   /** Prevents early network jobs from running while the first-time portal is active. */

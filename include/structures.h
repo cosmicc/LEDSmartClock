@@ -240,7 +240,7 @@ class DisplayToken
     /** Clears every token back to the idle state. */
     void resetAllTokens();
 
-    /** Returns true when the requested slot can safely render. */
+    /** Returns true when no other display token is currently active. */
     bool isReady(uint8_t position) const;
 
   private:

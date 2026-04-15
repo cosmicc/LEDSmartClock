@@ -82,7 +82,7 @@ void rebuildApiUrls()
 
   snprintf(networkService.urls.weather, sizeof(networkService.urls.weather), "%s?units=%s&exclude=minutely,alerts&appid=%s&lat=%f&lon=%f&lang=en",
            OPENWEATHER_ONECALL_ENDPOINT, units, weatherapi.value(), current.lat, current.lon);
-  snprintf(networkService.urls.alerts, sizeof(networkService.urls.alerts), "%s?status=actual&point=%f,%f&limit=1",
+  snprintf(networkService.urls.alerts, sizeof(networkService.urls.alerts), "%s?status=actual&point=%f,%f",
            WEATHER_GOV_ALERTS_ENDPOINT, current.lat, current.lon);
   snprintf(networkService.urls.geocode, sizeof(networkService.urls.geocode), "%s?lat=%f&lon=%f&limit=5&appid=%s",
            OPENWEATHER_GEOCODE_ENDPOINT, current.lat, current.lon, weatherapi.value());

@@ -27,6 +27,7 @@
 #define ANI_BITMAP_CYCLES 8        // Number of animation frames in each weather icon bitmap
 #define ANI_SPEED 100               // Bitmap animation speed in ms (lower is faster)
 #define NTPCHECKTIME 60            // NTP server check time in minutes
+#define DEFAULT_NTP_SERVER "pool.ntp.org"
 #define LIGHT_CHECK_DELAY 100      // delay for each brightness check in ms
 #define STARTSHOWDELAY_LOW 60      // min seconds for startup show delay
 #define STARTSHOWDELAY_HIGH 600    // max seconds for startup show delay
@@ -192,6 +193,8 @@ void updateLocation();
 void wifiConnected();
 /** Callback fired after the web configuration has been saved. */
 void configSaved();
+/** Applies the current in-memory configuration to runtime services and schedulers. */
+void applyRuntimeConfiguration();
 /** Draws the status LEDs around the display edge. */
 void display_showStatus();
 /** Draws a single large clock digit bitmap at the selected display position. */
@@ -219,7 +222,7 @@ bool isLocationValid(String source);
 /** Returns true when the active coordinates are usable. */
 bool isCoordsValid();
 /** Returns true when a display item has waited long enough to show again. */
-bool isNextShowReady(acetime_t lastshown, uint8_t interval, uint32_t multiplier);
+bool isNextShowReady(acetime_t lastshown, uint32_t interval, uint32_t multiplier);
 /** Returns true when enough time has passed since the last HTTP attempt. */
 bool isNextAttemptReady(acetime_t lastattempt);
 /** IotWebConf AP-mode callback used during first-time setup. */

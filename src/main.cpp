@@ -7,6 +7,7 @@
 
 #include "main.h"
 #include "bitmaps.h"
+#include "config_backup.h"
 #include "coroutines.h"
 
 namespace
@@ -48,6 +49,33 @@ void seedDisplaySchedules()
   lastshown.dayweather = seedLastShown(runtimeState.bootTime, static_cast<uint32_t>(daily_weather_interval.value()) * T1H);
   lastshown.aqi = seedLastShown(runtimeState.bootTime, static_cast<uint32_t>(aqi_interval.value()) * T1M);
 }
+
+/** Persists the live configuration into the key-based store and logs failures. */
+bool persistConfigurationState(const char *reason)
+{
+  String error;
+  if (!saveStoredConfiguration(error))
+  {
+    ESP_LOGE(TAG, "Failed to persist configuration after %s: %s", reason, error.c_str());
+    return false;
+  }
+
+  ESP_LOGI(TAG, "Persisted configuration after %s.", reason);
+  return true;
+}
+
+/** Persists the already-loaded legacy blob into the new key-based store. */
+bool migrateLegacyConfigurationStore(const char *reason)
+{
+  if (persistConfigurationState(reason))
+  {
+    ESP_EARLY_LOGI(TAG, "Migrated legacy positional configuration into the key-based store.");
+    return true;
+  }
+
+  ESP_EARLY_LOGE(TAG, "Failed to migrate legacy positional configuration into the key-based store.");
+  return false;
+}
 } // namespace
 
 extern "C" void app_main()
@@ -62,11 +90,35 @@ extern "C" void app_main()
   Wire.begin();
   wireInterface.begin();
   systemClock.setup();
+  setTimeSource(systemClock.isInit() ? F("rtc") : F("none"));
   dsClock.setup();
   gpsClock.setup();
   printSystemZonedTime();
   ESP_EARLY_LOGD(TAG, "Initializing IotWebConf...");
-  setupIotWebConf();
+  bool legacyConfigLoaded = setupIotWebConf();
+  if (hasStoredConfiguration())
+  {
+    String configStoreError;
+    if (loadStoredConfiguration(configStoreError))
+      ESP_EARLY_LOGI(TAG, "Loaded key-based configuration store.");
+    else if (legacyConfigLoaded)
+    {
+      ESP_EARLY_LOGE(TAG, "Failed to load key-based configuration store: %s", configStoreError.c_str());
+      ESP_EARLY_LOGW(TAG, "Falling back to the legacy positional configuration blob.");
+      migrateLegacyConfigurationStore("recovery from invalid key-based store");
+    }
+    else
+      ESP_EARLY_LOGE(TAG, "Failed to load key-based configuration store: %s", configStoreError.c_str());
+  }
+  else if (legacyConfigLoaded)
+  {
+    migrateLegacyConfigurationStore("legacy positional-config migration");
+  }
+  else
+  {
+    ESP_EARLY_LOGI(TAG, "No persisted configuration store found. Using defaults until first save.");
+  }
+  gpsClock.refreshNtpServer();
   ESP_EARLY_LOGD(TAG, "Initializing Light Sensor...");
   runtimeState.userBrightness = calcbright(brightness_level.value());
   current.brightness = runtimeState.userBrightness;
@@ -166,8 +218,15 @@ extern "C" void app_main()
 // callbacks
 void configSaved()
 {
+  persistConfigurationState("config save");
+  applyRuntimeConfiguration();
+}
+
+void applyRuntimeConfiguration()
+{
   updateCoords();
   processTimezone();
+  gpsClock.refreshNtpServer();
   rebuildApiUrls();
   showclock.fstop = 250;
   if (flickerfast.isChecked())
@@ -186,6 +245,7 @@ void configSaved()
 void wifiConnected()
 {
   ESP_LOGI(TAG, "WiFi is now connected.");
+  gpsClock.refreshNtpServer();
   gpsClock.ntpReady();
   display_showStatus();
   matrix->show();
@@ -200,16 +260,17 @@ bool connectAp(const char *apName, const char *password)
 
 void connectWifi(const char *ssid, const char *password)
 {
+  gpsClock.prepareServerSelection();
   WiFi.begin(ssid, password);
 }
 
 // Regular Functions
-bool isNextShowReady(acetime_t lastshown, uint8_t interval, uint32_t multiplier)
+bool isNextShowReady(acetime_t lastshown, uint32_t interval, uint32_t multiplier)
 {
   // Calculate current time in seconds
   acetime_t now = systemClock.getNow();
-  // Check if the elapsed time since the last show is greater than the interval multiplied by the multiplier
-  bool showReady = (now - lastshown) > (interval * multiplier);
+  // Check if the elapsed time since the last show has reached the configured interval.
+  bool showReady = (now - lastshown) >= static_cast<acetime_t>(interval * multiplier);
   return showReady;
 }
 
@@ -281,9 +342,9 @@ void print_debugData()
   else
     printf("Currently not known\n");
   printf("[^----------------------------------------------------------------^]\n");
-  printf("Firmware - Version:v%s | ConfigSchema:v%s\n", VERSION_SEMVER, CONFIG_VERSION);
+  printf("Firmware - Version:v%s\n", VERSION_SEMVER);
   printf("System - RawLux:%d | Lux:%d | UsrBright:+%d | Brightness:%d | ClockHue:%d | TempHue:%d | WifiState:%s | HttpReady:%s | IP:%s | Uptime:%s\n", current.rawlux, current.lux, runtimeState.userBrightness, current.brightness, current.clockhue, current.temphue, (connection_state[iotWebConf.getState()]), (yesno[isHttpReady()]), ((WiFi.localIP()).toString()).c_str(), elapsedTime(now - runtimeState.bootTime).c_str());
-  printf("Clock - Status:%s | TimeSource:%s | CurrentTZ:%d | NtpReady:%s | Skew:%d Seconds | LastAttempt:%s | NextAttempt:%s | NextNtp:%s | LastSync:%s\n", clock_status[systemClock.getSyncStatusCode()], runtimeState.timeSource, current.tzoffset, yesno[gpsClock.ntpIsReady], systemClock.getClockSkew(), elapsedTime(systemClock.getSecondsSinceSyncAttempt()).c_str(), elapsedTime(systemClock.getSecondsToSyncAttempt()).c_str(), elapsedTime((now - runtimeState.lastNtpCheck) - NTPCHECKTIME * 60).c_str(), elapsedTime(now - systemClock.getLastSyncTime()).c_str());
+  printf("Clock - Status:%s | TimeSource:%s | CurrentTZ:%d | NtpReady:%s | NtpServer:%s(%s) | Skew:%d Seconds | LastAttempt:%s | NextAttempt:%s | NextNtp:%s | LastSync:%s\n", clock_status[systemClock.getSyncStatusCode()], runtimeState.timeSource, current.tzoffset, yesno[gpsClock.ntpIsReady], runtimeState.ntpServer, runtimeState.ntpServerSource, systemClock.getClockSkew(), elapsedTime(systemClock.getSecondsSinceSyncAttempt()).c_str(), elapsedTime(systemClock.getSecondsToSyncAttempt()).c_str(), elapsedTime((now - runtimeState.lastNtpCheck) - NTPCHECKTIME * 60).c_str(), elapsedTime(now - systemClock.getLastSyncTime()).c_str());
   printf("Loc - SavedLat:%.5f | SavedLon:%.5f | CurrentLat:%.5f | CurrentLon:%.5f | LocValid:%s\n", atof(savedlat.value()), atof(savedlon.value()), current.lat, current.lon, yesno[isCoordsValid()]);
   printf("IPGeo - Complete:%s | Lat:%.5f | Lon:%.5f | TZoffset:%d | Timezone:%s | ValidApi:%s | Retries:%d | LastAttempt:%s | LastSuccess:%s\n", yesno[checkipgeo.complete], ipgeo.lat, ipgeo.lon, ipgeo.tzoffset, ipgeo.timezone, yesno[isApiValid(ipgeoapi.value())], checkipgeo.retries, elapsedTime(now - checkipgeo.lastattempt).c_str(), elapsedTime(now - checkipgeo.lastsuccess).c_str());
   printf("GPS - Chars:%s | With-Fix:%s | Failed:%s | Passed:%s | Sats:%d | Hdop:%d | Elev:%d | Lat:%.5f | Lon:%.5f | FixAge:%s | LocAge:%s\n", formatLargeNumber(GPS.charsProcessed()).c_str(), formatLargeNumber(GPS.sentencesWithFix()).c_str(), formatLargeNumber(GPS.failedChecksum()).c_str(), formatLargeNumber(GPS.passedChecksum()).c_str(), gps.sats, gps.hdop, gps.elevation, gps.lat, gps.lon, elapsedTime(now - gps.timestamp).c_str(), elapsedTime(now - gps.lockage).c_str());
@@ -310,6 +371,16 @@ void startFlash(uint16_t color, uint8_t laps)
 
 void startScroll(uint16_t color, bool displayicon)
 {
+  if (!hasVisibleText(scrolltext.message))
+  {
+    scrolltext.active = false;
+    scrolltext.displayicon = false;
+    scrolltext.position = mw - 1;
+    scrolltext.size = 0;
+    ESP_LOGW(TAG, "startScroll(): refusing to start an empty scroll message");
+    return;
+  }
+
   scrolltext.color = color;
   scrolltext.active = true;
   scrolltext.displayicon = displayicon;
@@ -336,7 +407,7 @@ void processTimezone()
     ESP_LOGI(TAG, "%s timezone [%d] is different than saved timezone [%d], saving new timezone", source, offset, savedoffset);
     savedtzoffset.value() = offset;
     savedoffset = offset;
-    iotWebConf.saveConfig();
+    persistConfigurationState("timezone update");
   };
 
   if (enable_fixed_tz.isChecked())
@@ -401,7 +472,7 @@ void updateLocation()
     strcpy(savedcity.value(), current.city);
     strcpy(savedstate.value(), current.state);
     strcpy(savedcountry.value(), current.country);
-    iotWebConf.saveConfig();
+    persistConfigurationState("location update");
   }
 }
 
@@ -451,7 +522,7 @@ void updateCoords()
     ESP_LOGW(TAG, "Lat:[%0.6lf]->[%0.6lf] Lon:[%0.6lf]->[%0.6lf]", olat, current.lat, olon, current.lon);
     dtostrf(current.lat, 9, 5, savedlat.value());
     dtostrf(current.lon, 9, 5, savedlon.value());
-    iotWebConf.saveConfig();
+    persistConfigurationState("coordinate update");
     checkgeocode.ready = true;
   }
   else if (isCoordsValid() && !isLocationValid("geocode") && !isLocationValid("current"))

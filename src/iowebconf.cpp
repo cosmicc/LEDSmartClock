@@ -1,6 +1,13 @@
 #include "main.h"
 
-IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
+namespace
+{
+// This legacy blob marker is only kept so already-deployed positional EEPROM
+// data can be recognized once and migrated into the new key-based store.
+constexpr char kLegacyIotWebConfBlobMarker[] = "18";
+}
+
+IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, kLegacyIotWebConfBlobMarker);
 
 iotwebconf::TextTParameter<12> savedlat =
   iotwebconf::Builder<iotwebconf::TextTParameter<12>>("savedlat").label("Saved Latitude").defaultValue("0").build();
@@ -48,6 +55,10 @@ iotwebconf::CheckboxTParameter enable_fixed_tz =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_fixed_tz").label("Use custom timezone (Disables auto timezone)").defaultValue(false).build();
 iotwebconf::IntTParameter<int8_t> fixed_offset =
   iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("fixed_offset").label("Custom timezone GMT offset hours").defaultValue(0).min(-12).max(12).step(1).placeholder("-12...12").build();
+iotwebconf::TextTParameter<64> ntp_server =
+  iotwebconf::Builder<iotwebconf::TextTParameter<64>>("ntp_server").label("Preferred NTP server").defaultValue(DEFAULT_NTP_SERVER).build();
+iotwebconf::CheckboxTParameter override_dhcp_ntp =
+  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("override_dhcp_ntp").label("Always use preferred NTP server (ignore DHCP NTP)").defaultValue(false).build();
 iotwebconf::CheckboxTParameter colonflicker =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("colonflicker").label("Enable clock colon flash").defaultValue(true).build();
 iotwebconf::CheckboxTParameter flickerfast =
@@ -166,7 +177,7 @@ void addHiddenParameters()
 }
 
 /** Repairs legacy or out-of-range config values after loading them from flash. */
-void normalizeConfigValues()
+void normalizeLoadedConfigValuesImpl()
 {
   bool corrected = false;
 
@@ -181,6 +192,11 @@ void normalizeConfigValues()
   corrected |= normalizeIntParameter(alert_interval, static_cast<int8_t>(1), static_cast<int8_t>(60), static_cast<int8_t>(DEF_ALERT_INTERVAL));
   corrected |= normalizeIntParameter(fixed_offset, static_cast<int8_t>(-12), static_cast<int8_t>(12), static_cast<int8_t>(0));
   corrected |= normalizeIntParameter(savedtzoffset, static_cast<int8_t>(-12), static_cast<int8_t>(12), static_cast<int8_t>(0));
+  if (ntp_server.value()[0] == '\0')
+  {
+    strlcpy(ntp_server.value(), DEFAULT_NTP_SERVER, 64);
+    corrected = true;
+  }
 
   if (corrected)
     ESP_LOGW(TAG, "One or more out-of-range configuration values were normalized in memory.");
@@ -200,6 +216,8 @@ void populateParameterGroups()
   group2.addItem(&twelve_clock);
   group2.addItem(&enable_fixed_tz);
   group2.addItem(&fixed_offset);
+  group2.addItem(&ntp_server);
+  group2.addItem(&override_dhcp_ntp);
   group2.addItem(&colonflicker);
   group2.addItem(&flickerfast);
   group2.addItem(&enable_clock_color);
@@ -259,7 +277,12 @@ void addParameterGroups()
 }
 } // namespace
 
-void setupIotWebConf()
+void normalizeLoadedConfigValues()
+{
+  normalizeLoadedConfigValuesImpl();
+}
+
+bool setupIotWebConf()
 {
   addSystemParameters();
   addHiddenParameters();
@@ -283,6 +306,7 @@ void setupIotWebConf()
         (void)userName;
         (void)password;
       });
-  iotWebConf.init();
-  normalizeConfigValues();
+  bool legacyConfigLoaded = iotWebConf.init();
+  normalizeLoadedConfigValues();
+  return legacyConfigLoaded;
 }

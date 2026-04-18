@@ -242,12 +242,17 @@ void GPSClock::ntpReady()
 {
   setupNTP();
   refreshNtpServer();
+  noteDiagnosticPending(DiagnosticService::Ntp, true, "Ready",
+                        String(F("SNTP transport is ready. Selected server: ")) + runtimeState.ntpServer +
+                            F(" (") + runtimeState.ntpServerSource + F(")."));
 }
 
 void GPSClock::prepareServerSelection()
 {
   ESP_LOGD(TAG, "GPSClock: prepareServerSelection(): configuring SNTP selection before Wi-Fi connect.");
   configureSntpServerSelection();
+  noteDiagnosticPending(DiagnosticService::Ntp, true, "Preparing",
+                        String(F("Preparing NTP server selection using ")) + preferredNtpServer() + F("."));
 }
 
 void GPSClock::refreshNtpServer()
@@ -260,6 +265,9 @@ void GPSClock::refreshNtpServer()
 
   if (iotWebConf.getState() != 4)
   {
+    noteDiagnosticPending(DiagnosticService::Ntp, true, "Waiting for Wi-Fi",
+                          String(F("Selected server is ")) + runtimeState.ntpServer + F(" (") +
+                              runtimeState.ntpServerSource + F("), but Wi-Fi is not online yet."));
     logActiveNtpSelection();
     return;
   }
@@ -284,6 +292,9 @@ void GPSClock::setupNTP()
   {
     configureSntpRuntime();
     ESP_LOGD(TAG, "GPSClock: SNTP transport ready");
+    noteDiagnosticPending(DiagnosticService::Ntp, true, "Transport ready",
+                          String(F("SNTP transport is ready. Selected server: ")) + runtimeState.ntpServer +
+                              F(" (") + runtimeState.ntpServerSource + F(")."));
     ntpIsReady = true;
   }
 }
@@ -342,6 +353,9 @@ void GPSClock::sendRequest() const
   if (candidateCount == 0)
   {
     ESP_LOGE(TAG, "GPSClock: sendRequest(): no NTP servers are available to query.");
+    noteDiagnosticFailure(DiagnosticService::Ntp, true, "No servers",
+                          F("No NTP servers are available from DHCP or the configured fallback."),
+                          0, 0);
     return;
   }
 
@@ -353,12 +367,19 @@ void GPSClock::sendRequest() const
   ESP_LOGD(TAG, "GPSClock: sendRequest(): requesting fresh SNTP sync from %s (%s)%s",
            runtimeState.ntpServer, runtimeState.ntpServerSource,
            candidates[0].slot >= 0 ? " [DHCP]" : "");
+  noteDiagnosticPending(DiagnosticService::Ntp, true, "Syncing",
+                        String(F("Requesting fresh SNTP sync from ")) + runtimeState.ntpServer +
+                            F(" (") + runtimeState.ntpServerSource + F(")."));
 
   if (!esp_sntp_restart())
   {
     ESP_LOGE(TAG, "GPSClock: sendRequest(): failed to restart SNTP for %s (%s).",
              runtimeState.ntpServer, runtimeState.ntpServerSource);
     const_cast<GPSClock *>(this)->mWaitingForNtpSync = false;
+    noteDiagnosticFailure(DiagnosticService::Ntp, true, "Restart failed",
+                          String(F("Failed to restart SNTP for ")) + runtimeState.ntpServer +
+                              F(" (") + runtimeState.ntpServerSource + F(")."),
+                          0, 0);
   }
 }
 
@@ -377,6 +398,10 @@ bool GPSClock::isResponseReady() const
       ESP_LOGW(TAG, "GPSClock: isResponseReady(): timed out waiting for fresh SNTP sync from %s (%s).",
                runtimeState.ntpServer, runtimeState.ntpServerSource);
       const_cast<GPSClock *>(this)->mWaitingForNtpSync = false;
+      noteDiagnosticFailure(DiagnosticService::Ntp, true, "Timed out",
+                            String(F("Timed out waiting for SNTP sync from ")) + runtimeState.ntpServer +
+                                F(" (") + runtimeState.ntpServerSource + F(")."),
+                            -11, 0);
     }
     return false;
   }
@@ -412,6 +437,9 @@ acetime_t GPSClock::readResponse() const
     if (epochSeconds == kInvalidSeconds)
     {
       ESP_LOGE(TAG, "GPSClock: readResponse(): SNTP callback fired but the system clock is still invalid.");
+      noteDiagnosticFailure(DiagnosticService::Ntp, true, "Invalid time",
+                            F("SNTP reported success, but the libc system clock still looks invalid."),
+                            0, 0);
       return kInvalidSeconds;
     }
 
@@ -421,10 +449,15 @@ acetime_t GPSClock::readResponse() const
       resetLastNtpCheck(epochSeconds);
       ESP_LOGI(TAG, "GPSClock: readResponse(): fresh SNTP sync unixSeconds: %ld | epochSeconds: %d | skew: %dsec",
                static_cast<long>(sLastSntpUnixTime), epochSeconds, abs(Now()) - abs(epochSeconds));
+      noteDiagnosticSuccess(DiagnosticService::Ntp, true, "Fresh sync",
+                            String(runtimeState.ntpServer) + F(" (") + runtimeState.ntpServerSource + F(")"),
+                            0, 0);
     }
     else
     {
       ESP_LOGD(TAG, "GPSClock: readResponse(): using cached SNTP-backed system time: %d", epochSeconds);
+      noteDiagnosticPending(DiagnosticService::Ntp, true, "Using cached sync",
+                            String(runtimeState.ntpServer) + F(" (") + runtimeState.ntpServerSource + F(")"));
     }
     return epochSeconds;
   }
@@ -435,11 +468,16 @@ acetime_t GPSClock::readResponse() const
     if (rtcSeconds != kInvalidSeconds)
     {
       setTimeSource("rtc");
+      noteDiagnosticPending(DiagnosticService::Ntp, true, "RTC fallback",
+                            F("No fresh NTP sync is active. The clock is currently using the RTC chip."));
       return rtcSeconds;
     }
   }
 
   setTimeSource("none");
+  noteDiagnosticFailure(DiagnosticService::Ntp, true, "No valid time",
+                        F("Neither GPS, NTP, nor the RTC currently has a valid time source."),
+                        0, 0);
   return kInvalidSeconds;
 }
 } // namespace clock

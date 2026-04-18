@@ -15,6 +15,8 @@ iotwebconf::TextTParameter<12> savedlon =
   iotwebconf::Builder<iotwebconf::TextTParameter<12>>("savedlon").label("Saved Longitude").defaultValue("0").build();
 iotwebconf::IntTParameter<int8_t> savedtzoffset =
   iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("tzoffset").label("Saved TZ Offset").defaultValue(0).min(-12).max(12).step(1).placeholder("-12...12").build();
+iotwebconf::TextTParameter<64> savedtimezone =
+  iotwebconf::Builder<iotwebconf::TextTParameter<64>>("savedtimezone").label("Saved Timezone Name").defaultValue("").build();
 iotwebconf::TextTParameter<32> savedcity =
   iotwebconf::Builder<iotwebconf::TextTParameter<32>>("savedcity").label("Saved City").defaultValue("").build();
 iotwebconf::TextTParameter<32> savedstate =
@@ -54,7 +56,7 @@ iotwebconf::CheckboxTParameter twelve_clock =
 iotwebconf::CheckboxTParameter enable_fixed_tz =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_fixed_tz").label("Use custom timezone (Disables auto timezone)").defaultValue(false).build();
 iotwebconf::IntTParameter<int8_t> fixed_offset =
-  iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("fixed_offset").label("Custom timezone GMT offset hours").defaultValue(0).min(-12).max(12).step(1).placeholder("-12...12").build();
+  iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("fixed_offset").label("Custom fixed GMT offset hours (no DST)").defaultValue(0).min(-12).max(12).step(1).placeholder("-12...12").build();
 iotwebconf::TextTParameter<64> ntp_server =
   iotwebconf::Builder<iotwebconf::TextTParameter<64>>("ntp_server").label("Preferred NTP server").defaultValue(DEFAULT_NTP_SERVER).build();
 iotwebconf::CheckboxTParameter override_dhcp_ntp =
@@ -169,6 +171,7 @@ void addSystemParameters()
 void addHiddenParameters()
 {
   iotWebConf.addHiddenParameter(&savedtzoffset);
+  iotWebConf.addHiddenParameter(&savedtimezone);
   iotWebConf.addHiddenParameter(&savedlat);
   iotWebConf.addHiddenParameter(&savedlon);
   iotWebConf.addHiddenParameter(&savedcity);

@@ -2,6 +2,7 @@
 
 #include <AceTime.h>
 #include <HTTPClient.h>
+#include <cstddef>
 #include <cstdint>
 
 /**
@@ -55,6 +56,53 @@ struct NetworkService
 };
 
 /**
+ * Enumerates the runtime subsystems surfaced on the diagnostics page.
+ */
+enum class DiagnosticService : uint8_t
+{
+  Wifi,
+  Timekeeping,
+  Ntp,
+  Gps,
+  Weather,
+  AirQuality,
+  Alerts,
+  Geocode,
+  IpGeo,
+  Count,
+};
+
+/** Number of diagnostics records carried inside runtime state. */
+constexpr size_t kDiagnosticServiceCount = static_cast<size_t>(DiagnosticService::Count);
+
+/**
+ * Stores the latest health snapshot for one subsystem.
+ *
+ * The web diagnostics page uses these records to show the current summary,
+ * last success, last failure, retry counters, and the most recent error code
+ * without having to inspect each service implementation directly.
+ */
+struct ServiceDiagnostic
+{
+  /** False when the subsystem is intentionally disabled by config or setup mode. */
+  bool enabled = true;
+  /** True when the subsystem is currently healthy enough to serve live data. */
+  bool healthy = false;
+  /** Most recent retry counter for the subsystem, when applicable. */
+  uint8_t retries = 0;
+  /** Latest HTTP or transport code associated with the current summary. */
+  int16_t lastCode = 0;
+  /** Time when this subsystem last completed a successful update. */
+  ace_time::acetime_t lastSuccess = 0;
+  /** Time when this subsystem last recorded a failure or hard warning. */
+  ace_time::acetime_t lastFailure = 0;
+  /** Short status text such as Connected, Waiting, Fresh Data, or Timed Out. */
+  char summary[32] = "Pending";
+  /** Longer human-readable context shown on the diagnostics page. */
+  char detail[160] = "Waiting for runtime data.";
+};
+
+/**
  * Collects the cross-cutting runtime values that were previously individual
  * primitive globals.
  */
@@ -80,6 +128,8 @@ struct RuntimeState
   bool rebootRequested = false;
   /** Millisecond timestamp used to delay restart until the HTTP response is sent. */
   uint32_t rebootRequestMillis = 0;
+  /** Latest diagnostics snapshot for each major subsystem shown in the web UI. */
+  ServiceDiagnostic diagnostics[kDiagnosticServiceCount]{};
 };
 
 /** Shared runtime timestamps and flags that coordinate major subsystems. */

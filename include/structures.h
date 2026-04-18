@@ -19,6 +19,13 @@ struct GPSData
   acetime_t lastcheck;
   acetime_t lockage;
   int32_t packetdelay;
+  bool moduleDetected = false;
+  bool waitingForFix = false;
+  uint8_t lastReportedSats = 255;
+  uint32_t firstByteMillis = 0;
+  uint32_t lastByteMillis = 0;
+  uint32_t lastNoDataLogMillis = 0;
+  uint32_t lastProgressLogMillis = 0;
 };
 
 struct RgbColor
@@ -113,7 +120,7 @@ struct Alerts {
 
 struct Ipgeo {
   int tzoffset;
-  char timezone[32];
+  char timezone[64];
   double lat;
   double lon;
 };

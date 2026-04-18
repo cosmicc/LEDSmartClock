@@ -12,6 +12,13 @@
 
 namespace
 {
+constexpr uint8_t kTimezoneCacheSize = 2;
+ExtendedZoneProcessorCache<kTimezoneCacheSize> timezoneProcessorCache;
+ExtendedZoneManager timezoneManager(
+    zonedbx::kZoneAndLinkRegistrySize,
+    zonedbx::kZoneAndLinkRegistry,
+    timezoneProcessorCache);
+
 /** Formats the remaining time until the next scheduled display for debug output. */
 String nextShowDebug(acetime_t now, acetime_t lastShown, uint32_t intervalSeconds)
 {
@@ -76,11 +83,71 @@ bool migrateLegacyConfigurationStore(const char *reason)
   ESP_EARLY_LOGE(TAG, "Failed to migrate legacy positional configuration into the key-based store.");
   return false;
 }
+
+/** Returns true when a timezone-name buffer contains a usable identifier. */
+bool hasTimezoneName(const char *zoneName)
+{
+  return zoneName != nullptr && zoneName[0] != '\0';
+}
+
+/** Formats an AceTime offset into a signed +HH:MM string. */
+String formatTimeOffset(const TimeOffset &offset)
+{
+  int8_t hour = 0;
+  int8_t minute = 0;
+  offset.toHourMinute(hour, minute);
+
+  char buffer[8];
+  snprintf(buffer, sizeof(buffer), "%+03d:%02d", hour, abs(minute));
+  return String(buffer);
+}
+
+/** Returns the currently active offset for the selected timezone at the given epoch. */
+TimeOffset getTimezoneOffsetAt(acetime_t epochSeconds)
+{
+  return ZonedDateTime::forEpochSeconds(epochSeconds, current.timezone).timeOffset();
+}
+
+/** Updates the cached whole-hour offset used by legacy code and debug output. */
+void refreshCachedTimezoneOffset(acetime_t epochSeconds)
+{
+  current.tzoffset = getTimezoneOffsetAt(epochSeconds).toMinutes() / 60;
+}
+
+/** Applies an IANA timezone name through AceTime so DST changes remain automatic. */
+bool applyNamedTimezone(const char *zoneName, const char *source)
+{
+  if (!hasTimezoneName(zoneName))
+    return false;
+
+  TimeZone resolved = timezoneManager.createForZoneName(zoneName);
+  if (resolved.isError())
+  {
+    ESP_LOGW(TAG, "Unable to resolve timezone name from %s: %s", source, zoneName);
+    return false;
+  }
+
+  current.timezone = resolved;
+  refreshCachedTimezoneOffset(systemClock.getNow());
+  ESP_LOGD(TAG, "Using %s timezone: %s (%s)", source, zoneName, getSystemTimezoneOffsetString().c_str());
+  return true;
+}
+
+/** Formats a TinyGPS++ age field into a readable string. */
+String formatGpsDataAge(unsigned long ageMillis)
+{
+  if (ageMillis == ULONG_MAX)
+    return F("Unavailable");
+
+  uint32_t roundedSeconds = static_cast<uint32_t>((ageMillis + 999UL) / 1000UL);
+  return elapsedTime(roundedSeconds);
+}
 } // namespace
 
 extern "C" void app_main()
 {
   Serial.begin(115200);
+  initConsoleLog();
   uint32_t init_timer = millis();
   nvs_flash_init();
   ESP_EARLY_LOGD(TAG, "Initializing Hardware Watchdog...");
@@ -90,7 +157,24 @@ extern "C" void app_main()
   Wire.begin();
   wireInterface.begin();
   systemClock.setup();
+  resetServiceDiagnostics();
   setTimeSource(systemClock.isInit() ? F("rtc") : F("none"));
+  noteDiagnosticPending(DiagnosticService::Wifi, true, "Booting",
+                        F("Wi-Fi services are still starting."));
+  noteDiagnosticPending(DiagnosticService::Ntp, true, "Waiting",
+                        F("The SNTP client is waiting for Wi-Fi before it can sync time."));
+  noteDiagnosticPending(DiagnosticService::Gps, true, "Waiting for UART",
+                        F("The GPS diagnostics are waiting for UART traffic from the receiver."));
+  noteDiagnosticPending(DiagnosticService::Weather, false, "Waiting",
+                        F("Weather checks will start after configuration, Wi-Fi, and coordinates are ready."));
+  noteDiagnosticPending(DiagnosticService::AirQuality, false, "Waiting",
+                        F("Air-quality checks will start after configuration, Wi-Fi, and coordinates are ready."));
+  noteDiagnosticPending(DiagnosticService::Alerts, true, "Waiting",
+                        F("Alert polling will start after Wi-Fi and coordinates are ready."));
+  noteDiagnosticPending(DiagnosticService::Geocode, false, "Waiting",
+                        F("Reverse geocoding will run once coordinates are known."));
+  noteDiagnosticPending(DiagnosticService::IpGeo, false, "Waiting",
+                        F("IP geolocation will run after Wi-Fi is connected if an API key is configured."));
   dsClock.setup();
   gpsClock.setup();
   printSystemZonedTime();
@@ -118,6 +202,26 @@ extern "C" void app_main()
   {
     ESP_EARLY_LOGI(TAG, "No persisted configuration store found. Using defaults until first save.");
   }
+  noteDiagnosticPending(DiagnosticService::Weather, isApiValid(weatherapi.value()),
+                        isApiValid(weatherapi.value()) ? "Waiting" : "Missing API key",
+                        isApiValid(weatherapi.value())
+                            ? String(F("Weather checks are waiting for Wi-Fi, coordinates, and their first refresh window."))
+                            : String(F("OpenWeather One Call 3.0 API key is not configured.")));
+  noteDiagnosticPending(DiagnosticService::AirQuality, isApiValid(weatherapi.value()),
+                        isApiValid(weatherapi.value()) ? "Waiting" : "Missing API key",
+                        isApiValid(weatherapi.value())
+                            ? String(F("AQI checks are waiting for Wi-Fi, coordinates, and their first refresh window."))
+                            : String(F("OpenWeather API key is not configured for AQI requests.")));
+  noteDiagnosticPending(DiagnosticService::IpGeo, isApiValid(ipgeoapi.value()),
+                        isApiValid(ipgeoapi.value()) ? "Waiting" : "Missing API key",
+                        isApiValid(ipgeoapi.value())
+                            ? String(F("IP geolocation is waiting for Wi-Fi before its first request."))
+                            : String(F("ipgeolocation.io API key is not configured.")));
+  noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()),
+                        isApiValid(weatherapi.value()) ? "Waiting" : "Missing API key",
+                        isApiValid(weatherapi.value())
+                            ? String(F("Reverse geocoding is waiting for valid coordinates."))
+                            : String(F("OpenWeather API key is not configured for reverse geocoding.")));
   gpsClock.refreshNtpServer();
   ESP_EARLY_LOGD(TAG, "Initializing Light Sensor...");
   runtimeState.userBrightness = calcbright(brightness_level.value());
@@ -133,6 +237,8 @@ extern "C" void app_main()
   Tsl.setSensitivity(true, Tsl2561::EXP_14);
   ESP_EARLY_LOGD(TAG, "Initializing GPS Module...");
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN); // Initialize GPS UART
+  ESP_EARLY_LOGI(TAG, "GPS UART started on RX:%d TX:%d at %d baud. Waiting for module traffic and satellite lock.",
+                 GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD);
   ESP_EARLY_LOGD(TAG, "Initializing coroutine scheduler...");
   sysClock.setName("sysclock");
   coroutineManager.setName("manager");
@@ -228,6 +334,24 @@ void applyRuntimeConfiguration()
   processTimezone();
   gpsClock.refreshNtpServer();
   rebuildApiUrls();
+  noteDiagnosticPending(DiagnosticService::Weather, isApiValid(weatherapi.value()),
+                        isApiValid(weatherapi.value()) ? "Configured" : "Missing API key",
+                        isApiValid(weatherapi.value())
+                            ? String(F("Weather refresh will run when Wi-Fi, coordinates, and schedules allow it."))
+                            : String(F("OpenWeather One Call 3.0 API key is not configured.")),
+                        checkweather.retries);
+  noteDiagnosticPending(DiagnosticService::AirQuality, isApiValid(weatherapi.value()),
+                        isApiValid(weatherapi.value()) ? "Configured" : "Missing API key",
+                        isApiValid(weatherapi.value())
+                            ? String(F("AQI refresh will run when Wi-Fi, coordinates, and schedules allow it."))
+                            : String(F("OpenWeather API key is not configured for AQI requests.")),
+                        checkaqi.retries);
+  noteDiagnosticPending(DiagnosticService::IpGeo, isApiValid(ipgeoapi.value()),
+                        isApiValid(ipgeoapi.value()) ? "Configured" : "Missing API key",
+                        isApiValid(ipgeoapi.value())
+                            ? String(F("IP geolocation will refresh after Wi-Fi is online."))
+                            : String(F("ipgeolocation.io API key is not configured.")),
+                        checkipgeo.retries);
   showclock.fstop = 250;
   if (flickerfast.isChecked())
     showclock.fstop = 20;
@@ -237,7 +361,10 @@ void applyRuntimeConfiguration()
   if (resetdefaults.isChecked())
     showready.reset = true;
   if (!serialdebug.isChecked())
-    printf("Serial debug info has been disabled.\n");
+  {
+    ConsoleMirrorPrint out(true);
+    out.printf("Serial debug info has been disabled.\n");
+  }
   runtimeState.firstTimeFailsafe = false;
 }
 
@@ -245,6 +372,8 @@ void applyRuntimeConfiguration()
 void wifiConnected()
 {
   ESP_LOGI(TAG, "WiFi is now connected.");
+  noteDiagnosticSuccess(DiagnosticService::Wifi, true, "Connected",
+                        String(F("Wi-Fi connected at ")) + WiFi.localIP().toString());
   gpsClock.refreshNtpServer();
   gpsClock.ntpReady();
   display_showStatus();
@@ -255,12 +384,16 @@ void wifiConnected()
 
 bool connectAp(const char *apName, const char *password)
 {
+  noteDiagnosticPending(DiagnosticService::Wifi, true, "Captive portal",
+                        String(F("Setup access point ")) + apName + F(" is active for configuration."));
   return WiFi.softAP(apName, password, 4);
 }
 
 void connectWifi(const char *ssid, const char *password)
 {
   gpsClock.prepareServerSelection();
+  noteDiagnosticPending(DiagnosticService::Wifi, true, "Connecting",
+                        String(F("Attempting to join SSID ")) + ssid + F("."));
   WiFi.begin(ssid, password);
 }
 
@@ -311,7 +444,7 @@ bool isLocationValid(String source)
   return result;
 }
 
-void print_debugData()
+void print_debugData(ConsoleMirrorPrint &out)
 {
   acetime_t now = systemClock.getNow();
   char tempunit[7];
@@ -329,36 +462,163 @@ void print_debugData()
     memcpy(speedunit, metric_units[1], 7);
     memcpy(distanceunit, metric_units[2], 7);
   }
-  printf("[^----------------------------------------------------------------^]\n");
-  printf("Current Time: %s\n", getSystemZonedTimestamp().c_str());
-  printf("Boot Time: %s\n", getCustomZonedTimestamp(runtimeState.bootTime).c_str());
-  printf("Sunrise Time: %s\n", getCustomZonedTimestamp(weather.day.sunrise).c_str());
-  printf("Sunset Time: %s\n", getCustomZonedTimestamp(weather.day.sunset).c_str());
-  printf("Moonrise Time: %s\n", getCustomZonedTimestamp(weather.day.moonrise).c_str());
-  printf("Moonset Time: %s\n", getCustomZonedTimestamp(weather.day.moonset).c_str());
-  printf("Location: ");
+  out.printf("[^----------------------------------------------------------------^]\n");
+  out.printf("Current Time: %s\n", getSystemZonedTimestamp().c_str());
+  out.printf("Boot Time: %s\n", getCustomZonedTimestamp(runtimeState.bootTime).c_str());
+  out.printf("Sunrise Time: %s\n", getCustomZonedTimestamp(weather.day.sunrise).c_str());
+  out.printf("Sunset Time: %s\n", getCustomZonedTimestamp(weather.day.sunset).c_str());
+  out.printf("Moonrise Time: %s\n", getCustomZonedTimestamp(weather.day.moonrise).c_str());
+  out.printf("Moonset Time: %s\n", getCustomZonedTimestamp(weather.day.moonset).c_str());
+  out.printf("Location: ");
   if (isLocationValid("current"))
-    printf("%s, %s, %s\n", current.city, current.state, current.country);
+    out.printf("%s, %s, %s\n", current.city, current.state, current.country);
   else
-    printf("Currently not known\n");
-  printf("[^----------------------------------------------------------------^]\n");
-  printf("Firmware - Version:v%s\n", VERSION_SEMVER);
-  printf("System - RawLux:%d | Lux:%d | UsrBright:+%d | Brightness:%d | ClockHue:%d | TempHue:%d | WifiState:%s | HttpReady:%s | IP:%s | Uptime:%s\n", current.rawlux, current.lux, runtimeState.userBrightness, current.brightness, current.clockhue, current.temphue, (connection_state[iotWebConf.getState()]), (yesno[isHttpReady()]), ((WiFi.localIP()).toString()).c_str(), elapsedTime(now - runtimeState.bootTime).c_str());
-  printf("Clock - Status:%s | TimeSource:%s | CurrentTZ:%d | NtpReady:%s | NtpServer:%s(%s) | Skew:%d Seconds | LastAttempt:%s | NextAttempt:%s | NextNtp:%s | LastSync:%s\n", clock_status[systemClock.getSyncStatusCode()], runtimeState.timeSource, current.tzoffset, yesno[gpsClock.ntpIsReady], runtimeState.ntpServer, runtimeState.ntpServerSource, systemClock.getClockSkew(), elapsedTime(systemClock.getSecondsSinceSyncAttempt()).c_str(), elapsedTime(systemClock.getSecondsToSyncAttempt()).c_str(), elapsedTime((now - runtimeState.lastNtpCheck) - NTPCHECKTIME * 60).c_str(), elapsedTime(now - systemClock.getLastSyncTime()).c_str());
-  printf("Loc - SavedLat:%.5f | SavedLon:%.5f | CurrentLat:%.5f | CurrentLon:%.5f | LocValid:%s\n", atof(savedlat.value()), atof(savedlon.value()), current.lat, current.lon, yesno[isCoordsValid()]);
-  printf("IPGeo - Complete:%s | Lat:%.5f | Lon:%.5f | TZoffset:%d | Timezone:%s | ValidApi:%s | Retries:%d | LastAttempt:%s | LastSuccess:%s\n", yesno[checkipgeo.complete], ipgeo.lat, ipgeo.lon, ipgeo.tzoffset, ipgeo.timezone, yesno[isApiValid(ipgeoapi.value())], checkipgeo.retries, elapsedTime(now - checkipgeo.lastattempt).c_str(), elapsedTime(now - checkipgeo.lastsuccess).c_str());
-  printf("GPS - Chars:%s | With-Fix:%s | Failed:%s | Passed:%s | Sats:%d | Hdop:%d | Elev:%d | Lat:%.5f | Lon:%.5f | FixAge:%s | LocAge:%s\n", formatLargeNumber(GPS.charsProcessed()).c_str(), formatLargeNumber(GPS.sentencesWithFix()).c_str(), formatLargeNumber(GPS.failedChecksum()).c_str(), formatLargeNumber(GPS.passedChecksum()).c_str(), gps.sats, gps.hdop, gps.elevation, gps.lat, gps.lon, elapsedTime(now - gps.timestamp).c_str(), elapsedTime(now - gps.lockage).c_str());
-  printf("Weather Current - Icon:%s | Temp:%d%s | FeelsLike:%d%s | Humidity:%d%% | Clouds:%d%% | Wind:%d/%d%s | UVI:%d(%s) | Desc:%s | ValidApi:%s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", weather.current.icon, weather.current.temp, tempunit, weather.current.feelsLike, tempunit, weather.current.humidity, weather.current.cloudcover, weather.current.windSpeed, weather.current.windGust, speedunit, weather.current.uvi, uv_index(weather.current.uvi).c_str(), weather.current.description, yesno[isApiValid(weatherapi.value())], checkweather.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkweather.lastattempt).c_str(), elapsedTime(now - checkweather.lastsuccess).c_str(), nextShowDebug(now, lastshown.currentweather, static_cast<uint32_t>(current_weather_interval.value()) * T1H).c_str());
-  printf("Weather Day - Icon:%s | LoTemp:%d%s | HiTemp:%d%s | Humidity:%d%% | Clouds:%d%% | Wind: %d/%d%s | UVI:%d(%s) | MoonPhase:%.2f | Desc: %s | NextShow:%s\n", weather.day.icon, weather.day.tempMin, tempunit, weather.day.tempMax, tempunit, weather.day.humidity, weather.day.cloudcover, weather.day.windSpeed, weather.day.windGust, speedunit, weather.day.uvi, uv_index(weather.day.uvi).c_str(), weather.day.moonPhase, weather.current.description, nextShowDebug(now, lastshown.dayweather, static_cast<uint32_t>(daily_weather_interval.value()) * T1H).c_str());
-  printf("AQI Current - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f | Desc: %s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", air_quality[aqi.current.aqi], aqi.current.co, aqi.current.no, aqi.current.no2, aqi.current.o3, aqi.current.so2, aqi.current.pm25, aqi.current.pm10, aqi.current.nh3, (aqi.current.description).c_str(), checkaqi.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkaqi.lastattempt).c_str(), elapsedTime(now - checkaqi.lastsuccess).c_str(), nextShowDebug(now, lastshown.aqi, static_cast<uint32_t>(aqi_interval.value()) * T1M).c_str());
-  printf("AQI Day - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f\n", air_quality[aqi.day.aqi], aqi.day.co, aqi.day.no, aqi.day.no2, aqi.day.o3, aqi.day.so2, aqi.day.pm25, aqi.day.pm10, aqi.day.nh3);
-  printf("Alerts - Active:%s | Watch:%s | Warn:%s | Retries:%d | LastAttempt:%s | LastSuccess:%s | LastShown:%s\n", yesno[alerts.active], yesno[alerts.inWatch], yesno[alerts.inWarning], checkalerts.retries, elapsedTime(now - checkalerts.lastattempt).c_str(), elapsedTime(now - checkalerts.lastsuccess).c_str(), elapsedTime(now - lastshown.alerts).c_str());
-  printf("[^----------------------------------------------------------------^]\n");
-  printf("Main task stack size: %s bytes remaining\n", formatLargeNumber(uxTaskGetStackHighWaterMark(NULL)).c_str());
-  printf("Current Display Tokens: %s\n", displaytoken.showTokens().c_str());
-  printf("[^----------------------------------------------------------------^]\n");
+    out.printf("Currently not known\n");
+  out.printf("[^----------------------------------------------------------------^]\n");
+  out.printf("Firmware - Version:v%s\n", VERSION_SEMVER);
+  out.printf("System - RawLux:%d | Lux:%d | UsrBright:+%d | Brightness:%d | ClockHue:%d | TempHue:%d | WifiState:%s | HttpReady:%s | IP:%s | Uptime:%s\n", current.rawlux, current.lux, runtimeState.userBrightness, current.brightness, current.clockhue, current.temphue, (connection_state[iotWebConf.getState()]), (yesno[isHttpReady()]), ((WiFi.localIP()).toString()).c_str(), elapsedTime(now - runtimeState.bootTime).c_str());
+  out.printf("Clock - Status:%s | TimeSource:%s | CurrentTZ:%s | Timezone:%s | DstActive:%s | NtpReady:%s | NtpServer:%s(%s) | Skew:%d Seconds | LastAttempt:%s | NextAttempt:%s | NextNtp:%s | LastSync:%s\n", clock_status[systemClock.getSyncStatusCode()], runtimeState.timeSource, getSystemTimezoneOffsetString().c_str(), getSystemTimezoneName().c_str(), yesno[isSystemTimezoneDstActive()], yesno[gpsClock.ntpIsReady], runtimeState.ntpServer, runtimeState.ntpServerSource, systemClock.getClockSkew(), elapsedTime(systemClock.getSecondsSinceSyncAttempt()).c_str(), elapsedTime(systemClock.getSecondsToSyncAttempt()).c_str(), elapsedTime((now - runtimeState.lastNtpCheck) - NTPCHECKTIME * 60).c_str(), elapsedTime(now - systemClock.getLastSyncTime()).c_str());
+  out.printf("Loc - SavedLat:%.5f | SavedLon:%.5f | CurrentLat:%.5f | CurrentLon:%.5f | LocValid:%s\n", atof(savedlat.value()), atof(savedlon.value()), current.lat, current.lon, yesno[isCoordsValid()]);
+  out.printf("IPGeo - Complete:%s | Lat:%.5f | Lon:%.5f | TZoffset:%d | Timezone:%s | ValidApi:%s | Retries:%d | LastAttempt:%s | LastSuccess:%s\n", yesno[checkipgeo.complete], ipgeo.lat, ipgeo.lon, ipgeo.tzoffset, ipgeo.timezone, yesno[isApiValid(ipgeoapi.value())], checkipgeo.retries, elapsedTime(now - checkipgeo.lastattempt).c_str(), elapsedTime(now - checkipgeo.lastsuccess).c_str());
+  out.printf("GPS - Chars:%s | With-Fix:%s | Failed:%s | Passed:%s | Sats:%d | Hdop:%d | Elev:%d | Lat:%.5f | Lon:%.5f | FixAge:%s | LocAge:%s\n", formatLargeNumber(GPS.charsProcessed()).c_str(), formatLargeNumber(GPS.sentencesWithFix()).c_str(), formatLargeNumber(GPS.failedChecksum()).c_str(), formatLargeNumber(GPS.passedChecksum()).c_str(), gps.sats, gps.hdop, gps.elevation, gps.lat, gps.lon, elapsedTime(now - gps.timestamp).c_str(), elapsedTime(now - gps.lockage).c_str());
+  out.printf("Weather Current - Icon:%s | Temp:%d%s | FeelsLike:%d%s | Humidity:%d%% | Clouds:%d%% | Wind:%d/%d%s | UVI:%d(%s) | Desc:%s | ValidApi:%s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", weather.current.icon, weather.current.temp, tempunit, weather.current.feelsLike, tempunit, weather.current.humidity, weather.current.cloudcover, weather.current.windSpeed, weather.current.windGust, speedunit, weather.current.uvi, uv_index(weather.current.uvi).c_str(), weather.current.description, yesno[isApiValid(weatherapi.value())], checkweather.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkweather.lastattempt).c_str(), elapsedTime(now - checkweather.lastsuccess).c_str(), nextShowDebug(now, lastshown.currentweather, static_cast<uint32_t>(current_weather_interval.value()) * T1H).c_str());
+  out.printf("Weather Day - Icon:%s | LoTemp:%d%s | HiTemp:%d%s | Humidity:%d%% | Clouds:%d%% | Wind: %d/%d%s | UVI:%d(%s) | MoonPhase:%.2f | Desc: %s | NextShow:%s\n", weather.day.icon, weather.day.tempMin, tempunit, weather.day.tempMax, tempunit, weather.day.humidity, weather.day.cloudcover, weather.day.windSpeed, weather.day.windGust, speedunit, weather.day.uvi, uv_index(weather.day.uvi).c_str(), weather.day.moonPhase, weather.current.description, nextShowDebug(now, lastshown.dayweather, static_cast<uint32_t>(daily_weather_interval.value()) * T1H).c_str());
+  out.printf("AQI Current - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f | Desc: %s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", air_quality[aqi.current.aqi], aqi.current.co, aqi.current.no, aqi.current.no2, aqi.current.o3, aqi.current.so2, aqi.current.pm25, aqi.current.pm10, aqi.current.nh3, (aqi.current.description).c_str(), checkaqi.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkaqi.lastattempt).c_str(), elapsedTime(now - checkaqi.lastsuccess).c_str(), nextShowDebug(now, lastshown.aqi, static_cast<uint32_t>(aqi_interval.value()) * T1M).c_str());
+  out.printf("AQI Day - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f\n", air_quality[aqi.day.aqi], aqi.day.co, aqi.day.no, aqi.day.no2, aqi.day.o3, aqi.day.so2, aqi.day.pm25, aqi.day.pm10, aqi.day.nh3);
+  out.printf("Alerts - Active:%s | Watch:%s | Warn:%s | Retries:%d | LastAttempt:%s | LastSuccess:%s | LastShown:%s\n", yesno[alerts.active], yesno[alerts.inWatch], yesno[alerts.inWarning], checkalerts.retries, elapsedTime(now - checkalerts.lastattempt).c_str(), elapsedTime(now - checkalerts.lastsuccess).c_str(), elapsedTime(now - lastshown.alerts).c_str());
+  out.printf("[^----------------------------------------------------------------^]\n");
+  out.printf("Main task stack size: %s bytes remaining\n", formatLargeNumber(uxTaskGetStackHighWaterMark(NULL)).c_str());
+  out.printf("Current Display Tokens: %s\n", displaytoken.showTokens().c_str());
+  out.printf("[^----------------------------------------------------------------^]\n");
   if (alerts.active)
-    printf("*Alert - Status: %s | Severity: %s | Certainty: %s | Urgency: %s | Event: %s | Desc: %s %s\n", alerts.status1, alerts.severity1, alerts.certainty1, alerts.urgency1, alerts.event1, alerts.description1, alerts.instruction1);
+    out.printf("*Alert - Status: %s | Severity: %s | Certainty: %s | Urgency: %s | Event: %s | Desc: %s %s\n", alerts.status1, alerts.severity1, alerts.certainty1, alerts.urgency1, alerts.event1, alerts.description1, alerts.instruction1);
+}
+
+void print_debugData()
+{
+  ConsoleMirrorPrint out(true);
+  print_debugData(out);
+}
+
+void print_gpsStatus(ConsoleMirrorPrint &out)
+{
+  uint32_t nowMillis = millis();
+  String lastByteAge = gps.moduleDetected ? elapsedTime((nowMillis - gps.lastByteMillis + 999UL) / 1000UL) : String(F("Never"));
+  String locationAge = formatGpsDataAge(GPS.location.age());
+  String timeAge = formatGpsDataAge(GPS.time.age());
+  String satsAge = formatGpsDataAge(GPS.satellites.age());
+  String altitudeAge = formatGpsDataAge(GPS.altitude.age());
+  String hdopAge = formatGpsDataAge(GPS.hdop.age());
+
+  out.printf("[^------------------------- GPS Status --------------------------^]\n");
+  out.printf("GPS UART - RX:%d | TX:%d | Baud:%d | ModuleDetected:%s | LastByte:%s | SerialAvail:%d\n",
+         GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD, yesno[gps.moduleDetected], lastByteAge.c_str(), Serial1.available());
+  out.printf("GPS Parser - Chars:%s | Passed:%s | Failed:%s | SentencesWithFix:%s\n",
+         formatLargeNumber(GPS.charsProcessed()).c_str(),
+         formatLargeNumber(GPS.passedChecksum()).c_str(),
+         formatLargeNumber(GPS.failedChecksum()).c_str(),
+         formatLargeNumber(GPS.sentencesWithFix()).c_str());
+  out.printf("GPS State - Fix:%s | WaitingForFix:%s | Sats:%u | LocationValid:%s | TimeValid:%s | DateValid:%s\n",
+         yesno[gps.fix], yesno[gps.waitingForFix], gps.sats,
+         yesno[GPS.location.isValid()], yesno[GPS.time.isValid()], yesno[GPS.date.isValid()]);
+  out.printf("GPS Ages - Location:%s | Time:%s | Satellites:%s | Altitude:%s | HDOP:%s\n",
+         locationAge.c_str(), timeAge.c_str(), satsAge.c_str(), altitudeAge.c_str(), hdopAge.c_str());
+  out.printf("GPS Live - Lat:%.6f | Lon:%.6f | Elev:%dft | HDOP:%d | LastFix:%s | LastLocation:%s\n",
+         gps.lat, gps.lon, gps.elevation, gps.hdop,
+         elapsedTime(systemClock.getNow() - gps.timestamp).c_str(),
+         elapsedTime(systemClock.getNow() - gps.lockage).c_str());
+  out.printf("GPS Override - FixedLocation:%s | CurrentCoords:%.6f,%.6f | CurrentSource:%s\n",
+         yesno[enable_fixed_loc.isChecked()], current.lat, current.lon, current.locsource);
+  out.printf("[^----------------------------------------------------------------^]\n");
+}
+
+void print_gpsStatus()
+{
+  ConsoleMirrorPrint out(true);
+  print_gpsStatus(out);
+}
+
+bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediateRestart)
+{
+  switch (input)
+  {
+  case 'd':
+    print_debugData(out);
+    return true;
+  case 'g':
+    print_gpsStatus(out);
+    return true;
+  case 's':
+    CoroutineScheduler::list(out);
+    return true;
+  case 'a':
+    lastshown.aqi = systemClock.getNow() - (aqi_interval.value() * 60);
+    showready.aqi = true;
+    out.printf("Triggered air quality display.\n");
+    return true;
+  case 'w':
+    lastshown.currentweather = systemClock.getNow() - (current_weather_interval.value() * 60 * 60);
+    showready.currentweather = true;
+    out.printf("Triggered current weather display.\n");
+    return true;
+  case 'e':
+    lastshown.date = systemClock.getNow() - ((date_interval.value()) * 60 * 60);
+    showready.date = true;
+    out.printf("Triggered date display.\n");
+    return true;
+  case 'q':
+    lastshown.dayweather = systemClock.getNow() - (daily_weather_interval.value() * 60 * 60);
+    showready.dayweather = true;
+    out.printf("Triggered daily weather display.\n");
+    return true;
+  case 'c':
+    out.printf("Main task stack size: %s bytes remaining\n", formatLargeNumber(uxTaskGetStackHighWaterMark(NULL)).c_str());
+    return true;
+  case 't':
+    startFlash(hex2rgb(system_color.value()), 5);
+    out.printf("Triggered alert flash test.\n");
+    return true;
+#ifdef COROUTINE_PROFILER
+  case 'f':
+    LogBinTableRenderer::printTo(out, 2 /*startBin*/, 13 /*endBin*/, false /*clear*/);
+    return true;
+#endif
+  case 'l':
+    out.printf("Log level changed to DEBUG\n");
+    esp_log_level_set(TAG, ESP_LOG_DEBUG);
+    return true;
+  case 'r':
+    out.printf("Rebooting...\n");
+    if (allowImmediateRestart)
+      ESP.restart();
+    else
+    {
+      runtimeState.rebootRequested = true;
+      runtimeState.rebootRequestMillis = millis();
+    }
+    return true;
+  case 'h':
+    out.printf("Help:\n");
+    out.printf("  d: Display debug data\n");
+    out.printf("  g: Display GPS status\n");
+    out.printf("  s: Display coroutines states\n");
+    out.printf("  a: Force display of current air quality\n");
+    out.printf("  w: Force display of current weather\n");
+    out.printf("  e: Display the current date\n");
+    out.printf("  q: Force display of day weather\n");
+    out.printf("  c: Display current main task stack size remaining (bytes)\n");
+    out.printf("  t: Test alertflash\n");
+#ifdef COROUTINE_PROFILER
+    out.printf("  f: Display coroutine execution time table (Profiler)\n");
+#endif
+    out.printf("  l: Change log level to DEBUG\n");
+    out.printf("  r: Reboot clock\n");
+    out.printf("  h: Display this help\n");
+    return true;
+  default:
+    out.printf("Unknown command: %c\n", input);
+    return false;
+  }
 }
 
 void startFlash(uint16_t color, uint8_t laps)
@@ -393,32 +653,56 @@ void processTimezone()
   uint32_t timer = millis();
   int16_t savedoffset = savedtzoffset.value();
   int16_t fixedoffset = fixed_offset.value();
+  const char *savedZoneName = savedtimezone.value();
 
   auto applyTimezoneOffset = [&](int16_t offset, const char *source) {
     current.tzoffset = offset;
     current.timezone = TimeZone::forHours(offset);
-    ESP_LOGD(TAG, "Using %s timezone offset: %d", source, offset);
+    ESP_LOGD(TAG, "Using %s fixed timezone offset: %d", source, offset);
   };
 
-  auto persistTimezoneOffset = [&](int16_t offset, const char *source) {
-    if (offset == savedoffset)
-      return;
+  auto persistTimezoneSelection = [&](int16_t offset, const char *zoneName, const char *source) {
+    bool changed = false;
+    if (offset != savedoffset)
+    {
+      ESP_LOGI(TAG, "%s timezone offset [%d] is different than saved timezone offset [%d], saving new timezone", source, offset, savedoffset);
+      savedtzoffset.value() = offset;
+      savedoffset = offset;
+      changed = true;
+    }
 
-    ESP_LOGI(TAG, "%s timezone [%d] is different than saved timezone [%d], saving new timezone", source, offset, savedoffset);
-    savedtzoffset.value() = offset;
-    savedoffset = offset;
+    if (zoneName != nullptr && strcmp(savedtimezone.value(), zoneName) != 0)
+    {
+      ESP_LOGI(TAG, "%s timezone name [%s] is different than saved timezone name [%s], saving new timezone", source, zoneName, savedtimezone.value());
+      strlcpy(savedtimezone.value(), zoneName, 64);
+      savedZoneName = savedtimezone.value();
+      changed = true;
+    }
+
+    if (!changed)
+      return;
     persistConfigurationState("timezone update");
   };
 
   if (enable_fixed_tz.isChecked())
   {
     applyTimezoneOffset(fixedoffset, "fixed");
-    persistTimezoneOffset(fixedoffset, "Fixed");
+    persistTimezoneSelection(fixedoffset, nullptr, "Fixed");
+    noteDiagnosticPending(DiagnosticService::Timekeeping, true, "Fixed timezone",
+                          String(F("Using a manual GMT offset of ")) + getSystemTimezoneOffsetString() + F(" with no automatic DST rules."));
+  }
+  else if (applyNamedTimezone(ipgeo.timezone, "ip geolocation"))
+  {
+    persistTimezoneSelection(getTimezoneOffsetAt(systemClock.getNow()).toMinutes() / 60, ipgeo.timezone, "IP Geo");
+  }
+  else if (applyNamedTimezone(savedZoneName, "saved"))
+  {
+    persistTimezoneSelection(getTimezoneOffsetAt(systemClock.getNow()).toMinutes() / 60, savedZoneName, "Saved");
   }
   else if (ipgeo.tzoffset != 127)
   {
     applyTimezoneOffset(ipgeo.tzoffset, "ip geolocation");
-    persistTimezoneOffset(ipgeo.tzoffset, "IP Geo");
+    persistTimezoneSelection(ipgeo.tzoffset, nullptr, "IP Geo");
   }
   else if (savedoffset != 0 || fixedoffset == 0)
   {
@@ -427,7 +711,7 @@ void processTimezone()
   else
   {
     applyTimezoneOffset(fixedoffset, "configured fallback");
-    persistTimezoneOffset(fixedoffset, "Configured fallback");
+    persistTimezoneSelection(fixedoffset, nullptr, "Configured fallback");
   }
   ESP_LOGV(TAG, "Process timezone complete: %lu ms", (millis() - timer));
 }
@@ -447,6 +731,9 @@ void updateLocation()
     strcpy(current.state, geocode.state);
     strcpy(current.country, geocode.country);
     ESP_LOGI(TAG, "Using Geocode location: %s, %s, %s", current.city, current.state, current.country);
+    noteDiagnosticSuccess(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "Resolved",
+                          String(current.city) + F(", ") + current.state + F(", ") + current.country,
+                          checkgeocode.retries, 200);
   }
   else if (isLocationValid("saved"))
   {
@@ -455,14 +742,23 @@ void updateLocation()
     strcpy(current.state, savedstate.value());
     strcpy(current.country, savedcountry.value());
     ESP_LOGD(TAG, "Using saved location: %s, %s, %s", current.city, current.state, current.country);
+    noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "Saved fallback",
+                          String(current.city) + F(", ") + current.state + F(", ") + current.country,
+                          checkgeocode.retries);
   }
   else if (isLocationValid("current"))
   {
     ESP_LOGD(TAG, "No new location update, using current location: %s, %s, %s", current.city, current.state, current.country);
+    noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "Using current",
+                          String(current.city) + F(", ") + current.state + F(", ") + current.country,
+                          checkgeocode.retries);
   }
   else
   {
     ESP_LOGD(TAG, "No valid locations found");
+    noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "Waiting",
+                          F("A city or region has not been resolved yet."),
+                          checkgeocode.retries);
   }
   // Save the new location if needed
   if ((String)savedcity.value() != current.city || (String)savedstate.value() != current.state || (String)savedcountry.value() != current.country)
@@ -484,11 +780,12 @@ void updateCoords()
 
   if (enable_fixed_loc.isChecked())
   {
-    gps.lat = strtod(fixedLat.value(), NULL);
-    gps.lon = strtod(fixedLon.value(), NULL);
     current.lat = strtod(fixedLat.value(), NULL);
     current.lon = strtod(fixedLon.value(), NULL);
     strcpy(current.locsource, "User Defined");
+    noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "Fixed coordinates",
+                          String(F("Services are using fixed coordinates ")) + String(current.lat, 5) + F(", ") + String(current.lon, 5),
+                          checkgeocode.retries);
   }
   else if (coordsUnset(gps.lat, gps.lon) && coordsUnset(ipgeo.lat, ipgeo.lon) && coordsUnset(current.lat, current.lon))
   {
@@ -496,6 +793,9 @@ void updateCoords()
     current.lat = strtod(savedlat.value(), NULL);
     current.lon = strtod(savedlon.value(), NULL);
     strcpy(current.locsource, "Previous Saved");
+    noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "Saved coordinates",
+                          String(F("Services are using saved coordinates ")) + String(current.lat, 5) + F(", ") + String(current.lon, 5),
+                          checkgeocode.retries);
   }
   else if (coordsUnset(gps.lat, gps.lon) && !coordsUnset(ipgeo.lat, ipgeo.lon) && coordsUnset(current.lat, current.lon))
   {
@@ -504,6 +804,9 @@ void updateCoords()
     current.lon = ipgeo.lon;
     strcpy(current.locsource, "IP Geolocation");
     ESP_LOGI(TAG, "Using IPGeo location information: Lat: %lf Lon: %lf", (ipgeo.lat), (ipgeo.lon));
+    noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "IP coordinates",
+                          String(F("Services are using IP-derived coordinates ")) + String(current.lat, 5) + F(", ") + String(current.lon, 5),
+                          checkgeocode.retries);
   }
   else if (!coordsUnset(gps.lat, gps.lon))
   {
@@ -511,6 +814,9 @@ void updateCoords()
     current.lat = gps.lat;
     current.lon = gps.lon;
     strcpy(current.locsource, "GPS");
+    noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "GPS coordinates",
+                          String(F("Services are using live GPS coordinates ")) + String(current.lat, 5) + F(", ") + String(current.lon, 5),
+                          checkgeocode.retries);
   }
   // Calculate if major location shift has taken place
   double olat = strtod(savedlat.value(), NULL);
@@ -782,7 +1088,33 @@ void printSystemZonedTime()
 
 ZonedDateTime getSystemZonedTime()
 {
-  return ZonedDateTime::forEpochSeconds(systemClock.getNow(), current.timezone);
+  acetime_t now = systemClock.getNow();
+  refreshCachedTimezoneOffset(now);
+  return ZonedDateTime::forEpochSeconds(now, current.timezone);
+}
+
+String getSystemTimezoneOffsetString()
+{
+  return formatTimeOffset(getTimezoneOffsetAt(systemClock.getNow()));
+}
+
+String getSystemTimezoneName()
+{
+  if (enable_fixed_tz.isChecked())
+    return String(F("Fixed GMT")) + getSystemTimezoneOffsetString();
+
+  if (hasTimezoneName(ipgeo.timezone))
+    return String(ipgeo.timezone);
+
+  if (hasTimezoneName(savedtimezone.value()))
+    return String(savedtimezone.value());
+
+  return String(F("Fixed GMT")) + getSystemTimezoneOffsetString();
+}
+
+bool isSystemTimezoneDstActive()
+{
+  return !current.timezone.getZonedExtra(systemClock.getNow()).dstOffset().isZero();
 }
 
 String getSystemZonedTimestamp()
@@ -791,18 +1123,19 @@ String getSystemZonedTimestamp()
   ZonedDateTime TimeWZ = ZonedDateTime::forEpochSeconds(now, current.timezone);
   char str[64];
   // Create string with year, month, day, hour, minute, second and time offset values
-  snprintf(str, sizeof(str), "%02d/%02d/%02d %02d:%02d:%02d [GMT%+d]", TimeWZ.month(), TimeWZ.day(), TimeWZ.year(),
-           TimeWZ.hour(), TimeWZ.minute(), TimeWZ.second(), current.tzoffset);
+  snprintf(str, sizeof(str), "%02d/%02d/%02d %02d:%02d:%02d [GMT%s]", TimeWZ.month(), TimeWZ.day(), TimeWZ.year(),
+           TimeWZ.hour(), TimeWZ.minute(), TimeWZ.second(), getSystemTimezoneOffsetString().c_str());
   return (String)str;
 }
 
 String getCustomZonedTimestamp(acetime_t now)
 {
   ZonedDateTime TimeWZ = ZonedDateTime::forEpochSeconds(now, current.timezone);
+  String offsetString = formatTimeOffset(TimeWZ.timeOffset());
   char str[64];
   // Create string with year, month, day, hour, minute, second and time offset values
-  snprintf(str, sizeof(str), "%02d/%02d/%02d %02d:%02d:%02d [GMT%+d]", TimeWZ.month(), TimeWZ.day(), TimeWZ.year(),
-           TimeWZ.hour(), TimeWZ.minute(), TimeWZ.second(), current.tzoffset);
+  snprintf(str, sizeof(str), "%02d/%02d/%02d %02d:%02d:%02d [GMT%s]", TimeWZ.month(), TimeWZ.day(), TimeWZ.year(),
+           TimeWZ.hour(), TimeWZ.minute(), TimeWZ.second(), offsetString.c_str());
   return (String)str;
 }
 

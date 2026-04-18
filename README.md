@@ -2,13 +2,13 @@
 
 LED SmartClock is an ESP32-based wall clock built around an 8x32 WS2812B LED matrix. It combines a large-format clock display with GPS, NTP, weather, air-quality, and alert data, then exposes everything through a web dashboard, a configuration portal, and OTA firmware updates.
 
-Version `2.5.0` is the current v2 release. It includes the rewritten web interface, OTA flow, display scheduler cleanup, DHCP-aware NTP selection, configuration backup or restore, hardened weather-alert fallback handling, and key-based config storage.
+Version `2.5.2` is the current v2 release. It includes the rewritten web interface, OTA flow, display scheduler cleanup, DHCP-aware NTP selection, configuration backup or restore, hardened weather-alert fallback handling, DST-aware timezone handling, key-based config storage, and expanded GPS diagnostics.
 
 ## What It Does
 
 - Displays a large 12-hour or 24-hour clock on an 8x32 LED matrix.
 - Keeps time from GPS, NTP, and the onboard DS3231 RTC.
-- Resolves timezone automatically from IP geolocation or uses a fixed manual offset.
+- Resolves timezone automatically from IP geolocation with DST-aware timezone rules, or uses a fixed manual offset.
 - Resolves location from GPS, reverse geocoding, or fixed coordinates.
 - Shows rotating data blocks for date, current temperature, current weather, daily forecast, AQI, and weather alerts.
 - Adjusts brightness automatically from ambient light, with user bias controls.
@@ -205,7 +205,7 @@ Because these backups contain secrets, store them privately.
 
 The firmware now persists settings in a key-based store instead of relying on IotWebConf's old positional EEPROM layout.
 
-- Firmware version: `2.5.0`
+- Firmware version: `2.5.2`
 - Adding new settings no longer shifts old settings into the wrong slots.
 - Reordering the web configuration page does not corrupt saved config.
 - Backup and restore use the same stable setting IDs as normal persistence.
@@ -259,6 +259,14 @@ If serial debug output is enabled in the configuration, runtime diagnostics are 
 ## Roadmap
 
 Current feature work and pending upgrades are tracked in [docs/feature-changelog.md](docs/feature-changelog.md).
+
+The current top roadmap items are:
+
+1. Completed: a dedicated diagnostics page for GPS, NTP, weather, AQI, alerts, Wi-Fi, and API health.
+2. Completed: a downloadable in-memory log buffer and live web console so debugging does not depend on a live serial cable.
+3. Completed: a dashboard service-health summary with concise status badges and recent-state reporting.
+4. Next: add manual timezone selection by real zone name, such as `America/New_York`.
+5. Next: add GPS recovery tools such as parser reset, raw NMEA inspection, and baud selection.
 
 ## Contributing
 

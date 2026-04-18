@@ -103,6 +103,7 @@ using WireInterface = ace_wire::TwoWireInterface<TwoWire>;
 #include "colors.h"
 #include "runtime_state.h"
 #include "support.h"
+#include "console_log.h"
 #include "network_service.h"
 #include "json_service.h"
 
@@ -183,8 +184,16 @@ extern const uint32_t AQIColorLookup[];
 /** Flash colors used for warning and watch alert presentations. */
 extern const uint32_t alertcolors[];
 
-/** Prints the current runtime state to the serial debug console. */
+/** Prints the current runtime state to the selected console output. */
+void print_debugData(ConsoleMirrorPrint &out);
+/** Prints the current runtime state to the default serial/web console output. */
 void print_debugData();
+/** Prints focused GPS receiver, parser, and fix information to the selected console output. */
+void print_gpsStatus(ConsoleMirrorPrint &out);
+/** Prints focused GPS receiver, parser, and fix information to the default serial/web console output. */
+void print_gpsStatus();
+/** Executes one single-character debug command from serial or the web console. */
+bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediateRestart = true);
 /** Refreshes the active coordinates used by remote services. */
 void updateCoords();
 /** Recomputes the current location strings from the latest location sources. */
@@ -209,6 +218,12 @@ void display_weatherIcon(char *icon);
 void processTimezone();
 /** Returns the current time converted into the active timezone. */
 ace_time::ZonedDateTime getSystemZonedTime();
+/** Returns the active local UTC offset in +HH:MM or -HH:MM format. */
+String getSystemTimezoneOffsetString();
+/** Returns the active timezone identifier or a readable fixed-offset label. */
+String getSystemTimezoneName();
+/** Returns true when the active timezone is currently observing DST. */
+bool isSystemTimezoneDstActive();
 /** Formats the current local time for logs and the web UI. */
 String getSystemZonedTimestamp();
 /** Formats an arbitrary timestamp using the active timezone. */

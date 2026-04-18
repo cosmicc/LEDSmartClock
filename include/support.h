@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <AceTime.h>
+#include "runtime_state.h"
 
 /** Formats an elapsed duration into a human-readable string. */
 String elapsedTime(uint32_t seconds);
@@ -41,3 +42,15 @@ int32_t fromNow(ace_time::acetime_t ctime);
 String formatLargeNumber(int number);
 /** Compares two zoned date-times using only hour, minute, and second. */
 bool compareTimes(ace_time::ZonedDateTime t1, ace_time::ZonedDateTime t2);
+/** Returns the mutable diagnostics record for the selected subsystem. */
+ServiceDiagnostic &diagnosticState(DiagnosticService service);
+/** Returns the shared label used for the selected diagnostics subsystem. */
+const char *diagnosticServiceLabel(DiagnosticService service);
+/** Resets all diagnostics records to their boot-time defaults. */
+void resetServiceDiagnostics();
+/** Records a non-fatal or still-waiting subsystem state for the diagnostics page. */
+void noteDiagnosticPending(DiagnosticService service, bool enabled, const char *summary, const String &detail, uint8_t retries = 0, int16_t lastCode = 0);
+/** Records a successful subsystem update for the diagnostics page. */
+void noteDiagnosticSuccess(DiagnosticService service, bool enabled, const char *summary, const String &detail, uint8_t retries = 0, int16_t lastCode = 200);
+/** Records a failed subsystem update for the diagnostics page. */
+void noteDiagnosticFailure(DiagnosticService service, bool enabled, const char *summary, const String &detail, int16_t lastCode = 0, uint8_t retries = 0);

@@ -6,6 +6,11 @@ namespace
 constexpr char kFirmwareUpdatePath[] = "/firmware";
 constexpr char kConfigExportPath[] = "/config/export";
 constexpr char kConfigImportPath[] = "/config/import";
+constexpr char kDiagnosticsPath[] = "/diagnostics";
+constexpr char kConsolePath[] = "/console";
+constexpr char kConsoleLogPath[] = "/console/log";
+constexpr char kConsoleCommandPath[] = "/console/command";
+constexpr char kConsoleDownloadPath[] = "/console/download";
 constexpr size_t kMaxConfigImportBytes = 24U * 1024U;
 
 /** Tracks whether the current config-import upload request passed auth checks. */
@@ -181,6 +186,69 @@ a:hover{text-decoration:underline}
   font-family:"Georgia","Times New Roman",serif;
   font-size:1.45rem;
   line-height:1.2;
+}
+.card-span{grid-column:1 / -1}
+.service-health-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+  gap:14px;
+  margin-top:18px;
+}
+.service-health-card{
+  padding:16px 18px;
+  border-radius:20px;
+  border:1px solid rgba(27,36,48,0.08);
+  box-shadow:0 10px 24px rgba(22,44,58,0.06);
+}
+.service-health-card h3{
+  margin:0;
+  font-family:"Georgia","Times New Roman",serif;
+  font-size:1.1rem;
+}
+.service-health-card-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+.service-health-card-head span{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:32px;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:0.75rem;
+  font-weight:700;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  color:var(--hero);
+  background:rgba(255,255,255,0.68);
+  border:1px solid rgba(27,36,48,0.08);
+}
+.service-health-card p{
+  margin:12px 0 0;
+  color:var(--muted);
+  line-height:1.5;
+}
+.service-health-meta{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-top:14px;
+  padding-top:12px;
+  border-top:1px solid rgba(27,36,48,0.08);
+}
+.service-health-meta span{
+  color:var(--muted);
+  font-size:0.76rem;
+  font-weight:700;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+}
+.service-health-meta strong{
+  font-size:0.95rem;
 }
 .tone-good{background:linear-gradient(180deg, var(--good-soft), rgba(255,255,255,0.96))}
 .tone-warn{background:linear-gradient(180deg, var(--warm-soft), rgba(255,255,255,0.96))}
@@ -572,6 +640,67 @@ button{
   border:1px solid rgba(23,55,72,0.12);
   box-shadow:0 10px 24px rgba(22,44,58,0.08);
 }
+.console-toolbar{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  margin-top:18px;
+}
+.console-toolbar button{
+  width:auto;
+}
+.console-view{
+  min-height:360px;
+  max-height:62vh;
+  overflow:auto;
+  margin-top:18px;
+  padding:18px;
+  border-radius:20px;
+  border:1px solid rgba(23,55,72,0.1);
+  background:#11222d;
+  color:#dbe9ee;
+  box-shadow:inset 0 1px 2px rgba(255,255,255,0.04);
+  font-family:"Courier New","SFMono-Regular",monospace;
+  font-size:0.92rem;
+  line-height:1.5;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+.console-status{
+  margin-top:12px;
+  color:var(--muted);
+  font-weight:700;
+}
+.console-command-form{
+  display:grid;
+  gap:12px;
+  margin-top:18px;
+}
+.console-command-row{
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) auto;
+  gap:12px;
+  align-items:end;
+}
+.console-command-row input{
+  width:100%;
+  border:1px solid rgba(15,118,110,0.2);
+  border-radius:14px;
+  background:rgba(255,255,255,0.94);
+  color:var(--text);
+  font:inherit;
+  padding:12px 14px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.6);
+}
+.console-command-row input:focus{
+  outline:2px solid rgba(15,118,110,0.18);
+  border-color:var(--accent);
+}
+.console-note{
+  margin-top:12px;
+  color:var(--muted);
+  line-height:1.6;
+}
 @media (max-width: 720px){
   .hero,.portal-hero{padding:22px}
   .kv-row{grid-template-columns:1fr;gap:6px}
@@ -584,6 +713,7 @@ button{
   button{width:100%}
   .password-row{grid-template-columns:1fr}
   .password-toggle{width:100%}
+  .console-command-row{grid-template-columns:1fr}
 }
 )clockcss";
 
@@ -1013,6 +1143,107 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 )clockjs";
 
+const char kConsolePageScript[] PROGMEM = R"clockjs(
+document.addEventListener('DOMContentLoaded', function () {
+  var output = document.getElementById('console-output');
+  var status = document.getElementById('console-status');
+  var form = document.getElementById('console-command-form');
+  var input = document.getElementById('console-command');
+  var cursor = Number(output && output.dataset.cursor ? output.dataset.cursor : '0');
+  var pollTimer = null;
+
+  function setStatus(text) {
+    if (status) {
+      status.textContent = text;
+    }
+  }
+
+  function appendOutput(text) {
+    if (!output || !text) {
+      return;
+    }
+    var wasNearBottom = (output.scrollTop + output.clientHeight + 40) >= output.scrollHeight;
+    output.textContent += text;
+    if (wasNearBottom) {
+      output.scrollTop = output.scrollHeight;
+    }
+  }
+
+  function fetchConsole() {
+    fetch('/console/log?since=' + encodeURIComponent(String(cursor)), { cache: 'no-store' })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status);
+        }
+        var nextCursor = Number(response.headers.get('X-Console-Cursor') || cursor);
+        var truncated = response.headers.get('X-Console-Truncated') === '1';
+        return response.text().then(function (text) {
+          if (truncated) {
+            output.textContent = '[console buffer wrapped; showing newest available output]\n';
+          }
+          if (text) {
+            appendOutput(text);
+          }
+          cursor = nextCursor;
+          setStatus('Live console connected. Cursor ' + cursor + '.');
+        });
+      })
+      .catch(function (error) {
+        setStatus('Console polling failed: ' + error.message);
+      });
+  }
+
+  document.querySelectorAll('[data-console-command]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      if (!input) {
+        return;
+      }
+      input.value = button.dataset.consoleCommand || '';
+      form.requestSubmit();
+    });
+  });
+
+  if (form) {
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (!input) {
+        return;
+      }
+      var command = (input.value || '').trim();
+      if (!command) {
+        setStatus('Enter a command before sending it.');
+        return;
+      }
+
+      fetch('/console/command', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+        },
+        body: 'cmd=' + encodeURIComponent(command)
+      }).then(function (response) {
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status);
+        }
+        input.value = '';
+        setStatus('Sent command "' + command + '". Waiting for console output...');
+        fetchConsole();
+      }).catch(function (error) {
+        setStatus('Command failed: ' + error.message);
+      });
+    });
+  }
+
+  fetchConsole();
+  pollTimer = window.setInterval(fetchConsole, 1500);
+  window.addEventListener('beforeunload', function () {
+    if (pollTimer) {
+      window.clearInterval(pollTimer);
+    }
+  });
+});
+)clockjs";
+
 /** Returns the current portal/network state as an array-safe label. */
 String currentConnectionStateLabel()
 {
@@ -1099,9 +1330,9 @@ String timezoneSourceLabel()
 {
   if (enable_fixed_tz.isChecked())
     return F("Manual override");
-  if (ipgeo.tzoffset != 127)
+  if (ipgeo.timezone[0] != '\0' || ipgeo.tzoffset != 127)
     return F("IP geolocation");
-  if (savedtzoffset.value() != 0)
+  if (savedtimezone.value()[0] != '\0' || savedtzoffset.value() != 0)
     return F("Saved fallback");
   if (fixed_offset.value() != 0)
     return F("Configured fallback");
@@ -1290,6 +1521,151 @@ const char *alertTone()
   return "tone-good";
 }
 
+/** Returns the current diagnostics record for the selected subsystem. */
+const ServiceDiagnostic &serviceDiagnostic(DiagnosticService service)
+{
+  return diagnosticState(service);
+}
+
+/** Returns the diagnostics card tone for the selected subsystem. */
+const char *diagnosticTone(DiagnosticService service)
+{
+  const ServiceDiagnostic &diag = serviceDiagnostic(service);
+  if (!diag.enabled)
+    return "tone-neutral";
+  if (diag.healthy)
+    return "tone-good";
+  if (diag.lastFailure > 0)
+    return "tone-bad";
+  return "tone-warn";
+}
+
+/** Returns a short diagnostics status label with disabled fallback handling. */
+String diagnosticSummary(DiagnosticService service)
+{
+  const ServiceDiagnostic &diag = serviceDiagnostic(service);
+  if (!diag.enabled)
+    return F("Disabled");
+  return safeText(String(diag.summary), "Pending");
+}
+
+/** Returns the longer diagnostics detail text for one subsystem. */
+String diagnosticDetail(DiagnosticService service)
+{
+  const ServiceDiagnostic &diag = serviceDiagnostic(service);
+  if (!diag.enabled)
+    return F("Disabled by current configuration.");
+  return safeText(String(diag.detail), "Waiting for runtime data.");
+}
+
+/** Formats the last recorded error or HTTP code for one subsystem. */
+String diagnosticCodeLabel(DiagnosticService service)
+{
+  const ServiceDiagnostic &diag = serviceDiagnostic(service);
+  if (diag.lastCode == 0)
+    return F("None");
+
+  if (diag.lastCode > 0)
+    return htmlEscape(String(F("HTTP ")) + diag.lastCode + F(" ") + getHttpCodeName(diag.lastCode));
+
+  return htmlEscape(String(diag.lastCode) + F(" ") + getHttpCodeName(diag.lastCode));
+}
+
+/** Counts diagnostics records by the requested health bucket. */
+size_t countDiagnostics(bool enabled, bool healthy)
+{
+  size_t count = 0;
+  for (size_t index = 0; index < kDiagnosticServiceCount; ++index)
+  {
+    const ServiceDiagnostic &diag = runtimeState.diagnostics[index];
+    if (diag.enabled == enabled && diag.healthy == healthy)
+      ++count;
+  }
+  return count;
+}
+
+/** Counts enabled services that are still waiting rather than actively failing. */
+size_t countPendingDiagnostics()
+{
+  size_t count = 0;
+  for (size_t index = 0; index < kDiagnosticServiceCount; ++index)
+  {
+    const ServiceDiagnostic &diag = runtimeState.diagnostics[index];
+    if (diag.enabled && !diag.healthy && diag.lastFailure == 0)
+      ++count;
+  }
+  return count;
+}
+
+/** Counts enabled services that have a recorded failure and need attention. */
+size_t countAttentionDiagnostics()
+{
+  size_t count = 0;
+  for (size_t index = 0; index < kDiagnosticServiceCount; ++index)
+  {
+    const ServiceDiagnostic &diag = runtimeState.diagnostics[index];
+    if (diag.enabled && !diag.healthy && diag.lastFailure > 0)
+      ++count;
+  }
+  return count;
+}
+
+/** Counts services that are intentionally disabled by config or setup state. */
+size_t countDisabledDiagnostics()
+{
+  size_t count = 0;
+  for (size_t index = 0; index < kDiagnosticServiceCount; ++index)
+  {
+    if (!runtimeState.diagnostics[index].enabled)
+      ++count;
+  }
+  return count;
+}
+
+/** Returns a short dashboard badge describing the current diagnostics state. */
+String diagnosticHealthBadge(DiagnosticService service)
+{
+  const ServiceDiagnostic &diag = serviceDiagnostic(service);
+  if (!diag.enabled)
+    return F("Disabled");
+  if (diag.healthy)
+    return F("Healthy");
+  if (diag.lastFailure > 0)
+    return F("Attention");
+  return F("Waiting");
+}
+
+/** Returns the most relevant recent timestamp for the diagnostics summary card. */
+String diagnosticRecentActivity(DiagnosticService service, acetime_t now)
+{
+  const ServiceDiagnostic &diag = serviceDiagnostic(service);
+  if (!diag.enabled)
+    return F("Disabled");
+  if (diag.healthy)
+    return formatAgo(now, diag.lastSuccess);
+  if (diag.lastFailure > 0)
+    return formatAgo(now, diag.lastFailure);
+  return F("Waiting");
+}
+
+/** Renders one compact service-health card on the dashboard. */
+void appendServiceHealthCard(String &html, DiagnosticService service, acetime_t now)
+{
+  html += F("<article class='service-health-card ");
+  html += diagnosticTone(service);
+  html += F("'><div class='service-health-card-head'><h3>");
+  html += htmlEscape(String(diagnosticServiceLabel(service)));
+  html += F("</h3><span>");
+  html += htmlEscape(diagnosticSummary(service));
+  html += F("</span></div><p>");
+  html += htmlEscape(diagnosticDetail(service));
+  html += F("</p><div class='service-health-meta'><span>");
+  html += htmlEscape(diagnosticHealthBadge(service));
+  html += F("</span><strong>");
+  html += htmlEscape(diagnosticRecentActivity(service, now));
+  html += F("</strong></div></article>");
+}
+
 /** Opens the page shell and injects the shared CSS theme. */
 void appendDocumentHead(String &html, const char *title, bool autoRefresh)
 {
@@ -1337,6 +1713,18 @@ void appendCardStart(String &html, const char *title, const char *subtitle)
   html += F("</p></div><dl class='kv-list'>");
 }
 
+/** Opens a detail card with a visual tone summary. */
+void appendTonedCardStart(String &html, const char *title, const char *subtitle, const char *toneClass)
+{
+  html += F("<section class='card ");
+  html += toneClass;
+  html += F("'><div class='card-header'><h2>");
+  html += htmlEscape(String(title));
+  html += F("</h2><p class='card-subtitle'>");
+  html += htmlEscape(String(subtitle));
+  html += F("</p></div><dl class='kv-list'>");
+}
+
 /** Adds a key/value row to the currently open detail card. */
 void appendKeyValueRow(String &html, const char *label, const String &value)
 {
@@ -1376,6 +1764,12 @@ void appendSetupPage(String &html)
   html += F(".</p><div class='action-row'>");
   html += F("<a class='button-link primary' href='/config'>Open Configuration</a>");
   html += F("<a class='button-link secondary' href='");
+  html += kDiagnosticsPath;
+  html += F("'>Diagnostics</a>");
+  html += F("<a class='button-link secondary' href='");
+  html += kConsolePath;
+  html += F("'>Console</a>");
+  html += F("<a class='button-link secondary' href='");
   html += kConfigImportPath;
   html += F("'>Import Backup</a>");
   html += F("</div><div class='portal-chip-row'>");
@@ -1412,6 +1806,12 @@ void appendFirmwareUpdatePage(String &html, const char *noticeToneClass, const S
   html += F("<p class='lede'>Upload the compiled <code>firmware.bin</code> application image to install a new release over the network without opening the enclosure.</p><div class='action-row'>");
   html += F("<a class='button-link primary' href='/'>Dashboard</a>");
   html += F("<a class='button-link secondary' href='/config'>Configuration</a>");
+  html += F("<a class='button-link secondary' href='");
+  html += kDiagnosticsPath;
+  html += F("'>Diagnostics</a>");
+  html += F("<a class='button-link secondary' href='");
+  html += kConsolePath;
+  html += F("'>Console</a>");
   html += F("</div><div class='portal-chip-row'>");
   appendStatusChip(html, "Firmware", htmlEscape(String(VERSION_SEMVER)));
   appendStatusChip(html, "Address", activeAddressLabel());
@@ -1480,6 +1880,12 @@ void appendConfigBackupPage(String &html, const char *noticeToneClass, const Str
   html += F("<p class='lede'>Download a JSON snapshot of the current configuration or restore one from another clock or older firmware. Import matches fields by key so older backups can seed newer builds without depending on storage order.</p><div class='action-row'>");
   html += F("<a class='button-link primary' href='/config'>Configuration</a>");
   html += F("<a class='button-link secondary' href='/'>Dashboard</a>");
+  html += F("<a class='button-link secondary' href='");
+  html += kDiagnosticsPath;
+  html += F("'>Diagnostics</a>");
+  html += F("<a class='button-link secondary' href='");
+  html += kConsolePath;
+  html += F("'>Console</a>");
   html += F("</div><div class='portal-chip-row'>");
   appendStatusChip(html, "Firmware", htmlEscape(String(VERSION_SEMVER)));
   appendStatusChip(html, "Address", activeAddressLabel());
@@ -1519,10 +1925,222 @@ void appendConfigBackupPage(String &html, const char *noticeToneClass, const Str
   html += F("</ul></section></main></div></body></html>");
 }
 
+/** Renders the live web console backed by the in-memory console log buffer. */
+void appendConsolePage(String &html)
+{
+  String snapshot;
+  uint32_t cursor = 0;
+  bool truncated = false;
+  readConsoleLogSnapshot(snapshot, cursor, truncated);
+
+  appendDocumentHead(html, "LED Smart Clock Console", false);
+  html += F("<div class='shell'><header class='hero'>");
+  html += F("<p class='eyebrow'>LED Smart Clock Console</p>");
+  html += F("<h1>Live Debug Console</h1>");
+  html += F("<p class='lede'>This page shows the in-memory runtime console buffer, keeps polling for new output, and can send the same one-character debug commands that normally go over USB serial.</p><div class='action-row'>");
+  html += F("<a class='button-link primary' href='");
+  html += kDiagnosticsPath;
+  html += F("'>Diagnostics</a>");
+  html += F("<a class='button-link secondary' href='/'>Dashboard</a>");
+  html += F("<a class='button-link secondary' href='");
+  html += kConsoleDownloadPath;
+  html += F("'>Download Log</a>");
+  html += F("</div><div class='portal-chip-row'>");
+  appendStatusChip(html, "Address", activeAddressLabel());
+  appendStatusChip(html, "Cursor", htmlEscape(String(cursor)));
+  appendStatusChip(html, "Serial Debug", serialdebug.isChecked() ? F("Enabled") : F("Disabled"));
+  html += F("</div><div class='metric-grid'>");
+  appendMetricCard(html, "Buffered Output", htmlEscape(String(snapshot.length()) + F(" bytes")), "tone-neutral");
+  appendMetricCard(html, "Live Polling", F("Every 1.5 seconds"), "tone-good");
+  appendMetricCard(html, "Command Path", F("/console/command"), "tone-neutral");
+  html += F("</div></header>");
+
+  if (truncated)
+    appendNotice(html, "notice-warn", F("The RAM console buffer already wrapped. The console below starts at the newest retained output."));
+
+  html += F("<main class='content-grid'>");
+  appendCardStart(html, "Live Output", "Newest output appears here automatically. Use the download button if you want the current retained tail as a text file.");
+  appendKeyValueRow(html, "Log Download", String(F("<a class='button-link primary' href='")) + kConsoleDownloadPath + F("'>Download Console Log</a>"));
+  appendKeyValueRow(html, "Incremental Feed", F("<code>/console/log</code>"));
+  appendKeyValueRow(html, "Buffer Scope", F("Recent runtime output retained in RAM only"));
+  html += F("</dl><pre id='console-output' class='console-view' data-cursor='");
+  html += cursor;
+  html += F("'>");
+  html += htmlEscape(snapshot);
+  html += F("</pre><p id='console-status' class='console-status'>Connecting to live console feed...</p></section>");
+
+  appendCardStart(html, "Send Debug Commands", "Commands map to the existing serial shortcuts. The first non-space character is used, so enter values such as h, d, g, or s.");
+  appendKeyValueRow(html, "Common Commands", F("<code>h</code> help, <code>d</code> dump debug, <code>g</code> GPS status, <code>s</code> coroutine states, <code>l</code> debug logging"));
+  appendKeyValueRow(html, "Display Tests", F("<code>a</code> AQI, <code>w</code> current weather, <code>e</code> date, <code>q</code> daily weather, <code>t</code> alert flash"));
+  appendKeyValueRow(html, "Caution", F("<code>r</code> queues a reboot from the web console after the HTTP response returns"));
+  html += F("</dl><div class='console-toolbar'>");
+  html += F("<button type='button' data-console-command='h'>Help</button>");
+  html += F("<button type='button' data-console-command='d'>Debug Dump</button>");
+  html += F("<button type='button' data-console-command='g'>GPS Status</button>");
+  html += F("<button type='button' data-console-command='s'>Coroutines</button>");
+  html += F("<button type='button' data-console-command='l'>Debug Logs</button>");
+  html += F("<button type='button' data-console-command='r'>Reboot</button>");
+  html += F("</div><form id='console-command-form' class='console-command-form'><div class='console-command-row'><input id='console-command' name='cmd' type='text' maxlength='8' placeholder='Enter a command such as h, d, g, s, or r'><button type='submit'>Send Command</button></div></form>");
+  html += F("<p class='console-note'>Web commands use the same handlers as the USB serial console, and their output is written back into this same RAM log buffer.</p></section>");
+  html += F("</main><script>");
+  html += FPSTR(kConsolePageScript);
+  html += F("</script></div></body></html>");
+}
+
+/** Renders the detailed diagnostics page for the major runtime subsystems. */
+void appendDiagnosticsPage(String &html)
+{
+  const acetime_t now = systemClock.getNow();
+  const size_t healthyCount = countDiagnostics(true, true);
+  const size_t pendingCount = countPendingDiagnostics();
+  const size_t disabledCount = countDisabledDiagnostics();
+  const size_t attentionCount = countAttentionDiagnostics();
+
+  appendDocumentHead(html, "LED Smart Clock Diagnostics", true);
+  html += F("<div class='shell'><header class='hero'>");
+  html += F("<p class='eyebrow'>LED Smart Clock Diagnostics</p>");
+  html += F("<h1>Service Health</h1>");
+  html += F("<p class='lede'>This page tracks the live state of Wi-Fi, timekeeping, GPS, weather, alerts, air quality, and location services so field debugging does not require a serial console for every issue.</p><div class='action-row'>");
+  html += F("<a class='button-link primary' href='/'>Dashboard</a>");
+  html += F("<a class='button-link secondary' href='/config'>Configuration</a>");
+  html += F("<a class='button-link secondary' href='");
+  html += kConsolePath;
+  html += F("'>Console</a>");
+  html += F("<a class='button-link secondary' href='");
+  html += kFirmwareUpdatePath;
+  html += F("'>Firmware Update</a>");
+  html += F("</div><div class='portal-chip-row'>");
+  appendStatusChip(html, "State", htmlEscape(currentConnectionStateLabel()));
+  appendStatusChip(html, "Address", activeAddressLabel());
+  appendStatusChip(html, "Location", currentLocationLabel());
+  html += F("</div><div class='metric-grid'>");
+  appendMetricCard(html, "Healthy", htmlEscape(String(healthyCount)), "tone-good");
+  appendMetricCard(html, "Attention", htmlEscape(String(attentionCount)), attentionCount > 0 ? "tone-bad" : "tone-neutral");
+  appendMetricCard(html, "Waiting", htmlEscape(String(pendingCount)), pendingCount > 0 ? "tone-warn" : "tone-neutral");
+  appendMetricCard(html, "Disabled", htmlEscape(String(disabledCount)), disabledCount > 0 ? "tone-neutral" : "tone-good");
+  html += F("</div></header>");
+
+  if (attentionCount > 0)
+    appendNotice(html, "notice-bad", F("One or more services have recorded a recent failure. Check the red diagnostics cards below for the latest error context."));
+  else if (pendingCount > 0)
+    appendNotice(html, "notice-warn", F("Some services are still waiting on Wi-Fi, coordinates, API keys, or first successful data. Waiting states are normal during boot and setup."));
+
+  html += F("<main class='content-grid'>");
+
+  appendTonedCardStart(html, "Connectivity", "Current network state, captive portal mode, and HTTP transport readiness.", diagnosticTone(DiagnosticService::Wifi));
+  appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::Wifi));
+  appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::Wifi));
+  appendKeyValueRow(html, "Connection State", htmlEscape(currentConnectionStateLabel()));
+  appendKeyValueRow(html, "Address", activeAddressLabel());
+  appendKeyValueRow(html, "Captive Portal", isSetupPortalState() ? F("Active") : F("Off"));
+  appendKeyValueRow(html, "HTTP Client Ready", isHttpReady() ? F("Yes") : F("No"));
+  appendKeyValueRow(html, "Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::Wifi).lastSuccess));
+  appendKeyValueRow(html, "Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::Wifi).lastFailure));
+  appendCardEnd(html);
+
+  appendTonedCardStart(html, "Timekeeping", "Clock source, SNTP state, timezone rules, and the most recent synchronization path.", diagnosticTone(DiagnosticService::Ntp));
+  appendKeyValueRow(html, "Clock Status", htmlEscape(String(clock_status[systemClock.getSyncStatusCode()])));
+  appendKeyValueRow(html, "Clock Source", timeSourceLabel());
+  appendKeyValueRow(html, "Clock Detail", diagnosticDetail(DiagnosticService::Timekeeping));
+  appendKeyValueRow(html, "Last Time Sync", formatAgo(now, systemClock.getLastSyncTime()));
+  appendKeyValueRow(html, "NTP Status", diagnosticSummary(DiagnosticService::Ntp));
+  appendKeyValueRow(html, "NTP Detail", diagnosticDetail(DiagnosticService::Ntp));
+  appendKeyValueRow(html, "NTP Server", ntpServerLabel());
+  appendKeyValueRow(html, "NTP Source", ntpServerSourceLabel());
+  appendKeyValueRow(html, "NTP Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::Ntp).lastSuccess));
+  appendKeyValueRow(html, "NTP Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::Ntp).lastFailure));
+  appendKeyValueRow(html, "NTP Last Code", diagnosticCodeLabel(DiagnosticService::Ntp));
+  appendKeyValueRow(html, "Timezone", htmlEscape(getSystemTimezoneName()));
+  appendKeyValueRow(html, "Timezone Offset", htmlEscape(getSystemTimezoneOffsetString()));
+  appendKeyValueRow(html, "DST Active", isSystemTimezoneDstActive() ? F("Yes") : F("No"));
+  appendCardEnd(html);
+
+  appendTonedCardStart(html, "GPS", "Receiver UART activity, fix acquisition, and the live navigation data currently available.", diagnosticTone(DiagnosticService::Gps));
+  appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::Gps));
+  appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::Gps));
+  appendKeyValueRow(html, "Module Detected", gps.moduleDetected ? F("Yes") : F("No"));
+  appendKeyValueRow(html, "Fix", gps.fix ? F("Yes") : F("No"));
+  appendKeyValueRow(html, "Waiting For Fix", gps.waitingForFix ? F("Yes") : F("No"));
+  appendKeyValueRow(html, "Satellites", htmlEscape(String(gps.sats)));
+  appendKeyValueRow(html, "Coordinates", htmlEscape(String(gps.lat, 5) + F(", ") + String(gps.lon, 5)));
+  appendKeyValueRow(html, "HDOP", htmlEscape(String(gps.hdop)));
+  appendKeyValueRow(html, "Elevation", htmlEscape(String(gps.elevation) + F(" ft")));
+  appendKeyValueRow(html, "Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::Gps).lastSuccess));
+  appendKeyValueRow(html, "Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::Gps).lastFailure));
+  appendCardEnd(html);
+
+  appendTonedCardStart(html, "Weather", "Current conditions refresh health and the data used by the current-weather and daily-weather displays.", diagnosticTone(DiagnosticService::Weather));
+  appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::Weather));
+  appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::Weather));
+  appendKeyValueRow(html, "Current Conditions", currentWeatherDescription());
+  appendKeyValueRow(html, "Current Temperature", formatTemperature(weather.current.temp));
+  appendKeyValueRow(html, "Enabled", show_current_temp.isChecked() || show_current_weather.isChecked() || show_daily_weather.isChecked() ? F("Yes") : F("No"));
+  appendKeyValueRow(html, "Retries", htmlEscape(String(serviceDiagnostic(DiagnosticService::Weather).retries)));
+  appendKeyValueRow(html, "Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::Weather).lastSuccess));
+  appendKeyValueRow(html, "Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::Weather).lastFailure));
+  appendKeyValueRow(html, "Last Code", diagnosticCodeLabel(DiagnosticService::Weather));
+  appendKeyValueRow(html, "Next Weather Scroll", formatUntil(now, lastshown.currentweather, static_cast<uint32_t>(current_weather_interval.value()) * 3600U));
+  appendCardEnd(html);
+
+  appendTonedCardStart(html, "Air Quality", "AQI forecast refresh health and the pollutant summary used by the AQI display block.", diagnosticTone(DiagnosticService::AirQuality));
+  appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::AirQuality));
+  appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::AirQuality));
+  appendKeyValueRow(html, "Current AQI", htmlEscape(String(air_quality[aqi.current.aqi])));
+  appendKeyValueRow(html, "Description", currentAqiDescription());
+  appendKeyValueRow(html, "Enabled", show_aqi.isChecked() ? F("Yes") : F("No"));
+  appendKeyValueRow(html, "Retries", htmlEscape(String(serviceDiagnostic(DiagnosticService::AirQuality).retries)));
+  appendKeyValueRow(html, "Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::AirQuality).lastSuccess));
+  appendKeyValueRow(html, "Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::AirQuality).lastFailure));
+  appendKeyValueRow(html, "Last Code", diagnosticCodeLabel(DiagnosticService::AirQuality));
+  appendKeyValueRow(html, "Next AQI Scroll", formatUntil(now, lastshown.aqi, static_cast<uint32_t>(aqi_interval.value()) * 60U));
+  appendCardEnd(html);
+
+  appendTonedCardStart(html, "Alerts", "weather.gov polling health and the currently selected watch or warning text.", diagnosticTone(DiagnosticService::Alerts));
+  appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::Alerts));
+  appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::Alerts));
+  appendKeyValueRow(html, "Alert Active", alerts.active ? F("Yes") : F("No"));
+  appendKeyValueRow(html, "Current Event", safeText(String(alerts.event1), "No active alert"));
+  appendKeyValueRow(html, "Description", currentAlertDescription());
+  appendKeyValueRow(html, "Retries", htmlEscape(String(serviceDiagnostic(DiagnosticService::Alerts).retries)));
+  appendKeyValueRow(html, "Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::Alerts).lastSuccess));
+  appendKeyValueRow(html, "Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::Alerts).lastFailure));
+  appendKeyValueRow(html, "Last Code", diagnosticCodeLabel(DiagnosticService::Alerts));
+  appendCardEnd(html);
+
+  appendTonedCardStart(html, "IP Geolocation", "Public-IP-based timezone and coarse coordinate fallback state.", diagnosticTone(DiagnosticService::IpGeo));
+  appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::IpGeo));
+  appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::IpGeo));
+  appendKeyValueRow(html, "Timezone", safeText(String(ipgeo.timezone), "Waiting"));
+  appendKeyValueRow(html, "Coordinates", htmlEscape(String(ipgeo.lat, 5) + F(", ") + String(ipgeo.lon, 5)));
+  appendKeyValueRow(html, "Retries", htmlEscape(String(serviceDiagnostic(DiagnosticService::IpGeo).retries)));
+  appendKeyValueRow(html, "Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::IpGeo).lastSuccess));
+  appendKeyValueRow(html, "Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::IpGeo).lastFailure));
+  appendKeyValueRow(html, "Last Code", diagnosticCodeLabel(DiagnosticService::IpGeo));
+  appendCardEnd(html);
+
+  appendTonedCardStart(html, "Reverse Geocode", "City and region resolution based on the active service coordinates.", diagnosticTone(DiagnosticService::Geocode));
+  appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::Geocode));
+  appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::Geocode));
+  appendKeyValueRow(html, "Location", currentLocationLabel());
+  appendKeyValueRow(html, "Coordinates", currentCoordinatesLabel());
+  appendKeyValueRow(html, "Location Source", safeText(String(current.locsource), "Unknown"));
+  appendKeyValueRow(html, "Retries", htmlEscape(String(serviceDiagnostic(DiagnosticService::Geocode).retries)));
+  appendKeyValueRow(html, "Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::Geocode).lastSuccess));
+  appendKeyValueRow(html, "Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::Geocode).lastFailure));
+  appendKeyValueRow(html, "Last Code", diagnosticCodeLabel(DiagnosticService::Geocode));
+  appendCardEnd(html);
+
+  html += F("</main></div></body></html>");
+}
+
 /** Renders the main status dashboard shown during normal operation. */
 void appendStatusPage(String &html)
 {
   acetime_t now = systemClock.getNow();
+  const size_t healthyCount = countDiagnostics(true, true);
+  const size_t attentionCount = countAttentionDiagnostics();
+  const size_t pendingCount = countPendingDiagnostics();
+  const size_t disabledCount = countDisabledDiagnostics();
 
   appendDocumentHead(html, "LED Smart Clock Status", true);
 
@@ -1533,6 +2151,12 @@ void appendStatusPage(String &html)
   html += htmlEscape(getSystemZonedDateTimeString());
   html += F("</p><div class='action-row'>");
   html += F("<a class='button-link primary' href='/config'>Configuration</a>");
+  html += F("<a class='button-link secondary' href='");
+  html += kDiagnosticsPath;
+  html += F("'>Diagnostics</a>");
+  html += F("<a class='button-link secondary' href='");
+  html += kConsolePath;
+  html += F("'>Console</a>");
   html += F("<a class='button-link secondary' href='/firmware'>Firmware Update</a>");
   html += F("<a class='button-link danger' href='/reboot'>Reboot</a>");
   html += F("</div><div class='portal-chip-row'>");
@@ -1556,8 +2180,26 @@ void appendStatusPage(String &html)
     appendNotice(html, "notice-warn", F("OpenWeather is not configured. Current weather, daily forecast, and AQI data will remain unavailable until a One Call 3.0 API key is saved."));
   if (!isCoordsValid())
     appendNotice(html, "notice-bad", F("The clock does not currently have valid coordinates, so remote weather and air-quality lookups cannot complete yet."));
+  if (attentionCount > 0)
+    appendNotice(html, "notice-bad", F("One or more live services need attention right now. The service-health summary below highlights the failing subsystem and the latest status text."));
+  else if (pendingCount > 0)
+    appendNotice(html, "notice-warn", F("Some services are still waiting on first data, coordinates, Wi-Fi, or API readiness. That can be normal during boot, but the health summary below shows which service is still pending."));
 
   html += F("<main class='content-grid'>");
+
+  html += F("<section class='card card-span'><div class='card-header'><h2>Service Health</h2><p class='card-subtitle'>Quick runtime triage for the major online and sensor subsystems. Open the full diagnostics page for retries, last codes, and deeper timing detail.</p></div><div class='metric-grid'>");
+  appendMetricCard(html, "Healthy", htmlEscape(String(healthyCount)), "tone-good");
+  appendMetricCard(html, "Attention", htmlEscape(String(attentionCount)), attentionCount > 0 ? "tone-bad" : "tone-neutral");
+  appendMetricCard(html, "Waiting", htmlEscape(String(pendingCount)), pendingCount > 0 ? "tone-warn" : "tone-neutral");
+  appendMetricCard(html, "Disabled", htmlEscape(String(disabledCount)), disabledCount > 0 ? "tone-neutral" : "tone-good");
+  html += F("</div><div class='service-health-grid'>");
+  for (size_t index = 0; index < kDiagnosticServiceCount; ++index)
+    appendServiceHealthCard(html, static_cast<DiagnosticService>(index), now);
+  html += F("</div><div class='action-row'><a class='button-link primary' href='");
+  html += kDiagnosticsPath;
+  html += F("'>Open Full Diagnostics</a><a class='button-link ghost' href='");
+  html += kConsolePath;
+  html += F("'>Open Console</a></div></section>");
 
   appendCardStart(html, "System", "Core firmware identity, connectivity, and synchronization.");
   appendKeyValueRow(html, "Firmware Version", htmlEscape(String(VERSION_SEMVER)));
@@ -1568,8 +2210,10 @@ void appendStatusPage(String &html)
   appendKeyValueRow(html, "Time Source", timeSourceLabel());
   appendKeyValueRow(html, "NTP Server", ntpServerLabel());
   appendKeyValueRow(html, "NTP Source", ntpServerSourceLabel());
+  appendKeyValueRow(html, "Timezone", htmlEscape(getSystemTimezoneName()));
   appendKeyValueRow(html, "Timezone Source", timezoneSourceLabel());
-  appendKeyValueRow(html, "Timezone Offset", htmlEscape(String(current.tzoffset)));
+  appendKeyValueRow(html, "Timezone Offset", htmlEscape(getSystemTimezoneOffsetString()));
+  appendKeyValueRow(html, "DST Active", isSystemTimezoneDstActive() ? F("Yes") : F("No"));
   appendCardEnd(html);
 
   appendCardStart(html, "Location", "Resolved city and coordinate data used by the external services.");
@@ -1672,7 +2316,9 @@ public:
     html += kConfigImportPath;
     html += F("'>Restore From Backup</a></div><p>The backup file includes Wi-Fi credentials, portal passwords, and API keys, so store it privately.</p></section>");
     html += F("<section class='portal-card portal-intro'><div class='card-header'><h2>Before You Save</h2><p class='card-subtitle'>Changes are written to flash when you apply them. Wi-Fi or API edits can briefly interrupt online services while the clock reconnects and refreshes its derived state.</p></div>");
-    html += F("<p>Use the status page at <a href='/'>/</a> to confirm time sync, weather refreshes, AQI updates, and alert health after saving.</p></section>");
+    html += F("<p>Use the status page at <a href='/'>/</a> to confirm runtime basics, and the <a href='");
+    html += kDiagnosticsPath;
+    html += F("'>diagnostics page</a> when you need detailed service health, retries, and recent error context after saving.</p></section>");
     html += F("<section class='portal-card portal-surface'>");
     return html;
   }
@@ -1967,6 +2613,99 @@ void handleConfigImportUpload()
 
   delay(0);
 }
+
+/** Renders the live web console page backed by the RAM log buffer. */
+void handleConsolePage()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!authorizeAdminRequest())
+    return;
+
+  String html;
+  html.reserve(18000);
+  appendConsolePage(html);
+  server.send(200, "text/html; charset=UTF-8", html);
+}
+
+/** Streams incremental console output newer than the supplied cursor. */
+void handleConsoleLog()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!authorizeAdminRequest())
+    return;
+
+  uint32_t since = 0;
+  if (server.hasArg("since"))
+    since = static_cast<uint32_t>(strtoul(server.arg("since").c_str(), nullptr, 10));
+
+  String payload;
+  uint32_t cursor = 0;
+  bool truncated = false;
+  readConsoleLogSince(since, payload, cursor, truncated);
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("X-Console-Cursor", String(cursor));
+  server.sendHeader("X-Console-Truncated", truncated ? "1" : "0");
+  server.send(200, "text/plain; charset=UTF-8", payload);
+}
+
+/** Downloads the current retained RAM console buffer as plain text. */
+void handleConsoleDownload()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!authorizeAdminRequest())
+    return;
+
+  String payload;
+  uint32_t cursor = 0;
+  bool truncated = false;
+  readConsoleLogSnapshot(payload, cursor, truncated);
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Content-Disposition", F("attachment; filename=\"ledsmartclock-console.txt\""));
+  server.send(200, "text/plain; charset=UTF-8", payload);
+}
+
+/** Accepts a one-character debug command from the web console. */
+void handleConsoleCommand()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!authorizeAdminRequest())
+    return;
+
+  String command = server.hasArg("cmd") ? server.arg("cmd") : String();
+  char input = '\0';
+  for (size_t index = 0; index < command.length(); ++index)
+  {
+    if (!isspace(static_cast<unsigned char>(command[index])))
+    {
+      input = command[index];
+      break;
+    }
+  }
+
+  if (input == '\0')
+  {
+    server.send(400, "application/json; charset=UTF-8", F("{\"ok\":false,\"error\":\"Missing command.\"}"));
+    return;
+  }
+
+  ConsoleMirrorPrint out(true);
+  out.printf("[web] command: %c\n", input);
+  bool handled = handleDebugCommand(input, out, false);
+  if (!handled)
+  {
+    server.send(400, "application/json; charset=UTF-8", F("{\"ok\":false,\"error\":\"Unknown command.\"}"));
+    return;
+  }
+
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json; charset=UTF-8", F("{\"ok\":true}"));
+}
 } // namespace
 
 void configureWebUi()
@@ -1977,6 +2716,19 @@ void configureWebUi()
 void registerWebRoutes()
 {
   server.on("/", handleRoot);
+  server.on(kDiagnosticsPath, []() {
+    if (iotWebConf.handleCaptivePortal())
+      return;
+
+    String html;
+    html.reserve(22000);
+    appendDiagnosticsPage(html);
+    server.send(200, "text/html; charset=UTF-8", html);
+  });
+  server.on(kConsolePath, handleConsolePage);
+  server.on(kConsoleLogPath, HTTP_GET, handleConsoleLog);
+  server.on(kConsoleDownloadPath, HTTP_GET, handleConsoleDownload);
+  server.on(kConsoleCommandPath, HTTP_POST, handleConsoleCommand);
   server.on(kConfigExportPath, HTTP_GET, handleConfigExport);
   server.on(kConfigImportPath, HTTP_GET, handleConfigImport);
   server.on(kConfigImportPath, HTTP_POST, handleConfigImportPost, handleConfigImportUpload);

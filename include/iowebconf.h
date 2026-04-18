@@ -14,6 +14,8 @@ extern iotwebconf::TextTParameter<12> savedlat;
 extern iotwebconf::TextTParameter<12> savedlon;
 /** Last persisted timezone offset used as a local fallback. */
 extern iotwebconf::IntTParameter<int8_t> savedtzoffset;
+/** Last persisted IANA timezone name used to restore DST-aware local time. */
+extern iotwebconf::TextTParameter<64> savedtimezone;
 /** Last persisted city name used during startup and offline operation. */
 extern iotwebconf::TextTParameter<32> savedcity;
 /** Last persisted state or province used during startup and offline operation. */
@@ -54,7 +56,7 @@ extern iotwebconf::ParameterGroup group2;
 extern iotwebconf::CheckboxTParameter twelve_clock;
 /** Forces a fixed timezone offset instead of automatic timezone detection. */
 extern iotwebconf::CheckboxTParameter enable_fixed_tz;
-/** User-selected timezone offset used when fixed timezone mode is enabled. */
+/** User-selected fixed GMT offset used when fixed timezone mode is enabled. */
 extern iotwebconf::IntTParameter<int8_t> fixed_offset;
 /** Preferred NTP hostname used when DHCP does not supply a server or override is enabled. */
 extern iotwebconf::TextTParameter<64> ntp_server;

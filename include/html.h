@@ -3,7 +3,7 @@
 /** Applies the shared LED Smart Clock visual theme to the config portal. */
 void configureWebUi();
 
-/** Registers the root, config, backup, firmware, reboot, and fallback handlers on the shared server. */
+/** Registers the root, diagnostics, console, config, backup, firmware, reboot, and fallback handlers on the shared server. */
 void registerWebRoutes();
 
 /** Renders the root web status page. */

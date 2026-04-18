@@ -305,7 +305,7 @@ bool fillAqiFromJson(const String &payload)
     return false;
   }
   JsonObject obj = doc.as<JsonObject>();
-  Serial.println(obj);
+  ESP_LOGV(TAG, "AQI forecast payload parsed successfully.");
   aqi.current.aqi = obj["list"][1]["main"]["aqi"];
   aqi.current.co = obj["list"][1]["components"]["co"];
   aqi.current.no = obj["list"][1]["components"]["no"];

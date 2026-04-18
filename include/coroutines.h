@@ -118,6 +118,8 @@ COROUTINE(checkAirquality)
     COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkaqi.lastsuccess, aqiRefreshIntervalMinutes(), T1M) && isNextAttemptReady(checkaqi.lastattempt) && isApiValid(weatherapi.value()) && checkaqi.retries < HTTP_MAX_RETRIES && isCoordsValid() && !runtimeState.firstTimeFailsafe);
     ESP_LOGI(TAG, "Checking air quality conditions...");
     checkaqi.retries++;
+    noteDiagnosticPending(DiagnosticService::AirQuality, true, "Refreshing",
+                          F("Requesting the latest AQI forecast from OpenWeather."), checkaqi.retries);
     IotWebConf.suspend();
     int httpCode = 0;
     String reqdata;
@@ -135,14 +137,24 @@ COROUTINE(checkAirquality)
           checkaqi.complete = true;
           checkaqi.lastsuccess = systemClock.getNow();
           ESP_LOGI(TAG, "New air quality data received");
+          noteDiagnosticSuccess(DiagnosticService::AirQuality, true, "Fresh data",
+                                String(air_quality[aqi.current.aqi]) + F(" AQI, ") + aqi.current.description,
+                                checkaqi.retries, httpCode);
           if (checkaqi.firsttime)
             checkaqi.firsttime = false;
         }
+        else
+          noteDiagnosticFailure(DiagnosticService::AirQuality, true, "Parse failed",
+                                F("OpenWeather returned AQI data, but the JSON payload could not be parsed cleanly."),
+                                httpCode, checkaqi.retries);
       }
       else if (httpCode == 401 || httpCode == 403 || httpCode == 404 || httpCode == 429)
       {
         reqdata = networkService.client.getString();
         ESP_LOGE(TAG, "OpenWeather AQI request failed: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.c_str());
+        noteDiagnosticFailure(DiagnosticService::AirQuality, true, "HTTP error",
+                              String(F("OpenWeather AQI request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
+                              httpCode, checkaqi.retries);
         showready.apierror = true;
         strcpy(showready.apierrorname, "openweather.org");
       }
@@ -150,12 +162,18 @@ COROUTINE(checkAirquality)
       {
         reqdata = networkService.client.getString();
         ESP_LOGE(TAG, "CHECKAQI ERROR: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.c_str());
+        noteDiagnosticFailure(DiagnosticService::AirQuality, true, "Request failed",
+                              String(F("AQI request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
+                              httpCode, checkaqi.retries);
       }
     }
     else
     {
       IotWebConf.resume();
       ESP_LOGE(TAG, "Failed to begin OpenWeather AQI request");
+      noteDiagnosticFailure(DiagnosticService::AirQuality, true, "Start failed",
+                            F("The shared HTTP client could not begin the AQI request."),
+                            0, checkaqi.retries);
     }
     endApiRequest();
     checkaqi.lastattempt = systemClock.getNow();
@@ -169,6 +187,8 @@ COROUTINE(checkWeather)
     COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkweather.lastsuccess, weatherRefreshIntervalMinutes(), T1M) && isNextAttemptReady(checkweather.lastattempt)  && isApiValid(weatherapi.value()) && checkweather.retries < HTTP_MAX_RETRIES && isCoordsValid() && !runtimeState.firstTimeFailsafe);
     ESP_LOGI(TAG, "Checking weather forecast...");
     checkweather.retries++;
+    noteDiagnosticPending(DiagnosticService::Weather, true, "Refreshing",
+                          F("Requesting current and daily weather from OpenWeather."), checkweather.retries);
     IotWebConf.suspend();
     int httpCode = 0;
     String reqdata;
@@ -188,12 +208,23 @@ COROUTINE(checkWeather)
             checkweather.firsttime = false;
           checkweather.lastsuccess = systemClock.getNow();
           ESP_LOGI(TAG, "New weather data received");
+          noteDiagnosticSuccess(DiagnosticService::Weather, true, "Fresh data",
+                                String(weather.current.description) + F(", feels like ") + weather.current.feelsLike +
+                                    (imperial.isChecked() ? F("F") : F("C")),
+                                checkweather.retries, httpCode);
         }
+        else
+          noteDiagnosticFailure(DiagnosticService::Weather, true, "Parse failed",
+                                F("OpenWeather returned weather data, but the JSON payload could not be parsed cleanly."),
+                                httpCode, checkweather.retries);
       }
       else if (httpCode == 401 || httpCode == 403 || httpCode == 404 || httpCode == 429)
       {
         reqdata = networkService.client.getString();
         ESP_LOGE(TAG, "OpenWeather weather request failed: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.c_str());
+        noteDiagnosticFailure(DiagnosticService::Weather, true, "HTTP error",
+                              String(F("OpenWeather weather request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
+                              httpCode, checkweather.retries);
         showready.apierror = true;
         strcpy(showready.apierrorname, "openweather.org");
       }
@@ -201,12 +232,18 @@ COROUTINE(checkWeather)
       {
         reqdata = networkService.client.getString();
         ESP_LOGE(TAG, "CheckWeather ERROR: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.c_str());
+        noteDiagnosticFailure(DiagnosticService::Weather, true, "Request failed",
+                              String(F("Weather request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
+                              httpCode, checkweather.retries);
       }
     }
     else
     {
       IotWebConf.resume();
       ESP_LOGE(TAG, "Failed to begin OpenWeather weather request");
+      noteDiagnosticFailure(DiagnosticService::Weather, true, "Start failed",
+                            F("The shared HTTP client could not begin the weather request."),
+                            0, checkweather.retries);
     }
     endApiRequest();
     checkweather.lastattempt = systemClock.getNow();
@@ -221,6 +258,8 @@ COROUTINE(checkAlerts)
     COROUTINE_AWAIT(isHttpReady() && isNextShowReady(checkalerts.lastsuccess, alert_interval.value(), T1M) && isNextAttemptReady(checkalerts.lastattempt) && checkalerts.retries < HTTP_MAX_RETRIES && isCoordsValid());
     ESP_LOGI(TAG, "Checking weather alerts...");
     checkalerts.retries++;
+    noteDiagnosticPending(DiagnosticService::Alerts, true, "Refreshing",
+                          F("Checking weather.gov for active local alerts."), checkalerts.retries);
     IotWebConf.suspend();
     int httpCode = 0;
     String reqdata;
@@ -237,18 +276,32 @@ COROUTINE(checkAlerts)
         {
           checkalerts.lastsuccess = systemClock.getNow();
           showready.alerts = true;
+          noteDiagnosticSuccess(DiagnosticService::Alerts, true,
+                                alerts.active ? "Active alert" : "Clear",
+                                alerts.active ? String(alerts.event1) : String(F("weather.gov reports no active alerts.")),
+                                checkalerts.retries, httpCode);
         }
+        else
+          noteDiagnosticFailure(DiagnosticService::Alerts, true, "Parse failed",
+                                F("weather.gov returned alerts data, but the JSON payload could not be parsed cleanly."),
+                                httpCode, checkalerts.retries);
       }
       else
       {
         reqdata = networkService.client.getString();
         ESP_LOGE(TAG, "Alerts ERROR: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.c_str());
+        noteDiagnosticFailure(DiagnosticService::Alerts, true, "Request failed",
+                              String(F("weather.gov alert request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
+                              httpCode, checkalerts.retries);
       }
     }
     else
     {
       IotWebConf.resume();
       ESP_LOGE(TAG, "Failed to begin weather.gov alerts request");
+      noteDiagnosticFailure(DiagnosticService::Alerts, true, "Start failed",
+                            F("The shared HTTP client could not begin the weather.gov alerts request."),
+                            0, checkalerts.retries);
     }
     endApiRequest();
     checkalerts.lastattempt = systemClock.getNow();
@@ -421,71 +474,8 @@ COROUTINE(serialInput)
     COROUTINE_AWAIT(500);
     if (Serial.available())
     {
-      char input;
-      input = Serial.read();
-      switch (input)
-      {
-        case 'd':  // Display debug data
-            print_debugData();
-            break;
-        case 's':  // Display coroutines states
-            CoroutineScheduler::list(Serial);
-            break;
-        case 'a':  // Force display of current air quality
-            lastshown.aqi = systemClock.getNow() - (aqi_interval.value() * 60);
-            showready.aqi = true;
-            break;
-        case 'w':  // Force display of current weather
-            lastshown.currentweather = systemClock.getNow() - (current_weather_interval.value() * 60 * 60);
-            showready.currentweather = true;
-            break;
-        case 'e':  // Display the current date
-            lastshown.date = systemClock.getNow() - ((date_interval.value()) * 60 * 60);
-            showready.date = true;
-            break;
-        case 'q':  // Force display of day weather
-            lastshown.dayweather = systemClock.getNow() - (daily_weather_interval.value() * 60 * 60);
-            showready.dayweather = true;
-            break;
-        case 'c':  // Display current main task stack size remaining (bytes)
-            printf("Main task stack size: %s bytes remaining\n", formatLargeNumber(uxTaskGetStackHighWaterMark(NULL)).c_str());
-            break;
-        case 't':  // Test alertflash
-            startFlash(hex2rgb(system_color.value()), 5);
-            COROUTINE_AWAIT(!alertflash.active);
-            break;
-        #ifdef COROUTINE_PROFILER    
-        case 'f':  // Display coroutine execution time table (Profiler)
-          LogBinTableRenderer::printTo(Serial, 2 /*startBin*/, 13 /*endBin*/, false /*clear*/);
-          break;
-        #endif
-        case 'l':
-          printf("Log level changed to DEBUG\n");
-          esp_log_level_set(TAG, ESP_LOG_DEBUG);
-          break;
-        case 'r':
-          printf("Rebooting...\n");
-          ESP.restart();
-          break;
-        case 'h':
-           printf("Help:\n");
-           printf("  d: Display debug data\n");
-           printf("  s: Display coroutines states\n");
-           printf("  a: Force display of current air quality\n");
-           printf("  w: Force display of current weather\n");
-           printf("  e: Display the current date\n");
-           printf("  q: Force display of day weather\n");
-           printf("  c: Display current main task stack size remaining (bytes)\n");
-           printf("  t: Test alertflash\n");
-           printf("  f: Display coroutine execution time table (Profiler)\n");
-           printf("  l: Change log level to DEBUG\n");
-           printf("  r: Reboot clock\n");
-           printf("  h: Display this help\n");
-           break;
-        default:
-          printf("Unknown command: %c\n", input);
-          break;
-        }
+      ConsoleMirrorPrint out(true);
+      handleDebugCommand(Serial.read(), out, true);
     }
   }
 }
@@ -496,6 +486,8 @@ COROUTINE(checkGeocode)
   {
     COROUTINE_AWAIT(isHttpReady() && isNextAttemptReady(checkgeocode.lastattempt) && isCoordsValid() && isApiValid(weatherapi.value()) && checkgeocode.ready && checkgeocode.retries < HTTP_MAX_RETRIES && !runtimeState.firstTimeFailsafe);
     ESP_LOGI(TAG, "Checking Geocode Location...");
+    noteDiagnosticPending(DiagnosticService::Geocode, true, "Refreshing",
+                          F("Resolving city and region details from the current coordinates."), checkgeocode.retries);
     IotWebConf.suspend();
     int httpCode = 0;
     if (beginApiRequest(ApiEndpoint::Geocode))
@@ -515,11 +507,18 @@ COROUTINE(checkGeocode)
           checkgeocode.ready = false;
           updateLocation();
         }
+        else
+          noteDiagnosticFailure(DiagnosticService::Geocode, true, "Parse failed",
+                                F("OpenWeather returned reverse-geocode data, but the JSON payload could not be parsed cleanly."),
+                                httpCode, checkgeocode.retries);
       }
       else if (httpCode == 401 || httpCode == 403 || httpCode == 404 || httpCode == 429)
       {
         payload = networkService.client.getString();
         ESP_LOGE(TAG, "OpenWeather geocode request failed: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), payload.c_str());
+        noteDiagnosticFailure(DiagnosticService::Geocode, true, "HTTP error",
+                              String(F("OpenWeather geocode request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
+                              httpCode, checkgeocode.retries);
         strcpy(showready.apierrorname, "openweather.org");
         showready.apierror = true;
       }
@@ -527,12 +526,18 @@ COROUTINE(checkGeocode)
       {
         payload = networkService.client.getString();
         ESP_LOGE(TAG, "CheckGeocode ERROR: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), payload.c_str());
+        noteDiagnosticFailure(DiagnosticService::Geocode, true, "Request failed",
+                              String(F("Geocode request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
+                              httpCode, checkgeocode.retries);
       }
     }
     else
     {
       IotWebConf.resume();
       ESP_LOGE(TAG, "Failed to begin OpenWeather geocode request");
+      noteDiagnosticFailure(DiagnosticService::Geocode, true, "Start failed",
+                            F("The shared HTTP client could not begin the reverse-geocode request."),
+                            0, checkgeocode.retries);
     }
     endApiRequest();
     checkgeocode.lastattempt = systemClock.getNow();
@@ -546,6 +551,8 @@ COROUTINE(checkIpgeo)
   {
     COROUTINE_AWAIT(!checkipgeo.complete && isHttpReady() && isNextAttemptReady(checkipgeo.lastattempt) && isApiValid(ipgeoapi.value()) && checkipgeo.retries < HTTP_MAX_RETRIES && !runtimeState.firstTimeFailsafe);
       ESP_LOGI(TAG, "Checking IP Geolocation...");
+      noteDiagnosticPending(DiagnosticService::IpGeo, true, "Refreshing",
+                            F("Resolving timezone and coarse coordinates from the public IP address."), checkipgeo.retries);
       IotWebConf.suspend();
       int httpCode = 0;
       if (beginApiRequest(ApiEndpoint::IpGeo))
@@ -566,23 +573,42 @@ COROUTINE(checkIpgeo)
             updateCoords();
             checkgeocode.ready = true;
             processTimezone();
+            noteDiagnosticSuccess(DiagnosticService::IpGeo, true, "Resolved",
+                                  String(ipgeo.timezone) + F(" at ") + String(ipgeo.lat, 5) + F(", ") + String(ipgeo.lon, 5),
+                                  checkipgeo.retries, httpCode);
           }
           else
+          {
             ESP_LOGE(TAG, "fillIpgeoFromJson() Error parsing response");
+            noteDiagnosticFailure(DiagnosticService::IpGeo, true, "Parse failed",
+                                  F("ipgeolocation.io returned data, but the JSON payload could not be parsed cleanly."),
+                                  httpCode, checkipgeo.retries);
+          }
         }
         else if (httpCode == 401)
         {
           ESP_LOGE(TAG, "IPGeolocation.io Invalid API, error: [%d] %s", httpCode, getHttpCodeName(httpCode).c_str());
+          noteDiagnosticFailure(DiagnosticService::IpGeo, true, "Invalid API key",
+                                String(F("ipgeolocation.io request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
+                                httpCode, checkipgeo.retries);
           strcpy(showready.apierrorname, "ipgeolocation.io");
           showready.apierror = true;
         }
         else
+        {
           ESP_LOGE(TAG, "CheckIPGeo ERROR: [%d] %s", httpCode, getHttpCodeName(httpCode).c_str());
+          noteDiagnosticFailure(DiagnosticService::IpGeo, true, "Request failed",
+                                String(F("IP geolocation request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
+                                httpCode, checkipgeo.retries);
+        }
       }
       else
       {
         IotWebConf.resume();
         ESP_LOGE(TAG, "Failed to begin ipgeolocation.io request");
+        noteDiagnosticFailure(DiagnosticService::IpGeo, true, "Start failed",
+                              F("The shared HTTP client could not begin the IP geolocation request."),
+                              0, checkipgeo.retries);
       }
       endApiRequest();
       checkipgeo.lastattempt = systemClock.getNow();
@@ -960,68 +986,142 @@ COROUTINE_LOOP() {
 COROUTINE(gps_checkData) {
 COROUTINE_LOOP() 
 {
-    COROUTINE_AWAIT(Serial1.available() > 0);
+    constexpr uint32_t kGpsNoDataLogIntervalMs = 15000;
+    constexpr uint32_t kGpsAcquiringLogIntervalMs = 30000;
+    uint32_t nowMillis = millis();
+    size_t bytesRead = 0;
     while (Serial1.available() > 0)
     {
-        // Read in the data from the serial port
         GPS.encode(Serial1.read());
+        bytesRead++;
     }
+    if (bytesRead > 0)
+    {
+        if (!gps.moduleDetected)
+        {
+            gps.moduleDetected = true;
+            gps.firstByteMillis = nowMillis;
+            ESP_LOGI(TAG, "GPS UART traffic detected after %lu ms. Parser is receiving NMEA data.", static_cast<unsigned long>(nowMillis));
+            noteDiagnosticPending(DiagnosticService::Gps, true, "UART detected",
+                                  F("GPS UART traffic is active. Waiting for satellites and a valid fix."));
+        }
+        gps.lastByteMillis = nowMillis;
+        gps.packetdelay = 0;
+        gps.lastNoDataLogMillis = nowMillis;
+    }
+    else if (gps.moduleDetected && gps.lastByteMillis > 0)
+    {
+        gps.packetdelay = static_cast<int32_t>(nowMillis - gps.lastByteMillis);
+    }
+
+    if (!gps.moduleDetected)
+    {
+        if (gps.lastNoDataLogMillis == 0 || (nowMillis - gps.lastNoDataLogMillis) >= kGpsNoDataLogIntervalMs)
+        {
+            ESP_LOGW(TAG, "GPS has not produced any UART traffic yet on RX:%d TX:%d @ %d baud. Check module power, wiring, and baud rate.",
+                     GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD);
+            noteDiagnosticPending(DiagnosticService::Gps, true, "Waiting for UART",
+                                  String(F("No GPS UART traffic has been seen yet on RX ")) + GPS_RX_PIN + F(" / TX ") + GPS_TX_PIN +
+                                      F(" at ") + GPS_BAUD + F(" baud."));
+            gps.lastNoDataLogMillis = nowMillis;
+        }
+    }
+    else if (gps.packetdelay >= static_cast<int32_t>(kGpsNoDataLogIntervalMs)
+             && (gps.lastNoDataLogMillis == 0 || (nowMillis - gps.lastNoDataLogMillis) >= kGpsNoDataLogIntervalMs))
+    {
+        ESP_LOGW(TAG, "GPS UART traffic stalled for %ld ms. Parsed chars:%lu passed:%lu failed:%lu",
+                 static_cast<long>(gps.packetdelay),
+                 static_cast<unsigned long>(GPS.charsProcessed()),
+                 static_cast<unsigned long>(GPS.passedChecksum()),
+                 static_cast<unsigned long>(GPS.failedChecksum()));
+        noteDiagnosticFailure(DiagnosticService::Gps, true, "UART stalled",
+                              String(F("GPS UART traffic stalled for ")) + gps.packetdelay + F(" ms."),
+                              0, 0);
+        gps.lastNoDataLogMillis = nowMillis;
+    }
+
     if (GPS.satellites.isUpdated())
     {
-        // Update the number of satellites all available satellites
         gps.sats = GPS.satellites.value();
-        ESP_LOGV(TAG, "GPS Satellites updated: %d", gps.sats);
-        // Check if a GPS fix is aquired and log the fix as true and record the timestamp
-        if (gps.sats > 0 && (gps.fix & 0x1) == 0)
+        if (gps.sats != gps.lastReportedSats)
         {
-            gps.fix |= 0x1; // Set the first bit to 1 to indicate a valid fix
-            gps.timestamp = systemClock.getNow();
-            ESP_LOGI(TAG, "GPS fix aquired with %d satellites", gps.sats);
-        }
-        // Check if the GPS fix is lost and set the fix variable to false
-        else if (gps.sats == 0 && (gps.fix & 0x1) > 0)
-        {
-            gps.fix &= 0x0; // Set the first bit to 0 to indicate no valid fix
-            ESP_LOGI(TAG, "GPS fix lost, no satellites");
+            gps.lastReportedSats = gps.sats;
+            if (gps.sats == 0)
+                ESP_LOGI(TAG, "GPS reports no satellites in view.");
+            else
+                ESP_LOGI(TAG, "GPS satellites updated: %u visible.", gps.sats);
         }
     }
     if (GPS.location.isUpdated()) 
     {
-        // If 'enable_fixed_loc' is not checked, set the latitude and longitude values to the values stored in the location object
-        if (!enable_fixed_loc.isChecked()) {
-            gps.lat =GPS.location.lat();
-            gps.lon = GPS.location.lng();
-            // Set the lockage timestamp
-            gps.lockage = systemClock.getNow();
-            // Call the 'updateCoords()' function
-            updateCoords();
-        }
-        // If 'enable_fixed_loc' is checked, set the latitude and longitude values to the values stored in the fixedLat and fixedLon values, which are strings
-        else {
-            gps.lat = strtod(fixedLat.value(), NULL);
-            gps.lon = strtod(fixedLon.value(), NULL);
-            // Call the 'updateCoords()' function
-            updateCoords();
-        }
-        // Log the latitude and longitude
-        ESP_LOGV(TAG, "GPS Location updated: Lat: %f Lon: %f", gps.lat, gps.lon);
+        gps.lat = GPS.location.lat();
+        gps.lon = GPS.location.lng();
+        gps.lockage = systemClock.getNow();
+        updateCoords();
+        if (enable_fixed_loc.isChecked())
+            ESP_LOGD(TAG, "GPS location updated: Lat: %.6f Lon: %.6f | custom coordinates remain active for services", gps.lat, gps.lon);
+        else
+            ESP_LOGI(TAG, "GPS location updated: Lat: %.6f Lon: %.6f | Sats:%u | HDOP:%d", gps.lat, gps.lon, gps.sats, gps.hdop);
     }
     if (GPS.altitude.isUpdated()) 
     {
-        // Set the elevation in feet
         gps.elevation = GPS.altitude.feet();
-        // Log the elevation
-        ESP_LOGV(TAG, "GPS Elevation updated: %d feet", gps.elevation);
+        ESP_LOGD(TAG, "GPS elevation updated: %d feet", gps.elevation);
     }
     if (GPS.hdop.isUpdated()) 
     {
-        // Set the HDOP
         gps.hdop = GPS.hdop.hdop();
-        // Log the HDOP
-        ESP_LOGV(TAG, "GPS HDOP updated: %d m",gps.hdop);
+        ESP_LOGD(TAG, "GPS HDOP updated: %d", gps.hdop);
     }
-    // Log a warning if there is no GPS data
-    if (GPS.charsProcessed() < 10) ESP_LOGE(TAG, "No GPS data. Check wiring.");
+
+    bool hasFix = GPS.location.isValid() && gps.sats > 0;
+    if (hasFix && !gps.fix)
+    {
+        gps.fix = true;
+        gps.waitingForFix = false;
+        gps.timestamp = systemClock.getNow();
+        gps.lastProgressLogMillis = nowMillis;
+        ESP_LOGI(TAG, "GPS fix acquired: Sats:%u | Lat:%.6f | Lon:%.6f | TimeValid:%s | LocationAge:%lu ms",
+                 gps.sats, gps.lat, gps.lon, yesno[GPS.time.isValid()],
+                 static_cast<unsigned long>(GPS.location.age()));
+        noteDiagnosticSuccess(DiagnosticService::Gps, true, "Fix acquired",
+                              String(gps.sats) + F(" sats, ") + String(gps.lat, 5) + F(", ") + String(gps.lon, 5));
+    }
+    else if (!hasFix && gps.fix)
+    {
+        gps.fix = false;
+        gps.waitingForFix = gps.sats > 0;
+        gps.lastProgressLogMillis = nowMillis;
+        ESP_LOGW(TAG, "GPS fix lost. Sats:%u | LocationValid:%s | TimeValid:%s",
+                 gps.sats, yesno[GPS.location.isValid()], yesno[GPS.time.isValid()]);
+        noteDiagnosticFailure(DiagnosticService::Gps, true, "Fix lost",
+                              String(F("GPS previously had a fix but lost it. Satellites visible: ")) + gps.sats,
+                              0, 0);
+    }
+    else if (!hasFix && gps.moduleDetected
+             && (gps.lastProgressLogMillis == 0 || (nowMillis - gps.lastProgressLogMillis) >= kGpsAcquiringLogIntervalMs))
+    {
+        gps.waitingForFix = true;
+        gps.lastProgressLogMillis = nowMillis;
+        if (gps.sats > 0)
+        {
+            ESP_LOGI(TAG, "GPS is receiving satellite data but has no valid lock yet. Sats:%u | LocationValid:%s | TimeValid:%s | Chars:%lu",
+                     gps.sats, yesno[GPS.location.isValid()], yesno[GPS.time.isValid()],
+                     static_cast<unsigned long>(GPS.charsProcessed()));
+            noteDiagnosticPending(DiagnosticService::Gps, true, "Acquiring fix",
+                                  String(F("Satellites visible: ")) + gps.sats + F(". The receiver is still waiting for a valid lock."));
+        }
+        else
+        {
+            ESP_LOGI(TAG, "GPS module detected and parser is active, but no satellites are locked yet. Chars:%lu | Passed:%lu | Failed:%lu",
+                     static_cast<unsigned long>(GPS.charsProcessed()),
+                     static_cast<unsigned long>(GPS.passedChecksum()),
+                     static_cast<unsigned long>(GPS.failedChecksum()));
+            noteDiagnosticPending(DiagnosticService::Gps, true, "Searching satellites",
+                                  String(F("The GPS receiver is active, but no satellites are locked yet. Parsed chars: ")) +
+                                      formatLargeNumber(GPS.charsProcessed()));
+        }
+    }
     COROUTINE_DELAY(1000);
 }
 }

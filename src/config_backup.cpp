@@ -239,6 +239,7 @@ const ConfigBackupField kConfigBackupFields[] = {
     TEXT_FIELD("savedlat", savedlat),
     TEXT_FIELD("savedlon", savedlon),
     INT_FIELD("tzoffset", savedtzoffset, -12, 12),
+    TEXT_FIELD("savedtimezone", savedtimezone),
     TEXT_FIELD("savedcity", savedcity),
     TEXT_FIELD("savedstate", savedstate),
     TEXT_FIELD("savedcountry", savedcountry),

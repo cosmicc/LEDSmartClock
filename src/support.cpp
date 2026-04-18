@@ -1,5 +1,35 @@
 #include "main.h"
 
+namespace
+{
+/** Copies a string into a diagnostics buffer without overrunning it. */
+template <size_t N>
+void copyDiagnosticText(char (&dest)[N], const char *value)
+{
+  snprintf(dest, N, "%s", value == nullptr ? "" : value);
+}
+
+/** Applies a diagnostics update to the selected subsystem record. */
+void updateDiagnosticRecord(DiagnosticService service, bool enabled, bool healthy, const char *summary,
+                            const String &detail, uint8_t retries, int16_t lastCode,
+                            bool markSuccess, bool markFailure)
+{
+  ServiceDiagnostic &record = diagnosticState(service);
+  record.enabled = enabled;
+  record.healthy = healthy;
+  record.retries = retries;
+  record.lastCode = lastCode;
+  copyDiagnosticText(record.summary, summary);
+  copyDiagnosticText(record.detail, detail.c_str());
+
+  const acetime_t now = systemClock.getNow();
+  if (markSuccess && now > 0)
+    record.lastSuccess = now;
+  if (markFailure && now > 0)
+    record.lastFailure = now;
+}
+} // namespace
+
 String elapsedTime(uint32_t seconds)
 {
   String result;
@@ -102,6 +132,29 @@ void setTimeSource(const String &inputString)
       break;
     }
   }
+
+  String source = inputString;
+  source.toLowerCase();
+  if (source == "gps")
+  {
+    noteDiagnosticSuccess(DiagnosticService::Timekeeping, true, "GPS locked",
+                          F("Clock time is currently coming from the GPS receiver."), 0, 0);
+  }
+  else if (source == "ntp")
+  {
+    noteDiagnosticSuccess(DiagnosticService::Timekeeping, true, "Network synced",
+                          F("Clock time is currently coming from the SNTP client."), 0, 0);
+  }
+  else if (source == "rtc")
+  {
+    noteDiagnosticPending(DiagnosticService::Timekeeping, true, "RTC fallback",
+                          F("Clock time is currently being held by the DS3231 RTC chip."));
+  }
+  else
+  {
+    noteDiagnosticPending(DiagnosticService::Timekeeping, true, "Waiting",
+                          F("The clock is still waiting for GPS, NTP, or RTC time."));
+  }
 }
 
 ace_time::acetime_t Now()
@@ -124,6 +177,73 @@ bool compareTimes(ace_time::ZonedDateTime t1, ace_time::ZonedDateTime t2)
   return t1.hour() == t2.hour() &&
          t1.minute() == t2.minute() &&
          t1.second() == t2.second();
+}
+
+ServiceDiagnostic &diagnosticState(DiagnosticService service)
+{
+  return runtimeState.diagnostics[static_cast<size_t>(service)];
+}
+
+const char *diagnosticServiceLabel(DiagnosticService service)
+{
+  switch (service)
+  {
+  case DiagnosticService::Wifi:
+    return "Wi-Fi";
+  case DiagnosticService::Timekeeping:
+    return "Timekeeping";
+  case DiagnosticService::Ntp:
+    return "NTP";
+  case DiagnosticService::Gps:
+    return "GPS";
+  case DiagnosticService::Weather:
+    return "Weather";
+  case DiagnosticService::AirQuality:
+    return "Air Quality";
+  case DiagnosticService::Alerts:
+    return "Alerts";
+  case DiagnosticService::Geocode:
+    return "Geocode";
+  case DiagnosticService::IpGeo:
+    return "IP Geo";
+  case DiagnosticService::Count:
+  default:
+    return "Unknown";
+  }
+}
+
+void resetServiceDiagnostics()
+{
+  for (size_t index = 0; index < kDiagnosticServiceCount; ++index)
+  {
+    ServiceDiagnostic &record = runtimeState.diagnostics[index];
+    record.enabled = true;
+    record.healthy = false;
+    record.retries = 0;
+    record.lastCode = 0;
+    record.lastSuccess = 0;
+    record.lastFailure = 0;
+    copyDiagnosticText(record.summary, "Pending");
+    copyDiagnosticText(record.detail, "Waiting for runtime data.");
+  }
+}
+
+void noteDiagnosticPending(DiagnosticService service, bool enabled, const char *summary, const String &detail,
+                           uint8_t retries, int16_t lastCode)
+{
+  updateDiagnosticRecord(service, enabled, false, summary, detail, retries, lastCode, false, false);
+}
+
+void noteDiagnosticSuccess(DiagnosticService service, bool enabled, const char *summary, const String &detail,
+                           uint8_t retries, int16_t lastCode)
+{
+  updateDiagnosticRecord(service, enabled, true, summary, detail, retries, lastCode, true, false);
+}
+
+void noteDiagnosticFailure(DiagnosticService service, bool enabled, const char *summary, const String &detail,
+                           int16_t lastCode, uint8_t retries)
+{
+  updateDiagnosticRecord(service, enabled, false, summary, detail, retries, lastCode, false, true);
 }
 
 void toUpper(char *input)

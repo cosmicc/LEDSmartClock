@@ -145,7 +145,7 @@ extern DNSServer dnsServer;
 extern WebServer server;
 /** Latest parsed current and daily weather data. */
 extern WeatherData weather;
-/** Active weather-alert state selected from the latest weather.gov response. */
+/** Active weather-alert set ranked from the latest weather.gov response. */
 extern Alerts alerts;
 /** Latest timezone and coarse location data returned by ipgeolocation.io. */
 extern Ipgeo ipgeo;

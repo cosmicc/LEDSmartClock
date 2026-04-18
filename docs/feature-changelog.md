@@ -32,7 +32,7 @@ The `Current Priorities` section is the active implementation order.
 
 - [ ] Add quiet hours or bedtime mode for brightness and noisy scroll suppression overnight.
 - [ ] Add multiple display profiles such as home, travel, debug, and minimal clock-only.
-- [ ] Add richer weather-alert handling for multiple active alerts, severity ordering, and condensed long-text mode.
+- [x] Add richer weather-alert handling for multiple active alerts, severity ordering, and condensed long-text mode.
 - [ ] Derive more local behavior directly from GPS location, including timezone selection and sunrise or sunset fallback.
 
 ## Completed

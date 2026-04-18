@@ -102,20 +102,75 @@ typedef struct {
   } day;
 } AqiData;
 
+/** Maximum number of active weather alerts retained from one weather.gov poll. */
+constexpr uint8_t kMaxTrackedAlerts = 6;
+
+/**
+ * Stores one parsed weather.gov alert after classification and sort ranking.
+ *
+ * The firmware keeps a short ranked list so multiple simultaneous watches or
+ * warnings can be rotated on the matrix and summarized in the web UI.
+ */
+struct AlertEntry
+{
+  /** weather.gov status field, typically "Actual". */
+  char status[32]{};
+  /** weather.gov severity field, such as Extreme or Severe. */
+  char severity[32]{};
+  /** weather.gov certainty field, such as Observed or Possible. */
+  char certainty[32]{};
+  /** weather.gov urgency field, such as Immediate or Expected. */
+  char urgency[32]{};
+  /** Event title such as Tornado Warning or Flood Watch. */
+  char event[128]{};
+  /** Short weather.gov headline used for concise summaries when present. */
+  char headline[160]{};
+  /** Longer descriptive text retained for the dashboard and diagnostics page. */
+  char description[512]{};
+  /** Optional instruction text returned by weather.gov. */
+  char instruction[512]{};
+  /** Condensed text prebuilt for the LED matrix scroller. */
+  char displayText[512]{};
+  /** Sort rank derived from event class keywords such as warning or watch. */
+  uint8_t categoryRank = 0;
+  /** Sort rank derived from the severity field. */
+  uint8_t severityRank = 0;
+  /** Sort rank derived from the urgency field. */
+  uint8_t urgencyRank = 0;
+  /** Sort rank derived from the certainty field. */
+  uint8_t certaintyRank = 0;
+  /** True when this alert should be treated like a warning-level event. */
+  bool warning = false;
+  /** True when this alert should be treated like a watch-level event. */
+  bool watch = false;
+};
+
+/**
+ * Stores the latest ranked set of active weather alerts returned by weather.gov.
+ */
 struct Alerts {
-  bool active;
-  bool inWatch;
-  bool inWarning;
-  char status1[32];
-  char severity1[32];
-  char certainty1[32];
-  char urgency1[32];
-  char event1[128];
-  char description1[512];
-  char instruction1[512];
-  acetime_t lastsuccess;
-  acetime_t lastattempt;
-  acetime_t timestamp;
+  /** True when at least one active alert is currently retained. */
+  bool active = false;
+  /** True when the retained alert set contains at least one watch. */
+  bool inWatch = false;
+  /** True when the retained alert set contains at least one warning. */
+  bool inWarning = false;
+  /** Number of retained active alerts currently stored in items[]. */
+  uint8_t count = 0;
+  /** Number of retained alerts classified as watches. */
+  uint8_t watchCount = 0;
+  /** Number of retained alerts classified as warnings. */
+  uint8_t warningCount = 0;
+  /** Index of the next alert that should be shown on the LED matrix. */
+  uint8_t displayIndex = 0;
+  /** Ranked active alerts with the most urgent item in slot 0. */
+  AlertEntry items[kMaxTrackedAlerts]{};
+  /** Time of the last successful alert download. */
+  acetime_t lastsuccess = 0;
+  /** Time of the last alert-request attempt. */
+  acetime_t lastattempt = 0;
+  /** Time when the current active alert set was last refreshed. */
+  acetime_t timestamp = 0;
 };
 
 struct Ipgeo {

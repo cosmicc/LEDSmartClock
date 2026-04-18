@@ -277,8 +277,10 @@ COROUTINE(checkAlerts)
           checkalerts.lastsuccess = systemClock.getNow();
           showready.alerts = true;
           noteDiagnosticSuccess(DiagnosticService::Alerts, true,
-                                alerts.active ? "Active alert" : "Clear",
-                                alerts.active ? String(alerts.event1) : String(F("weather.gov reports no active alerts.")),
+                                alerts.active ? "Active alerts" : "Clear",
+                                alerts.active
+                                    ? String(alerts.count) + F(" alert(s): ") + summarizeActiveAlerts()
+                                    : String(F("weather.gov reports no active alerts.")),
                                 checkalerts.retries, httpCode);
         }
         else
@@ -446,22 +448,28 @@ COROUTINE(showAlerts)
     COROUTINE_AWAIT(showready.alerts && displaytoken.isReady(3));
     if (alerts.active)
     {
-      displaytoken.setToken(3);
-      startFlash(alertcolors[alerts.inWatch], 3);
-      COROUTINE_AWAIT(!alertflash.active);
-      char *inst = alerts.instruction1;
-      const char *alertMessage = hasVisibleText(alerts.description1) ? alerts.description1 : alerts.event1;
-      capitalize(inst);
-      strlcpy(scrolltext.message, alertMessage, sizeof(scrolltext.message));
-      if (inst[0] != '\0')
+      const AlertEntry *selectedEntry = displayAlert();
+      if (selectedEntry == nullptr)
       {
-        strlcat(scrolltext.message, ". ", sizeof(scrolltext.message));
-        strlcat(scrolltext.message, inst, sizeof(scrolltext.message));
+        showready.alerts = false;
       }
-      startScroll(alertcolors[alerts.inWatch], false);
-      COROUTINE_AWAIT(!scrolltext.active);
-      lastshown.alerts = systemClock.getNow();
-      displaytoken.resetToken(3);
+      else
+      {
+        bool useWatchTone = selectedEntry->watch;
+        const char *alertMessage = hasVisibleText(selectedEntry->displayText)
+                                       ? selectedEntry->displayText
+                                       : selectedEntry->event;
+
+        displaytoken.setToken(3);
+        startFlash(alertcolors[useWatchTone], 3);
+        COROUTINE_AWAIT(!alertflash.active);
+        strlcpy(scrolltext.message, alertMessage, sizeof(scrolltext.message));
+        startScroll(alertcolors[useWatchTone], false);
+        COROUTINE_AWAIT(!scrolltext.active);
+        lastshown.alerts = systemClock.getNow();
+        advanceAlertRotation();
+        displaytoken.resetToken(3);
+      }
     }
     showready.alerts = false;
   }

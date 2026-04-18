@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 /**
- * Parses a weather.gov alert payload into the shared alert state.
+ * Parses a weather.gov alert payload into the ranked shared alert state.
  */
 bool fillAlertsFromJson(const String &payload);
 

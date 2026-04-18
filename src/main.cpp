@@ -485,13 +485,38 @@ void print_debugData(ConsoleMirrorPrint &out)
   out.printf("Weather Day - Icon:%s | LoTemp:%d%s | HiTemp:%d%s | Humidity:%d%% | Clouds:%d%% | Wind: %d/%d%s | UVI:%d(%s) | MoonPhase:%.2f | Desc: %s | NextShow:%s\n", weather.day.icon, weather.day.tempMin, tempunit, weather.day.tempMax, tempunit, weather.day.humidity, weather.day.cloudcover, weather.day.windSpeed, weather.day.windGust, speedunit, weather.day.uvi, uv_index(weather.day.uvi).c_str(), weather.day.moonPhase, weather.current.description, nextShowDebug(now, lastshown.dayweather, static_cast<uint32_t>(daily_weather_interval.value()) * T1H).c_str());
   out.printf("AQI Current - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f | Desc: %s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", air_quality[aqi.current.aqi], aqi.current.co, aqi.current.no, aqi.current.no2, aqi.current.o3, aqi.current.so2, aqi.current.pm25, aqi.current.pm10, aqi.current.nh3, (aqi.current.description).c_str(), checkaqi.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkaqi.lastattempt).c_str(), elapsedTime(now - checkaqi.lastsuccess).c_str(), nextShowDebug(now, lastshown.aqi, static_cast<uint32_t>(aqi_interval.value()) * T1M).c_str());
   out.printf("AQI Day - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f\n", air_quality[aqi.day.aqi], aqi.day.co, aqi.day.no, aqi.day.no2, aqi.day.o3, aqi.day.so2, aqi.day.pm25, aqi.day.pm10, aqi.day.nh3);
-  out.printf("Alerts - Active:%s | Watch:%s | Warn:%s | Retries:%d | LastAttempt:%s | LastSuccess:%s | LastShown:%s\n", yesno[alerts.active], yesno[alerts.inWatch], yesno[alerts.inWarning], checkalerts.retries, elapsedTime(now - checkalerts.lastattempt).c_str(), elapsedTime(now - checkalerts.lastsuccess).c_str(), elapsedTime(now - lastshown.alerts).c_str());
+  out.printf("Alerts - Active:%s | Count:%u | Watch:%u | Warn:%u | Retries:%d | LastAttempt:%s | LastSuccess:%s | LastShown:%s\n",
+             yesno[alerts.active],
+             alerts.count,
+             alerts.watchCount,
+             alerts.warningCount,
+             checkalerts.retries,
+             elapsedTime(now - checkalerts.lastattempt).c_str(),
+             elapsedTime(now - checkalerts.lastsuccess).c_str(),
+             elapsedTime(now - lastshown.alerts).c_str());
   out.printf("[^----------------------------------------------------------------^]\n");
   out.printf("Main task stack size: %s bytes remaining\n", formatLargeNumber(uxTaskGetStackHighWaterMark(NULL)).c_str());
   out.printf("Current Display Tokens: %s\n", displaytoken.showTokens().c_str());
   out.printf("[^----------------------------------------------------------------^]\n");
   if (alerts.active)
-    out.printf("*Alert - Status: %s | Severity: %s | Certainty: %s | Urgency: %s | Event: %s | Desc: %s %s\n", alerts.status1, alerts.severity1, alerts.certainty1, alerts.urgency1, alerts.event1, alerts.description1, alerts.instruction1);
+  {
+    for (uint8_t index = 0; index < alerts.count; ++index)
+    {
+      const AlertEntry &entry = alerts.items[index];
+      out.printf("*Alert %u/%u - Status:%s | Severity:%s | Certainty:%s | Urgency:%s | Event:%s | Headline:%s | Desc:%s | Inst:%s | Display:%s\n",
+                 index + 1U,
+                 alerts.count,
+                 entry.status,
+                 entry.severity,
+                 entry.certainty,
+                 entry.urgency,
+                 entry.event,
+                 entry.headline,
+                 entry.description,
+                 entry.instruction,
+                 entry.displayText);
+    }
+  }
 }
 
 void print_debugData()

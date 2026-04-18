@@ -64,7 +64,7 @@ body{
 }
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
-.shell,.portal-shell{max-width:1180px;margin:0 auto;padding:28px 18px 48px}
+.shell,.portal-shell{max-width:1320px;margin:0 auto;padding:28px 18px 48px}
 .hero,.portal-hero{
   position:relative;
   overflow:hidden;
@@ -146,6 +146,7 @@ a:hover{text-decoration:underline}
 .status-chip{
   display:inline-flex;
   align-items:center;
+  flex-wrap:wrap;
   gap:8px;
   padding:10px 14px;
   border-radius:999px;
@@ -186,6 +187,8 @@ a:hover{text-decoration:underline}
   font-family:"Georgia","Times New Roman",serif;
   font-size:1.45rem;
   line-height:1.2;
+  overflow-wrap:anywhere;
+  word-break:break-word;
 }
 .card-span{grid-column:1 / -1}
 .service-health-grid{
@@ -267,7 +270,7 @@ a:hover{text-decoration:underline}
 .notice-bad{background:var(--bad-soft)}
 .content-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns:repeat(auto-fit, minmax(340px, 1fr));
   gap:18px;
   margin-top:20px;
 }
@@ -285,10 +288,11 @@ a:hover{text-decoration:underline}
 .kv-list{margin-top:16px}
 .kv-row{
   display:grid;
-  grid-template-columns:minmax(0, 1fr) auto;
+  grid-template-columns:minmax(150px, 220px) minmax(0, 1fr);
   gap:14px;
   padding:12px 0;
   border-top:1px solid rgba(27,36,48,0.08);
+  align-items:start;
 }
 .kv-row:first-child{border-top:0;padding-top:0}
 .kv-row dt{
@@ -303,6 +307,18 @@ a:hover{text-decoration:underline}
   margin:0;
   text-align:right;
   font-weight:700;
+  min-width:0;
+  max-width:100%;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.dashboard-clamp{
+  display:inline-block;
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  vertical-align:top;
 }
 .setup-steps{
   display:grid;
@@ -705,6 +721,7 @@ button{
   .hero,.portal-hero{padding:22px}
   .kv-row{grid-template-columns:1fr;gap:6px}
   .kv-row dd{text-align:left}
+  .dashboard-clamp{white-space:normal}
   .portal-actions{justify-content:flex-start}
   .portal-button-row{width:100%;margin-left:0}
   .portal-button-row .button-link{width:100%}
@@ -1299,6 +1316,12 @@ String safeText(const String &value, const char *fallback)
   return htmlEscape(value);
 }
 
+/** Wraps a rendered dashboard value so long text stays visually compact. */
+String dashboardClampValue(const String &renderedValue)
+{
+  return String(F("<span class='dashboard-clamp'>")) + renderedValue + F("</span>");
+}
+
 /** Returns the address that makes sense for the current operating mode. */
 String activeAddressLabel()
 {
@@ -1382,7 +1405,11 @@ String brightnessPercentLabel()
 /** Formats a timestamp as a relative "x ago" string. */
 String formatAgo(acetime_t now, acetime_t timestamp)
 {
-  if (timestamp <= 0 || now <= timestamp)
+  // AceTime timestamps can be valid negative epoch values on this firmware, so
+  // do not treat <= 0 as "missing". Only the library invalid sentinel, our
+  // own zero-initialized "unset" fields, or future timestamps should render as
+  // pending.
+  if (now == LocalTime::kInvalidSeconds || timestamp == LocalTime::kInvalidSeconds || timestamp == 0 || now <= timestamp)
     return F("Pending");
   return elapsedTime(static_cast<uint32_t>(now - timestamp)) + F(" ago");
 }
@@ -1453,13 +1480,50 @@ String currentWeatherDescription()
 }
 
 /** Formats the active alert description with a fallback to the alert title. */
+String currentAlertEvent()
+{
+  const AlertEntry *entry = primaryAlert();
+  if (entry == nullptr)
+    return F("No active alert");
+  if (hasVisibleText(entry->event))
+    return htmlEscape(String(entry->event));
+  if (hasVisibleText(entry->headline))
+    return htmlEscape(String(entry->headline));
+  return F("Unnamed alert");
+}
+
+/** Formats the active alert description with a fallback to the alert title. */
 String currentAlertDescription()
 {
-  if (hasVisibleText(alerts.description1))
-    return htmlEscape(String(alerts.description1));
-  if (hasVisibleText(alerts.event1))
-    return htmlEscape(String(alerts.event1));
+  const AlertEntry *entry = primaryAlert();
+  if (entry == nullptr)
+    return F("No active alert");
+  if (hasVisibleText(entry->description))
+    return htmlEscape(String(entry->description));
+  if (hasVisibleText(entry->headline))
+    return htmlEscape(String(entry->headline));
+  if (hasVisibleText(entry->event))
+    return htmlEscape(String(entry->event));
   return F("No active alert");
+}
+
+/** Formats the condensed alert text currently used by the matrix scroller. */
+String currentAlertDisplayText()
+{
+  const AlertEntry *entry = primaryAlert();
+  if (entry == nullptr)
+    return F("No active alert");
+  if (hasVisibleText(entry->displayText))
+    return htmlEscape(String(entry->displayText));
+  if (hasVisibleText(entry->event))
+    return htmlEscape(String(entry->event));
+  return F("No active alert");
+}
+
+/** Summarizes the active alerts in priority order for the dashboard. */
+String activeAlertsLabel()
+{
+  return htmlEscape(summarizeActiveAlerts());
 }
 
 /** Returns the current firmware-upload target path. */
@@ -1514,9 +1578,9 @@ const char *aqiTone()
 /** Selects a tone class that visually summarizes the alert situation. */
 const char *alertTone()
 {
-  if (alerts.inWarning)
+  if (alerts.warningCount > 0)
     return "tone-bad";
-  if (alerts.active || alerts.inWatch)
+  if (alerts.active || alerts.watchCount > 0)
     return "tone-warn";
   return "tone-good";
 }
@@ -2099,8 +2163,13 @@ void appendDiagnosticsPage(String &html)
   appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::Alerts));
   appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::Alerts));
   appendKeyValueRow(html, "Alert Active", alerts.active ? F("Yes") : F("No"));
-  appendKeyValueRow(html, "Current Event", safeText(String(alerts.event1), "No active alert"));
+  appendKeyValueRow(html, "Tracked Alerts", htmlEscape(String(alerts.count)));
+  appendKeyValueRow(html, "Warning Count", htmlEscape(String(alerts.warningCount)));
+  appendKeyValueRow(html, "Watch Count", htmlEscape(String(alerts.watchCount)));
+  appendKeyValueRow(html, "Primary Event", currentAlertEvent());
+  appendKeyValueRow(html, "Active Set", activeAlertsLabel());
   appendKeyValueRow(html, "Description", currentAlertDescription());
+  appendKeyValueRow(html, "Matrix Text", currentAlertDisplayText());
   appendKeyValueRow(html, "Retries", htmlEscape(String(serviceDiagnostic(DiagnosticService::Alerts).retries)));
   appendKeyValueRow(html, "Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::Alerts).lastSuccess));
   appendKeyValueRow(html, "Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::Alerts).lastFailure));
@@ -2171,7 +2240,7 @@ void appendStatusPage(String &html)
                        : "tone-neutral");
   appendMetricCard(html, "Brightness", brightnessPercentLabel(), "tone-neutral");
   appendMetricCard(html, "Air Quality", htmlEscape(String(air_quality[aqi.current.aqi])), aqiTone());
-  appendMetricCard(html, "Weather Alerts", alerts.active ? F("Active") : F("Clear"), alertTone());
+  appendMetricCard(html, "Weather Alerts", alerts.active ? htmlEscape(String(alerts.count) + F(" active")) : String(F("Clear")), alertTone());
   html += F("</div></header>");
 
   if (!isApiValid(ipgeoapi.value()))
@@ -2208,21 +2277,21 @@ void appendStatusPage(String &html)
   appendKeyValueRow(html, "Uptime", htmlEscape(elapsedTime(static_cast<uint32_t>(now - runtimeState.bootTime))));
   appendKeyValueRow(html, "Last Time Sync", formatAgo(now, systemClock.getLastSyncTime()));
   appendKeyValueRow(html, "Time Source", timeSourceLabel());
-  appendKeyValueRow(html, "NTP Server", ntpServerLabel());
-  appendKeyValueRow(html, "NTP Source", ntpServerSourceLabel());
-  appendKeyValueRow(html, "Timezone", htmlEscape(getSystemTimezoneName()));
+  appendKeyValueRow(html, "NTP Server", dashboardClampValue(ntpServerLabel()));
+  appendKeyValueRow(html, "NTP Source", dashboardClampValue(ntpServerSourceLabel()));
+  appendKeyValueRow(html, "Timezone", dashboardClampValue(htmlEscape(getSystemTimezoneName())));
   appendKeyValueRow(html, "Timezone Source", timezoneSourceLabel());
   appendKeyValueRow(html, "Timezone Offset", htmlEscape(getSystemTimezoneOffsetString()));
   appendKeyValueRow(html, "DST Active", isSystemTimezoneDstActive() ? F("Yes") : F("No"));
   appendCardEnd(html);
 
   appendCardStart(html, "Location", "Resolved city and coordinate data used by the external services.");
-  appendKeyValueRow(html, "Location", currentLocationLabel());
+  appendKeyValueRow(html, "Location", dashboardClampValue(currentLocationLabel()));
   appendKeyValueRow(html, "Coordinates", currentCoordinatesLabel());
-  appendKeyValueRow(html, "Location Source", safeText(String(current.locsource), "Unknown"));
+  appendKeyValueRow(html, "Location Source", dashboardClampValue(safeText(String(current.locsource), "Unknown")));
   appendKeyValueRow(html, "IP Geo Success", formatAgo(now, checkipgeo.lastsuccess));
   appendKeyValueRow(html, "Geocode Success", formatAgo(now, checkgeocode.lastsuccess));
-  appendKeyValueRow(html, "Saved City", isLocationValid("saved") ? safeText(String(savedcity.value()), "Not saved") : String(F("Not saved")));
+  appendKeyValueRow(html, "Saved City", dashboardClampValue(isLocationValid("saved") ? safeText(String(savedcity.value()), "Not saved") : String(F("Not saved"))));
   appendCardEnd(html);
 
   appendCardStart(html, "GPS", "Live fix quality and parser statistics from the attached receiver.");
@@ -2238,7 +2307,7 @@ void appendStatusPage(String &html)
   appendCardStart(html, "Weather", "Current conditions, daily outlook, and display rotation timing.");
   appendKeyValueRow(html, "Current Temperature", formatTemperature(weather.current.temp));
   appendKeyValueRow(html, "Feels Like", formatTemperature(weather.current.feelsLike));
-  appendKeyValueRow(html, "Conditions", currentWeatherDescription());
+  appendKeyValueRow(html, "Conditions", dashboardClampValue(currentWeatherDescription()));
   appendKeyValueRow(html, "Temp Display Duration", htmlEscape(String(current_temp_duration.value()) + F(" seconds")));
   appendKeyValueRow(html, "Humidity", htmlEscape(String(weather.current.humidity) + F("%")));
   appendKeyValueRow(html, "Wind", htmlEscape(String(weather.current.windSpeed) + F(" / ") + String(weather.current.windGust) + F(" ")) + speedUnitLabel());
@@ -2250,7 +2319,7 @@ void appendStatusPage(String &html)
 
   appendCardStart(html, "Air Quality", "Current AQI bucket, pollutant summary, and rotation timing.");
   appendKeyValueRow(html, "Current AQI", htmlEscape(String(air_quality[aqi.current.aqi])));
-  appendKeyValueRow(html, "AQI Description", currentAqiDescription());
+  appendKeyValueRow(html, "AQI Description", dashboardClampValue(currentAqiDescription()));
   appendKeyValueRow(html, "PM2.5 / PM10", htmlEscape(String(aqi.current.pm25, 1) + F(" / ") + String(aqi.current.pm10, 1)));
   appendKeyValueRow(html, "Ozone / Nitrogen Dioxide", htmlEscape(String(aqi.current.o3, 1) + F(" / ") + String(aqi.current.no2, 1)));
   appendKeyValueRow(html, "AQI Success", formatAgo(now, checkaqi.lastsuccess));
@@ -2259,10 +2328,13 @@ void appendStatusPage(String &html)
 
   appendCardStart(html, "Alerts", "Weather.gov alert state and recent delivery timing.");
   appendKeyValueRow(html, "Alert Active", alerts.active ? F("Yes") : F("No"));
-  appendKeyValueRow(html, "Warning Count", htmlEscape(String(alerts.inWarning)));
-  appendKeyValueRow(html, "Watch Count", htmlEscape(String(alerts.inWatch)));
-  appendKeyValueRow(html, "Current Event", safeText(String(alerts.event1), "No active alert"));
-  appendKeyValueRow(html, "Alert Description", currentAlertDescription());
+  appendKeyValueRow(html, "Tracked Alerts", htmlEscape(String(alerts.count)));
+  appendKeyValueRow(html, "Warning Count", htmlEscape(String(alerts.warningCount)));
+  appendKeyValueRow(html, "Watch Count", htmlEscape(String(alerts.watchCount)));
+  appendKeyValueRow(html, "Primary Event", dashboardClampValue(currentAlertEvent()));
+  appendKeyValueRow(html, "Active Set", dashboardClampValue(activeAlertsLabel()));
+  appendKeyValueRow(html, "Alert Description", dashboardClampValue(currentAlertDescription()));
+  appendKeyValueRow(html, "Matrix Text", dashboardClampValue(currentAlertDisplayText()));
   appendKeyValueRow(html, "Alert Success", formatAgo(now, checkalerts.lastsuccess));
   appendKeyValueRow(html, "Last Alert Shown", formatAgo(now, lastshown.alerts));
   appendCardEnd(html);

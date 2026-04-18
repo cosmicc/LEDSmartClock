@@ -2,6 +2,11 @@
 
 namespace
 {
+constexpr size_t kAlertFilterCapacity = 4096U;
+constexpr size_t kAlertDocumentCapacity = 16384U;
+constexpr size_t kAlertDisplayTarget = 220U;
+constexpr size_t kAlertSentenceTarget = 140U;
+
 /**
  * Copies a JSON string field into a fixed-size destination, defaulting to an
  * empty string when the source field is absent.
@@ -13,16 +18,40 @@ void copyJsonString(char (&dest)[N], JsonVariantConst value)
   snprintf(dest, N, "%s", text == nullptr ? "" : text);
 }
 
-/** Clears all stored details for the current active alert. */
-void clearAlertDetails()
+/** Clears one retained alert entry back to an empty state. */
+void clearAlertEntry(AlertEntry &entry)
 {
-  alerts.status1[0] = '\0';
-  alerts.severity1[0] = '\0';
-  alerts.certainty1[0] = '\0';
-  alerts.urgency1[0] = '\0';
-  alerts.event1[0] = '\0';
-  alerts.description1[0] = '\0';
-  alerts.instruction1[0] = '\0';
+  entry.status[0] = '\0';
+  entry.severity[0] = '\0';
+  entry.certainty[0] = '\0';
+  entry.urgency[0] = '\0';
+  entry.event[0] = '\0';
+  entry.headline[0] = '\0';
+  entry.description[0] = '\0';
+  entry.instruction[0] = '\0';
+  entry.displayText[0] = '\0';
+  entry.categoryRank = 0;
+  entry.severityRank = 0;
+  entry.urgencyRank = 0;
+  entry.certaintyRank = 0;
+  entry.warning = false;
+  entry.watch = false;
+}
+
+/** Clears the shared active-alert state before loading a fresh payload. */
+void clearAlertState()
+{
+  alerts.active = false;
+  alerts.inWatch = false;
+  alerts.inWarning = false;
+  alerts.count = 0;
+  alerts.watchCount = 0;
+  alerts.warningCount = 0;
+  alerts.displayIndex = 0;
+  alerts.timestamp = 0;
+
+  for (uint8_t index = 0; index < kMaxTrackedAlerts; ++index)
+    clearAlertEntry(alerts.items[index]);
 }
 
 /** Copies, sanitizes, and reports whether a JSON string produced visible text. */
@@ -34,138 +63,396 @@ bool copyJsonStringClean(char (&dest)[N], JsonVariantConst value)
   return hasVisibleText(dest);
 }
 
-/** Copies the selected feature into the shared alert fields using safe fallbacks. */
-void loadAlertDetails(JsonVariantConst feature)
+/** Returns true when haystack contains needle, ignoring ASCII case. */
+bool containsIgnoreCase(const char *haystack, const char *needle)
+{
+  if (!hasVisibleText(haystack) || !hasVisibleText(needle))
+    return false;
+
+  String haystackText(haystack);
+  String needleText(needle);
+  haystackText.toLowerCase();
+  needleText.toLowerCase();
+  return haystackText.indexOf(needleText) >= 0;
+}
+
+/** Returns true when two alert strings are equivalent, ignoring case. */
+bool equalsIgnoreCase(const char *left, const char *right)
+{
+  if (!hasVisibleText(left) || !hasVisibleText(right))
+    return false;
+
+  return strcasecmp(left, right) == 0;
+}
+
+/** Maps the alert event title to a coarse priority bucket. */
+uint8_t alertCategoryRank(const char *event)
+{
+  if (containsIgnoreCase(event, "Emergency"))
+    return 5;
+  if (containsIgnoreCase(event, "Warning"))
+    return 4;
+  if (containsIgnoreCase(event, "Watch"))
+    return 3;
+  if (containsIgnoreCase(event, "Advisory"))
+    return 2;
+  if (containsIgnoreCase(event, "Statement") || containsIgnoreCase(event, "Outlook"))
+    return 1;
+  return 0;
+}
+
+/** Maps weather.gov severity text into a sort rank. */
+uint8_t alertSeverityRank(const char *severity)
+{
+  if (equalsIgnoreCase(severity, "Extreme"))
+    return 4;
+  if (equalsIgnoreCase(severity, "Severe"))
+    return 3;
+  if (equalsIgnoreCase(severity, "Moderate"))
+    return 2;
+  if (equalsIgnoreCase(severity, "Minor"))
+    return 1;
+  return 0;
+}
+
+/** Maps weather.gov urgency text into a sort rank. */
+uint8_t alertUrgencyRank(const char *urgency)
+{
+  if (equalsIgnoreCase(urgency, "Immediate"))
+    return 4;
+  if (equalsIgnoreCase(urgency, "Expected"))
+    return 3;
+  if (equalsIgnoreCase(urgency, "Future"))
+    return 2;
+  if (equalsIgnoreCase(urgency, "Past"))
+    return 1;
+  return 0;
+}
+
+/** Maps weather.gov certainty text into a sort rank. */
+uint8_t alertCertaintyRank(const char *certainty)
+{
+  if (equalsIgnoreCase(certainty, "Observed"))
+    return 4;
+  if (equalsIgnoreCase(certainty, "Likely"))
+    return 3;
+  if (equalsIgnoreCase(certainty, "Possible"))
+    return 2;
+  if (equalsIgnoreCase(certainty, "Unlikely"))
+    return 1;
+  return 0;
+}
+
+/** Returns true when the retained alert should be treated as warning-level. */
+bool isWarningAlert(const AlertEntry &entry)
+{
+  if (entry.categoryRank >= 4)
+    return true;
+  if (entry.categoryRank > 0)
+    return false;
+  return entry.certaintyRank >= 3;
+}
+
+/** Returns true when the retained alert should be treated as watch-level. */
+bool isWatchAlert(const AlertEntry &entry)
+{
+  if (entry.categoryRank == 3)
+    return true;
+  if (entry.categoryRank >= 4)
+    return false;
+  return entry.certaintyRank == 2;
+}
+
+/** Copies only the first sentence or line of a longer alert paragraph. */
+template <size_t N>
+void copyFirstSentence(char (&dest)[N], const char *source, size_t targetLength = N - 1U)
+{
+  dest[0] = '\0';
+  if (!hasVisibleText(source))
+    return;
+
+  const size_t maxLength = min(targetLength, N - 1U);
+  size_t writeIndex = 0;
+  bool truncated = false;
+  for (size_t readIndex = 0; source[readIndex] != '\0' && writeIndex < maxLength; ++readIndex)
+  {
+    char ch = source[readIndex];
+    if (ch == '\r' || ch == '\n')
+      break;
+
+    dest[writeIndex++] = ch;
+
+    if (ch == '.' || ch == '!' || ch == '?')
+      break;
+
+    if (writeIndex == maxLength && source[readIndex + 1] != '\0')
+      truncated = true;
+  }
+
+  while (writeIndex > 0 && isspace(static_cast<unsigned char>(dest[writeIndex - 1])))
+    --writeIndex;
+
+  if (truncated && writeIndex >= 3U)
+  {
+    dest[writeIndex - 3U] = '.';
+    dest[writeIndex - 2U] = '.';
+    dest[writeIndex - 1U] = '.';
+  }
+
+  dest[writeIndex] = '\0';
+}
+
+/** Appends one alert clause using sentence-style separation. */
+template <size_t N>
+void appendAlertClause(char (&dest)[N], const char *text)
+{
+  if (!hasVisibleText(text))
+    return;
+
+  if (dest[0] != '\0')
+    strlcat(dest, ". ", N);
+  strlcat(dest, text, N);
+}
+
+/** Trims a mutable alert string to the desired maximum length with ellipsis. */
+template <size_t N>
+void truncateWithEllipsis(char (&text)[N], size_t targetLength)
+{
+  if (targetLength >= N)
+    targetLength = N - 1U;
+
+  size_t length = strlen(text);
+  if (length <= targetLength)
+    return;
+
+  if (targetLength < 4U)
+  {
+    text[targetLength] = '\0';
+    return;
+  }
+
+  text[targetLength - 3U] = '.';
+  text[targetLength - 2U] = '.';
+  text[targetLength - 1U] = '.';
+  text[targetLength] = '\0';
+}
+
+/** Builds the matrix-friendly scroll text for one retained alert. */
+void buildAlertDisplayText(AlertEntry &entry, uint8_t index, uint8_t totalCount)
+{
+  entry.displayText[0] = '\0';
+
+  char prefix[32]{};
+  char shortHeadline[160]{};
+  char shortDescription[160]{};
+  char shortInstruction[128]{};
+  copyFirstSentence(shortHeadline, entry.headline, kAlertSentenceTarget);
+  copyFirstSentence(shortDescription, entry.description, kAlertSentenceTarget);
+  copyFirstSentence(shortInstruction, entry.instruction, 96U);
+
+  if (totalCount > 1U)
+    snprintf(prefix, sizeof(prefix), "Alert %u/%u", index + 1U, totalCount);
+
+  if (prefix[0] != '\0')
+    appendAlertClause(entry.displayText, prefix);
+
+  const char *title = hasVisibleText(entry.event) ? entry.event : (hasVisibleText(entry.headline) ? entry.headline : entry.description);
+  appendAlertClause(entry.displayText, title);
+
+  const char *summary = hasVisibleText(shortHeadline) ? shortHeadline : shortDescription;
+  if (hasVisibleText(summary) && !equalsIgnoreCase(summary, title) && !containsIgnoreCase(summary, title))
+    appendAlertClause(entry.displayText, summary);
+
+  char candidate[sizeof(entry.displayText)]{};
+  strlcpy(candidate, entry.displayText, sizeof(candidate));
+  if (hasVisibleText(shortInstruction) && !containsIgnoreCase(candidate, shortInstruction))
+  {
+    appendAlertClause(candidate, shortInstruction);
+    if (strlen(candidate) <= kAlertDisplayTarget)
+      strlcpy(entry.displayText, candidate, sizeof(entry.displayText));
+  }
+
+  if (!hasVisibleText(entry.displayText))
+    strlcpy(entry.displayText, title, sizeof(entry.displayText));
+
+  truncateWithEllipsis(entry.displayText, kAlertDisplayTarget);
+}
+
+/** Returns true when left should sort ahead of right in the alert list. */
+bool alertHigherPriority(const AlertEntry &left, const AlertEntry &right)
+{
+  if (left.categoryRank != right.categoryRank)
+    return left.categoryRank > right.categoryRank;
+  if (left.severityRank != right.severityRank)
+    return left.severityRank > right.severityRank;
+  if (left.urgencyRank != right.urgencyRank)
+    return left.urgencyRank > right.urgencyRank;
+  if (left.certaintyRank != right.certaintyRank)
+    return left.certaintyRank > right.certaintyRank;
+  return strcasecmp(left.event, right.event) < 0;
+}
+
+/** Sorts the retained alert list from highest to lowest priority. */
+void sortRetainedAlerts()
+{
+  for (uint8_t left = 0; left + 1U < alerts.count; ++left)
+  {
+    uint8_t bestIndex = left;
+    for (uint8_t right = left + 1U; right < alerts.count; ++right)
+    {
+      if (alertHigherPriority(alerts.items[right], alerts.items[bestIndex]))
+        bestIndex = right;
+    }
+
+    if (bestIndex != left)
+    {
+      AlertEntry swap = alerts.items[left];
+      alerts.items[left] = alerts.items[bestIndex];
+      alerts.items[bestIndex] = swap;
+    }
+  }
+}
+
+/** Copies one weather.gov feature into a retained alert entry. */
+void loadAlertEntry(JsonVariantConst feature, AlertEntry &entry)
 {
   JsonVariantConst properties = feature["properties"];
-  copyJsonStringClean(alerts.status1, properties["status"]);
-  copyJsonStringClean(alerts.severity1, properties["severity"]);
-  copyJsonStringClean(alerts.certainty1, properties["certainty"]);
-  copyJsonStringClean(alerts.urgency1, properties["urgency"]);
-  copyJsonStringClean(alerts.event1, properties["event"]);
+  copyJsonStringClean(entry.status, properties["status"]);
+  copyJsonStringClean(entry.severity, properties["severity"]);
+  copyJsonStringClean(entry.certainty, properties["certainty"]);
+  copyJsonStringClean(entry.urgency, properties["urgency"]);
+  copyJsonStringClean(entry.event, properties["event"]);
+
+  const char *headlineSource = "empty";
+  if (copyJsonStringClean(entry.headline, properties["parameters"]["NWSheadline"][0]))
+    headlineSource = "parameters.NWSheadline";
+  else if (copyJsonStringClean(entry.headline, properties["headline"]))
+    headlineSource = "headline";
+  else if (copyJsonStringClean(entry.headline, properties["event"]))
+    headlineSource = "event";
+  else
+    entry.headline[0] = '\0';
 
   const char *descriptionSource = "empty";
-  if (copyJsonStringClean(alerts.description1, properties["parameters"]["NWSheadline"][0]))
-    descriptionSource = "parameters.NWSheadline";
-  else if (copyJsonStringClean(alerts.description1, properties["headline"]))
-    descriptionSource = "headline";
-  else if (copyJsonStringClean(alerts.description1, properties["event"]))
-    descriptionSource = "event";
-  else if (copyJsonStringClean(alerts.description1, properties["description"]))
+  if (copyJsonStringClean(entry.description, properties["description"]))
     descriptionSource = "description";
+  else if (copyJsonStringClean(entry.description, properties["headline"]))
+    descriptionSource = "headline";
+  else if (copyJsonStringClean(entry.description, properties["event"]))
+    descriptionSource = "event";
   else
-    alerts.description1[0] = '\0';
+    entry.description[0] = '\0';
 
-  if (!copyJsonStringClean(alerts.instruction1, properties["instruction"]))
-    alerts.instruction1[0] = '\0';
+  if (!copyJsonStringClean(entry.instruction, properties["instruction"]))
+    entry.instruction[0] = '\0';
 
-  ESP_LOGI(TAG, "Selected alert text source: %s | Event: %s | Description: %s",
+  entry.categoryRank = alertCategoryRank(entry.event);
+  entry.severityRank = alertSeverityRank(entry.severity);
+  entry.urgencyRank = alertUrgencyRank(entry.urgency);
+  entry.certaintyRank = alertCertaintyRank(entry.certainty);
+  entry.warning = isWarningAlert(entry);
+  entry.watch = isWatchAlert(entry);
+
+  ESP_LOGI(TAG,
+           "Loaded alert: Event=%s | HeadlineSource=%s | DescriptionSource=%s | Category=%u | Severity=%u | Urgency=%u | Certainty=%u",
+           hasVisibleText(entry.event) ? entry.event : "(unnamed)",
+           headlineSource,
            descriptionSource,
-           alerts.event1,
-           hasVisibleText(alerts.description1) ? alerts.description1 : "(empty)");
+           entry.categoryRank,
+           entry.severityRank,
+           entry.urgencyRank,
+           entry.certaintyRank);
 }
 } // namespace
 
 bool fillAlertsFromJson(const String &payload)
 {
-  StaticJsonDocument<2048> filter;
-  filter["features"][0]["properties"]["status"] = true;
-  filter["features"][0]["properties"]["severity"] = true;
-  filter["features"][0]["properties"]["certainty"] = true;
-  filter["features"][0]["properties"]["urgency"] = true;
-  filter["features"][0]["properties"]["event"] = true;
-  filter["features"][0]["properties"]["headline"] = true;
-  filter["features"][0]["properties"]["description"] = true;
-  filter["features"][0]["properties"]["instruction"] = true;
-  filter["features"][0]["properties"]["parameters"]["NWSheadline"] = true;
-  filter["features"][1]["properties"]["status"] = true;
-  filter["features"][1]["properties"]["severity"] = true;
-  filter["features"][1]["properties"]["certainty"] = true;
-  filter["features"][1]["properties"]["urgency"] = true;
-  filter["features"][1]["properties"]["event"] = true;
-  filter["features"][1]["properties"]["headline"] = true;
-  filter["features"][1]["properties"]["description"] = true;
-  filter["features"][1]["properties"]["instruction"] = true;
-  filter["features"][1]["properties"]["parameters"]["NWSheadline"] = true;
-  filter["features"][2]["properties"]["status"] = true;
-  filter["features"][2]["properties"]["severity"] = true;
-  filter["features"][2]["properties"]["certainty"] = true;
-  filter["features"][2]["properties"]["urgency"] = true;
-  filter["features"][2]["properties"]["event"] = true;
-  filter["features"][2]["properties"]["headline"] = true;
-  filter["features"][2]["properties"]["description"] = true;
-  filter["features"][2]["properties"]["instruction"] = true;
-  filter["features"][2]["properties"]["parameters"]["NWSheadline"] = true;
-  StaticJsonDocument<8192> doc;
+  DynamicJsonDocument filter(kAlertFilterCapacity);
+  for (uint8_t index = 0; index < kMaxTrackedAlerts; ++index)
+  {
+    JsonObject properties = filter["features"][index]["properties"];
+    properties["status"] = true;
+    properties["severity"] = true;
+    properties["certainty"] = true;
+    properties["urgency"] = true;
+    properties["event"] = true;
+    properties["headline"] = true;
+    properties["description"] = true;
+    properties["instruction"] = true;
+    properties["parameters"]["NWSheadline"] = true;
+  }
+
+  DynamicJsonDocument doc(kAlertDocumentCapacity);
   DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
   if (error)
   {
     ESP_LOGE(TAG, "Alerts deserializeJson() failed: %s", error.c_str());
     return false;
   }
-  JsonObject obj = doc.as<JsonObject>();
-  clearAlertDetails();
-  uint8_t selectedWatch = 0;
-  uint8_t selectedWarning = 0;
 
-  for (uint8_t index = 0; index < 3; ++index)
+  JsonArrayConst features = doc["features"].as<JsonArrayConst>();
+  clearAlertState();
+
+  uint8_t featureIndex = 0;
+  for (JsonVariantConst feature : features)
   {
-    JsonVariantConst feature = obj["features"][index];
-    if (feature.isNull())
-      continue;
+    if (alerts.count >= kMaxTrackedAlerts)
+      break;
 
-    String severity = feature["properties"]["severity"] | "";
-    if (severity == "Unknown")
+    AlertEntry entry;
+    clearAlertEntry(entry);
+    loadAlertEntry(feature, entry);
+    if (!hasVisibleText(entry.event) && !hasVisibleText(entry.headline) && !hasVisibleText(entry.description))
     {
-      ESP_LOGD(TAG, "Weather alert %d received but is of severity Unknown, skipping", index + 1);
+      ESP_LOGD(TAG, "Skipping weather alert %u because it had no visible event or description text", featureIndex + 1U);
+      ++featureIndex;
       continue;
     }
 
-    String certainty = feature["properties"]["certainty"] | "";
-    if ((certainty == "Observed" || certainty == "Likely") && selectedWarning == 0)
-      selectedWarning = index + 1;
-    else if (certainty == "Possible" && selectedWatch == 0)
-      selectedWatch = index + 1;
-    else
-      ESP_LOGD(TAG, "Weather alert %d certainty [%s] did not map to warning/watch selection", index + 1, certainty.c_str());
+    alerts.items[alerts.count] = entry;
+    ++alerts.count;
+    ++featureIndex;
   }
 
-  const uint8_t selectedAlert = selectedWarning > 0 ? selectedWarning : selectedWatch;
-  if (selectedWarning > 0)
+  if (alerts.count == 0)
   {
-    alerts.inWarning = true;
-    alerts.inWatch = false;
-    alerts.active = true;
-    showready.alerts = true;
-    alerts.timestamp = systemClock.getNow();
-    ESP_LOGI(TAG, "Active weather WARNING alert received");
-  }
-  else if (selectedWatch > 0)
-  {
-    alerts.inWarning = false;
-    alerts.inWatch = true;
-    alerts.active = true;
-    showready.alerts = true;
-    alerts.timestamp = systemClock.getNow();
-    ESP_LOGI(TAG, "Active weather WATCH alert received");
-  }
-  else
-  {
-    alerts.active = false;
-    alerts.inWarning = false;
-    alerts.inWatch = false;
+    showready.alerts = false;
     ESP_LOGI(TAG, "No current active weather alerts");
     return true;
   }
 
-  if (selectedAlert > 0)
+  sortRetainedAlerts();
+
+  alerts.active = true;
+  alerts.timestamp = systemClock.getNow();
+  alerts.displayIndex = 0;
+  for (uint8_t index = 0; index < alerts.count; ++index)
   {
-    loadAlertDetails(obj["features"][selectedAlert - 1]);
-    if (!hasVisibleText(alerts.description1) && hasVisibleText(alerts.event1))
-    {
-      strlcpy(alerts.description1, alerts.event1, sizeof(alerts.description1));
-      ESP_LOGW(TAG, "Alert description was empty after parsing, falling back to event title");
-    }
+    AlertEntry &entry = alerts.items[index];
+    if (entry.warning)
+      ++alerts.warningCount;
+    if (entry.watch)
+      ++alerts.watchCount;
+    buildAlertDisplayText(entry, index, alerts.count);
+  }
+
+  alerts.inWarning = alerts.warningCount > 0;
+  alerts.inWatch = alerts.watchCount > 0;
+  showready.alerts = true;
+
+  ESP_LOGI(TAG, "Retained %u active weather alert(s): warnings=%u watches=%u primary=%s",
+           alerts.count,
+           alerts.warningCount,
+           alerts.watchCount,
+           hasVisibleText(alerts.items[0].event) ? alerts.items[0].event : "(unnamed)");
+  for (uint8_t index = 0; index < alerts.count; ++index)
+  {
+    const AlertEntry &entry = alerts.items[index];
+    ESP_LOGI(TAG, "Alert %u/%u ranked: %s | Display: %s",
+             index + 1U,
+             alerts.count,
+             hasVisibleText(entry.event) ? entry.event : "(unnamed)",
+             hasVisibleText(entry.displayText) ? entry.displayText : "(empty)");
   }
 
   return true;

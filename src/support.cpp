@@ -23,9 +23,9 @@ void updateDiagnosticRecord(DiagnosticService service, bool enabled, bool health
   copyDiagnosticText(record.detail, detail.c_str());
 
   const acetime_t now = systemClock.getNow();
-  if (markSuccess && now > 0)
+  if (markSuccess && now != LocalTime::kInvalidSeconds)
     record.lastSuccess = now;
-  if (markFailure && now > 0)
+  if (markFailure && now != LocalTime::kInvalidSeconds)
     record.lastFailure = now;
 }
 } // namespace
@@ -353,6 +353,65 @@ bool hasVisibleText(const char *text)
   }
 
   return false;
+}
+
+const AlertEntry *primaryAlert()
+{
+  if (!alerts.active || alerts.count == 0)
+    return nullptr;
+
+  return &alerts.items[0];
+}
+
+const AlertEntry *displayAlert()
+{
+  if (!alerts.active || alerts.count == 0)
+    return nullptr;
+
+  if (alerts.displayIndex >= alerts.count)
+    alerts.displayIndex = 0;
+
+  return &alerts.items[alerts.displayIndex];
+}
+
+void advanceAlertRotation()
+{
+  if (alerts.count == 0)
+  {
+    alerts.displayIndex = 0;
+    return;
+  }
+
+  alerts.displayIndex = (alerts.displayIndex + 1U) % alerts.count;
+}
+
+String summarizeActiveAlerts(uint8_t maxItems)
+{
+  if (!alerts.active || alerts.count == 0)
+    return F("No active alert");
+
+  String summary;
+  uint8_t rendered = min(maxItems, alerts.count);
+  for (uint8_t index = 0; index < rendered; ++index)
+  {
+    const AlertEntry &entry = alerts.items[index];
+    const char *title = hasVisibleText(entry.event) ? entry.event : entry.headline;
+    if (!hasVisibleText(title))
+      title = "Unnamed alert";
+
+    if (summary.length() > 0)
+      summary += F(", ");
+    summary += title;
+  }
+
+  if (alerts.count > rendered)
+  {
+    summary += F(" (+");
+    summary += (alerts.count - rendered);
+    summary += F(" more)");
+  }
+
+  return summary;
 }
 
 bool cmpLocs(const char a1[32], const char a2[32])

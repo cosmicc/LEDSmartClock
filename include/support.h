@@ -32,6 +32,14 @@ void cleanString(char *str);
 void capitalize(char *str);
 /** Returns true when a mutable C string contains at least one non-space character. */
 bool hasVisibleText(const char *text);
+/** Returns the highest-priority active alert or nullptr when none are retained. */
+const AlertEntry *primaryAlert();
+/** Returns the active alert selected for the next matrix display rotation. */
+const AlertEntry *displayAlert();
+/** Advances the retained alert rotation to the next active alert, if any. */
+void advanceAlertRotation();
+/** Summarizes the retained active alert titles in priority order. */
+String summarizeActiveAlerts(uint8_t maxItems = 3);
 /** Compares two fixed-width location strings for exact equality. */
 bool cmpLocs(const char a1[32], const char a2[32]);
 /** Converts a numeric UV index into a descriptive label. */

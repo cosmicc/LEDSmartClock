@@ -12,6 +12,8 @@ constexpr char kConsoleLogPath[] = "/console/log";
 constexpr char kConsoleCommandPath[] = "/console/command";
 constexpr char kConsoleDownloadPath[] = "/console/download";
 constexpr size_t kMaxConfigImportBytes = 24U * 1024U;
+constexpr uint32_t kLiveRefreshIntervalMs = 15000UL;
+constexpr uint32_t kConsoleAccessTokenLifetimeMs = 30UL * 60UL * 1000UL;
 
 /** Tracks whether the current config-import upload request passed auth checks. */
 bool configImportAuthenticated = false;
@@ -28,6 +30,12 @@ bool firmwareUploadAuthenticated = false;
 bool firmwareUploadStarted = false;
 /** Holds the fatal error message for the current firmware-upload request. */
 String firmwareUploadError;
+/** Temporary console-access token embedded into the live console page for follow-up fetches. */
+char consoleAccessToken[17] = "";
+/** Millisecond timestamp when the current console-access token was issued. */
+uint32_t consoleAccessTokenIssuedAt = 0;
+
+bool authorizeAdminRequest();
 
 const char kWebThemeCss[] PROGMEM = R"clockcss(
 :root{
@@ -288,8 +296,8 @@ a:hover{text-decoration:underline}
 .kv-list{margin-top:16px}
 .kv-row{
   display:grid;
-  grid-template-columns:minmax(150px, 220px) minmax(0, 1fr);
-  gap:14px;
+  grid-template-columns:minmax(120px, 176px) minmax(0, 1fr);
+  gap:10px;
   padding:12px 0;
   border-top:1px solid rgba(27,36,48,0.08);
   align-items:start;
@@ -305,7 +313,7 @@ a:hover{text-decoration:underline}
 }
 .kv-row dd{
   margin:0;
-  text-align:right;
+  text-align:left;
   font-weight:700;
   min-width:0;
   max-width:100%;
@@ -313,11 +321,15 @@ a:hover{text-decoration:underline}
   word-break:break-word;
 }
 .dashboard-clamp{
-  display:inline-block;
+  display:-webkit-box;
   max-width:100%;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:2;
   overflow:hidden;
   text-overflow:ellipsis;
-  white-space:nowrap;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+  line-height:1.35;
   vertical-align:top;
 }
 .setup-steps{
@@ -665,9 +677,12 @@ button{
 .console-toolbar button{
   width:auto;
 }
+.console-page-grid{
+  grid-template-columns:minmax(0, 1fr);
+}
 .console-view{
-  min-height:360px;
-  max-height:62vh;
+  min-height:420px;
+  max-height:68vh;
   overflow:auto;
   margin-top:18px;
   padding:18px;
@@ -682,10 +697,25 @@ button{
   white-space:pre-wrap;
   word-break:break-word;
 }
+.console-ansi-bold{font-weight:700}
+.console-ansi-gray{color:#9fb0b9}
+.console-ansi-red{color:#ff8d8d}
+.console-ansi-green{color:#8fe3a0}
+.console-ansi-yellow{color:#ffd27a}
+.console-ansi-blue{color:#8db8ff}
+.console-ansi-magenta{color:#e2a6ff}
+.console-ansi-cyan{color:#88e4ff}
+.console-ansi-white{color:#f4fbff}
 .console-status{
   margin-top:12px;
   color:var(--muted);
   font-weight:700;
+}
+.console-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-top:18px;
 }
 .console-command-form{
   display:grid;
@@ -721,7 +751,13 @@ button{
   .hero,.portal-hero{padding:22px}
   .kv-row{grid-template-columns:1fr;gap:6px}
   .kv-row dd{text-align:left}
-  .dashboard-clamp{white-space:normal}
+  .dashboard-clamp{
+    display:block;
+    -webkit-line-clamp:unset;
+    -webkit-box-orient:initial;
+    overflow:visible;
+    white-space:normal;
+  }
   .portal-actions{justify-content:flex-start}
   .portal-button-row{width:100%;margin-left:0}
   .portal-button-row .button-link{width:100%}
@@ -733,6 +769,75 @@ button{
   .console-command-row{grid-template-columns:1fr}
 }
 )clockcss";
+
+const char kLiveRefreshScript[] PROGMEM = R"clockjs(
+(function(){
+  const intervalFallback = 15000;
+  let timerId = 0;
+  let inFlight = false;
+
+  function currentShell(){
+    return document.getElementById('live-shell');
+  }
+
+  function scheduleNext(){
+    const shell = currentShell();
+    if (!shell || document.hidden)
+      return;
+
+    const interval = Number(shell.dataset.refreshInterval || intervalFallback);
+    window.clearTimeout(timerId);
+    timerId = window.setTimeout(refreshShell, interval);
+  }
+
+  async function refreshShell(){
+    const shell = currentShell();
+    if (!shell || inFlight)
+      return;
+
+    const refreshPath = shell.dataset.refreshPath;
+    if (!refreshPath)
+      return;
+
+    inFlight = true;
+    try{
+      const response = await fetch(refreshPath, {
+        cache: 'no-store',
+        headers: {'X-Requested-With': 'ledsmartclock-live'}
+      });
+      if (!response.ok)
+        throw new Error('HTTP ' + response.status);
+
+      const markup = (await response.text()).trim();
+      if (!markup)
+        throw new Error('Empty response');
+
+      const container = document.createElement('div');
+      container.innerHTML = markup;
+      const nextShell = container.firstElementChild;
+      const existingShell = currentShell();
+      if (!existingShell || !nextShell || nextShell.id !== 'live-shell')
+        throw new Error('Invalid live fragment');
+
+      existingShell.replaceWith(nextShell);
+    } catch (error){
+      console.warn('LED Smart Clock live refresh failed', error);
+    } finally {
+      inFlight = false;
+      scheduleNext();
+    }
+  }
+
+  document.addEventListener('visibilitychange', function(){
+    if (document.hidden)
+      window.clearTimeout(timerId);
+    else
+      scheduleNext();
+  });
+
+  scheduleNext();
+})();
+)clockjs";
 
 const char kConfigPortalScript[] PROGMEM = R"clockjs(
 document.addEventListener('DOMContentLoaded', function () {
@@ -1162,12 +1267,22 @@ document.addEventListener('DOMContentLoaded', function () {
 
 const char kConsolePageScript[] PROGMEM = R"clockjs(
 document.addEventListener('DOMContentLoaded', function () {
+  var page = document.getElementById('console-page');
   var output = document.getElementById('console-output');
   var status = document.getElementById('console-status');
   var form = document.getElementById('console-command-form');
   var input = document.getElementById('console-command');
+  var accessToken = page && page.dataset.consoleToken ? page.dataset.consoleToken : '';
   var cursor = Number(output && output.dataset.cursor ? output.dataset.cursor : '0');
   var pollTimer = null;
+  var pollInFlight = false;
+
+  function withToken(path) {
+    if (!accessToken) {
+      return path;
+    }
+    return path + (path.indexOf('?') === -1 ? '?' : '&') + 'token=' + encodeURIComponent(accessToken);
+  }
 
   function setStatus(text) {
     if (status) {
@@ -1175,28 +1290,53 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
+  function stripAnsi(text) {
+    if (!text) {
+      return '';
+    }
+    return text.replace(/\u001b\[[0-9;]*m/g, '');
+  }
+
   function appendOutput(text) {
     if (!output || !text) {
       return;
     }
     var wasNearBottom = (output.scrollTop + output.clientHeight + 40) >= output.scrollHeight;
-    output.textContent += text;
+    output.textContent += stripAnsi(text);
     if (wasNearBottom) {
       output.scrollTop = output.scrollHeight;
     }
   }
 
+  function schedulePoll(delayMs) {
+    if (pollTimer) {
+      window.clearTimeout(pollTimer);
+    }
+    pollTimer = window.setTimeout(fetchConsole, delayMs);
+  }
+
   function fetchConsole() {
-    fetch('/console/log?since=' + encodeURIComponent(String(cursor)), { cache: 'no-store' })
+    if (!output || pollInFlight || document.hidden) {
+      return;
+    }
+
+    pollInFlight = true;
+    fetch(withToken('/console/log?since=' + encodeURIComponent(String(cursor))), {
+      cache: 'no-store',
+      credentials: 'same-origin'
+    })
       .then(function (response) {
         if (!response.ok) {
-          throw new Error('HTTP ' + response.status);
+          return response.text().then(function (body) {
+            throw new Error('HTTP ' + response.status + (body ? ': ' + body : ''));
+          });
         }
         var nextCursor = Number(response.headers.get('X-Console-Cursor') || cursor);
         var truncated = response.headers.get('X-Console-Truncated') === '1';
         return response.text().then(function (text) {
           if (truncated) {
-            output.textContent = '[console buffer wrapped; showing newest available output]\n';
+            output.textContent = '';
+            appendOutput('[console buffer wrapped; showing newest available output]\n');
           }
           if (text) {
             appendOutput(text);
@@ -1207,6 +1347,10 @@ document.addEventListener('DOMContentLoaded', function () {
       })
       .catch(function (error) {
         setStatus('Console polling failed: ' + error.message);
+      })
+      .finally(function () {
+        pollInFlight = false;
+        schedulePoll(1500);
       });
   }
 
@@ -1216,7 +1360,11 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
       }
       input.value = button.dataset.consoleCommand || '';
-      form.requestSubmit();
+      if (form.requestSubmit) {
+        form.requestSubmit();
+      } else {
+        form.dispatchEvent(new Event('submit', { cancelable: true }));
+      }
     });
   });
 
@@ -1232,30 +1380,56 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
       }
 
-      fetch('/console/command', {
+      fetch(withToken('/console/command'), {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
         },
-        body: 'cmd=' + encodeURIComponent(command)
+        body: 'cmd=' + encodeURIComponent(command) + '&token=' + encodeURIComponent(accessToken)
       }).then(function (response) {
-        if (!response.ok) {
-          throw new Error('HTTP ' + response.status);
-        }
-        input.value = '';
-        setStatus('Sent command "' + command + '". Waiting for console output...');
-        fetchConsole();
+        return response.text().then(function (body) {
+          var payload = {};
+          try {
+            payload = body ? JSON.parse(body) : {};
+          } catch (error) {
+            payload = {};
+          }
+
+          if (!response.ok || payload.ok === false) {
+            var message = payload.error || ('HTTP ' + response.status);
+            throw new Error(message);
+          }
+
+          input.value = '';
+          setStatus('Sent command "' + command + '". Waiting for console output...');
+          fetchConsole();
+        });
       }).catch(function (error) {
         setStatus('Command failed: ' + error.message);
       });
     });
   }
 
+  if (output) {
+    var initialText = output.textContent || '';
+    output.textContent = '';
+    appendOutput(initialText);
+  }
+
   fetchConsole();
-  pollTimer = window.setInterval(fetchConsole, 1500);
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      if (pollTimer) {
+        window.clearTimeout(pollTimer);
+      }
+      return;
+    }
+    fetchConsole();
+  });
   window.addEventListener('beforeunload', function () {
     if (pollTimer) {
-      window.clearInterval(pollTimer);
+      window.clearTimeout(pollTimer);
     }
   });
 });
@@ -1320,6 +1494,44 @@ String safeText(const String &value, const char *fallback)
 String dashboardClampValue(const String &renderedValue)
 {
   return String(F("<span class='dashboard-clamp'>")) + renderedValue + F("</span>");
+}
+
+/** Returns true when the current request asked for a live-fragment refresh instead of a full page. */
+bool isLiveRefreshRequest()
+{
+  return server.hasArg("partial") && server.arg("partial") == "1";
+}
+
+/** Returns true when a previously issued console page token is still valid for follow-up fetches. */
+bool hasValidConsoleAccessToken()
+{
+  if (consoleAccessToken[0] == '\0')
+    return false;
+  if (!server.hasArg("token"))
+    return false;
+  if (strcmp(server.arg("token").c_str(), consoleAccessToken) != 0)
+    return false;
+  return static_cast<uint32_t>(millis() - consoleAccessTokenIssuedAt) <= kConsoleAccessTokenLifetimeMs;
+}
+
+/** Issues a fresh console page token so live fetches do not depend on browser auth quirks. */
+String issueConsoleAccessToken()
+{
+  snprintf(consoleAccessToken, sizeof(consoleAccessToken), "%08lx%08lx",
+           static_cast<unsigned long>(esp_random()),
+           static_cast<unsigned long>(esp_random()));
+  consoleAccessTokenIssuedAt = millis();
+  return String(consoleAccessToken);
+}
+
+/** Allows console AJAX requests to use either admin auth or the current page token. */
+bool authorizeConsoleRequest()
+{
+  if (iotWebConf.getState() != iotwebconf::OnLine)
+    return true;
+  if (hasValidConsoleAccessToken())
+    return true;
+  return authorizeAdminRequest();
 }
 
 /** Returns the address that makes sense for the current operating mode. */
@@ -1737,12 +1949,28 @@ void appendDocumentHead(String &html, const char *title, bool autoRefresh)
   html += F("<meta name='viewport' content='width=device-width, initial-scale=1, user-scalable=no'>");
   html += F("<meta name='theme-color' content='#173748'>");
   if (autoRefresh)
-    html += F("<meta http-equiv='refresh' content='15'>");
+    html += F("<noscript><meta http-equiv='refresh' content='15'></noscript>");
   html += F("<title>");
   html += htmlEscape(String(title));
   html += F("</title><style>");
   html += FPSTR(kWebThemeCss);
   html += F("</style></head><body>");
+}
+
+/** Opens the live-refresh shell used by pages that update in place. */
+void appendLiveShellStart(String &html, const char *refreshPath)
+{
+  html += F("<div id='live-shell' class='shell' data-refresh-path='");
+  html += refreshPath;
+  html += F("' data-refresh-interval='");
+  html += String(kLiveRefreshIntervalMs);
+  html += F("'>");
+}
+
+/** Closes the live-refresh shell wrapper. */
+void appendLiveShellEnd(String &html)
+{
+  html += F("</div>");
 }
 
 /** Adds a pill-style status chip to the current page. */
@@ -1990,7 +2218,7 @@ void appendConfigBackupPage(String &html, const char *noticeToneClass, const Str
 }
 
 /** Renders the live web console backed by the in-memory console log buffer. */
-void appendConsolePage(String &html)
+void appendConsolePage(String &html, const String &accessToken)
 {
   String snapshot;
   uint32_t cursor = 0;
@@ -2022,12 +2250,22 @@ void appendConsolePage(String &html)
   if (truncated)
     appendNotice(html, "notice-warn", F("The RAM console buffer already wrapped. The console below starts at the newest retained output."));
 
-  html += F("<main class='content-grid'>");
-  appendCardStart(html, "Live Output", "Newest output appears here automatically. Use the download button if you want the current retained tail as a text file.");
-  appendKeyValueRow(html, "Log Download", String(F("<a class='button-link primary' href='")) + kConsoleDownloadPath + F("'>Download Console Log</a>"));
-  appendKeyValueRow(html, "Incremental Feed", F("<code>/console/log</code>"));
-  appendKeyValueRow(html, "Buffer Scope", F("Recent runtime output retained in RAM only"));
-  html += F("</dl><pre id='console-output' class='console-view' data-cursor='");
+  html += F("<main id='console-page' class='content-grid console-page-grid' data-console-token='");
+  html += htmlEscape(accessToken);
+  html += F("'>");
+
+  html += F("<section class='card card-span'><div class='card-header'><h2>Live Output</h2><p class='card-subtitle'>Newest output appears here automatically. Use the download button to save the current retained tail as a text file.</p></div><div class='console-actions'>");
+  html += F("<a class='button-link primary' href='");
+  html += kConsoleDownloadPath;
+  if (accessToken.length() > 0)
+  {
+    html += F("?token=");
+    html += htmlEscape(accessToken);
+  }
+  html += F("'>Download Console Log</a>");
+  html += F("<span class='status-chip'><strong>Incremental Feed</strong><span><code>/console/log</code></span></span>");
+  html += F("<span class='status-chip'><strong>Buffer Scope</strong><span>Recent runtime output retained in RAM only</span></span>");
+  html += F("</div><pre id='console-output' class='console-view' data-cursor='");
   html += cursor;
   html += F("'>");
   html += htmlEscape(snapshot);
@@ -2051,8 +2289,8 @@ void appendConsolePage(String &html)
   html += F("</script></div></body></html>");
 }
 
-/** Renders the detailed diagnostics page for the major runtime subsystems. */
-void appendDiagnosticsPage(String &html)
+/** Renders the live diagnostics shell contents that can be refreshed in place. */
+void appendDiagnosticsContent(String &html)
 {
   const acetime_t now = systemClock.getNow();
   const size_t healthyCount = countDiagnostics(true, true);
@@ -2060,8 +2298,7 @@ void appendDiagnosticsPage(String &html)
   const size_t disabledCount = countDisabledDiagnostics();
   const size_t attentionCount = countAttentionDiagnostics();
 
-  appendDocumentHead(html, "LED Smart Clock Diagnostics", true);
-  html += F("<div class='shell'><header class='hero'>");
+  html += F("<header class='hero'>");
   html += F("<p class='eyebrow'>LED Smart Clock Diagnostics</p>");
   html += F("<h1>Service Health</h1>");
   html += F("<p class='lede'>This page tracks the live state of Wi-Fi, timekeeping, GPS, weather, alerts, air quality, and location services so field debugging does not require a serial console for every issue.</p><div class='action-row'>");
@@ -2199,11 +2436,23 @@ void appendDiagnosticsPage(String &html)
   appendKeyValueRow(html, "Last Code", diagnosticCodeLabel(DiagnosticService::Geocode));
   appendCardEnd(html);
 
-  html += F("</main></div></body></html>");
+  html += F("</main>");
 }
 
-/** Renders the main status dashboard shown during normal operation. */
-void appendStatusPage(String &html)
+/** Renders the detailed diagnostics page with live in-place refresh enabled. */
+void appendDiagnosticsPage(String &html)
+{
+  appendDocumentHead(html, "LED Smart Clock Diagnostics", true);
+  appendLiveShellStart(html, "/diagnostics?partial=1");
+  appendDiagnosticsContent(html);
+  appendLiveShellEnd(html);
+  html += F("<script>");
+  html += FPSTR(kLiveRefreshScript);
+  html += F("</script></body></html>");
+}
+
+/** Renders the live status shell contents that can be refreshed in place. */
+void appendStatusContent(String &html)
 {
   acetime_t now = systemClock.getNow();
   const size_t healthyCount = countDiagnostics(true, true);
@@ -2211,9 +2460,7 @@ void appendStatusPage(String &html)
   const size_t pendingCount = countPendingDiagnostics();
   const size_t disabledCount = countDisabledDiagnostics();
 
-  appendDocumentHead(html, "LED Smart Clock Status", true);
-
-  html += F("<div class='shell'><header class='hero'>");
+  html += F("<header class='hero'>");
   html += F("<p class='eyebrow'>LED Smart Clock Status</p>");
   html += F("<h1>Runtime Dashboard</h1>");
   html += F("<p class='lede'>");
@@ -2339,7 +2586,19 @@ void appendStatusPage(String &html)
   appendKeyValueRow(html, "Last Alert Shown", formatAgo(now, lastshown.alerts));
   appendCardEnd(html);
 
-  html += F("</main></div></body></html>");
+  html += F("</main>");
+}
+
+/** Renders the main status dashboard shown during normal operation. */
+void appendStatusPage(String &html)
+{
+  appendDocumentHead(html, "LED Smart Clock Status", true);
+  appendLiveShellStart(html, "/?partial=1");
+  appendStatusContent(html);
+  appendLiveShellEnd(html);
+  html += F("<script>");
+  html += FPSTR(kLiveRefreshScript);
+  html += F("</script></body></html>");
 }
 
 /** Customizes the generated IotWebConf portal so it matches the status page. */
@@ -2694,9 +2953,10 @@ void handleConsolePage()
   if (!authorizeAdminRequest())
     return;
 
+  String accessToken = issueConsoleAccessToken();
   String html;
   html.reserve(18000);
-  appendConsolePage(html);
+  appendConsolePage(html, accessToken);
   server.send(200, "text/html; charset=UTF-8", html);
 }
 
@@ -2705,7 +2965,7 @@ void handleConsoleLog()
 {
   if (iotWebConf.handleCaptivePortal())
     return;
-  if (!authorizeAdminRequest())
+  if (!authorizeConsoleRequest())
     return;
 
   uint32_t since = 0;
@@ -2728,7 +2988,7 @@ void handleConsoleDownload()
 {
   if (iotWebConf.handleCaptivePortal())
     return;
-  if (!authorizeAdminRequest())
+  if (!authorizeConsoleRequest())
     return;
 
   String payload;
@@ -2746,7 +3006,7 @@ void handleConsoleCommand()
 {
   if (iotWebConf.handleCaptivePortal())
     return;
-  if (!authorizeAdminRequest())
+  if (!authorizeConsoleRequest())
     return;
 
   String command = server.hasArg("cmd") ? server.arg("cmd") : String();
@@ -2794,7 +3054,18 @@ void registerWebRoutes()
 
     String html;
     html.reserve(22000);
-    appendDiagnosticsPage(html);
+    if (isLiveRefreshRequest())
+    {
+      appendLiveShellStart(html, "/diagnostics?partial=1");
+      appendDiagnosticsContent(html);
+      appendLiveShellEnd(html);
+      server.sendHeader("Cache-Control", "no-store");
+      server.sendHeader("Pragma", "no-cache");
+    }
+    else
+    {
+      appendDiagnosticsPage(html);
+    }
     server.send(200, "text/html; charset=UTF-8", html);
   });
   server.on(kConsolePath, handleConsolePage);
@@ -2823,6 +3094,14 @@ void handleRoot()
 
   if (isSetupPortalState())
     appendSetupPage(html);
+  else if (isLiveRefreshRequest())
+  {
+    appendLiveShellStart(html, "/?partial=1");
+    appendStatusContent(html);
+    appendLiveShellEnd(html);
+    server.sendHeader("Cache-Control", "no-store");
+    server.sendHeader("Pragma", "no-cache");
+  }
   else
     appendStatusPage(html);
 

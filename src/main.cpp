@@ -71,19 +71,6 @@ bool persistConfigurationState(const char *reason)
   return true;
 }
 
-/** Persists the already-loaded legacy blob into the new key-based store. */
-bool migrateLegacyConfigurationStore(const char *reason)
-{
-  if (persistConfigurationState(reason))
-  {
-    ESP_EARLY_LOGI(TAG, "Migrated legacy positional configuration into the key-based store.");
-    return true;
-  }
-
-  ESP_EARLY_LOGE(TAG, "Failed to migrate legacy positional configuration into the key-based store.");
-  return false;
-}
-
 /** Returns true when a timezone-name buffer contains a usable identifier. */
 bool hasTimezoneName(const char *zoneName)
 {
@@ -179,24 +166,19 @@ extern "C" void app_main()
   gpsClock.setup();
   printSystemZonedTime();
   ESP_EARLY_LOGD(TAG, "Initializing IotWebConf...");
-  bool legacyConfigLoaded = setupIotWebConf();
+  setupIotWebConf();
   if (hasStoredConfiguration())
   {
     String configStoreError;
     if (loadStoredConfiguration(configStoreError))
       ESP_EARLY_LOGI(TAG, "Loaded key-based configuration store.");
-    else if (legacyConfigLoaded)
+    else
     {
       ESP_EARLY_LOGE(TAG, "Failed to load key-based configuration store: %s", configStoreError.c_str());
-      ESP_EARLY_LOGW(TAG, "Falling back to the legacy positional configuration blob.");
-      migrateLegacyConfigurationStore("recovery from invalid key-based store");
+      ESP_EARLY_LOGW(TAG, "Ignoring the persisted key-based store and continuing with defaults.");
+      iotWebConf.getRootParameterGroup()->applyDefaultValue();
+      normalizeLoadedConfigValues();
     }
-    else
-      ESP_EARLY_LOGE(TAG, "Failed to load key-based configuration store: %s", configStoreError.c_str());
-  }
-  else if (legacyConfigLoaded)
-  {
-    migrateLegacyConfigurationStore("legacy positional-config migration");
   }
   else
   {

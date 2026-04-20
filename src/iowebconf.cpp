@@ -2,12 +2,13 @@
 
 namespace
 {
-// This legacy blob marker is only kept so already-deployed positional EEPROM
-// data can be recognized once and migrated into the new key-based store.
-constexpr char kLegacyIotWebConfBlobMarker[] = "18";
+// The application now treats the key-based NVS store as authoritative. Keep a
+// distinct marker for IotWebConf's internal blob so old positional layouts are
+// no longer recognized as valid application config during boot.
+constexpr char kIotWebConfStorageMarker[] = "NVS2";
 }
 
-IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, kLegacyIotWebConfBlobMarker);
+IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, kIotWebConfStorageMarker);
 
 iotwebconf::TextTParameter<12> savedlat =
   iotwebconf::Builder<iotwebconf::TextTParameter<12>>("savedlat").label("Saved Latitude").defaultValue("0").build();
@@ -285,7 +286,7 @@ void normalizeLoadedConfigValues()
   normalizeLoadedConfigValuesImpl();
 }
 
-bool setupIotWebConf()
+void setupIotWebConf()
 {
   addSystemParameters();
   addHiddenParameters();
@@ -301,6 +302,11 @@ bool setupIotWebConf()
   iotWebConf.setConfigPin(CONFIG_PIN);
   configureWebUi();
   iotWebConf.getSystemParameterGroup()->label = "Connectivity & Access";
+  iotWebConf.getThingNameParameter()->label = "Clock network name";
+  iotWebConf.getWifiSsidParameter()->label = "Wi-Fi SSID";
+  iotWebConf.getWifiPasswordParameter()->label = "Wi-Fi password";
+  iotWebConf.getApPasswordParameter()->label = "Clock web / setup password";
+  iotWebConf.getApTimeoutParameter()->label = "Setup portal timeout in seconds";
   iotWebConf.setupUpdateServer(
       [](const char *updatePath)
       { (void)updatePath; },
@@ -309,7 +315,9 @@ bool setupIotWebConf()
         (void)userName;
         (void)password;
       });
-  bool legacyConfigLoaded = iotWebConf.init();
+  iotWebConf.init();
+  // The key-based Preferences store owns persistence now, so start from
+  // defaults here and let the JSON/NVS loader apply authoritative values.
+  iotWebConf.getRootParameterGroup()->applyDefaultValue();
   normalizeLoadedConfigValues();
-  return legacyConfigLoaded;
 }

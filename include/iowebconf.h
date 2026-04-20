@@ -4,7 +4,7 @@
 extern IotWebConf iotWebConf;
 
 /** Wires parameters, callbacks, OTA support, and the themed config portal. */
-bool setupIotWebConf();
+void setupIotWebConf();
 /** Repairs out-of-range or legacy config values currently loaded in memory. */
 void normalizeLoadedConfigValues();
 

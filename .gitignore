@@ -1,5 +1,6 @@
 # Custom
 *.log
+pt-readback.bin
 
 # Prerequisites
 *.d
@@ -38,4 +39,3 @@
 .pio/
 sdkconfig.esp32dev
 build/
-

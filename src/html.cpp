@@ -11,9 +11,17 @@ constexpr char kConsolePath[] = "/console";
 constexpr char kConsoleLogPath[] = "/console/log";
 constexpr char kConsoleCommandPath[] = "/console/command";
 constexpr char kConsoleDownloadPath[] = "/console/download";
+constexpr char kThemeCssPath[] = "/theme.css";
+constexpr char kLoginPath[] = "/login";
+constexpr char kLogoutPath[] = "/logout";
+constexpr char kOnboardingPath[] = "/onboarding";
+constexpr char kOnboardingMatrixTestPath[] = "/onboarding/self-test/matrix";
 constexpr size_t kMaxConfigImportBytes = 24U * 1024U;
 constexpr uint32_t kLiveRefreshIntervalMs = 15000UL;
 constexpr uint32_t kConsoleAccessTokenLifetimeMs = 30UL * 60UL * 1000UL;
+constexpr uint32_t kWebSessionLifetimeSeconds = 7UL * 24UL * 60UL * 60UL;
+constexpr char kWebSessionCookieName[] = "ledclock_session";
+const char *kCollectedHeaderKeys[] = {"Cookie"};
 
 /** Tracks whether the current config-import upload request passed auth checks. */
 bool configImportAuthenticated = false;
@@ -34,8 +42,24 @@ String firmwareUploadError;
 char consoleAccessToken[17] = "";
 /** Millisecond timestamp when the current console-access token was issued. */
 uint32_t consoleAccessTokenIssuedAt = 0;
+/** Session token used by the custom password login for the normal web UI. */
+char webSessionToken[33] = "";
+/** Millisecond timestamp when the current web login session token was issued. */
+uint32_t webSessionIssuedAt = 0;
 
 bool authorizeAdminRequest();
+
+/** Captures the current onboarding form values before they are persisted. */
+struct OnboardingDraft
+{
+  String wifiSsid;
+  String wifiPassword;
+  String adminPassword;
+  String weatherApiKey;
+  String ipGeoApiKey;
+  bool useFixedTimezone = false;
+  int8_t fixedOffset = 0;
+};
 
 const char kWebThemeCss[] PROGMEM = R"clockcss(
 :root{
@@ -352,6 +376,150 @@ a:hover{text-decoration:underline}
   color:var(--muted);
   line-height:1.55;
 }
+.auth-shell{
+  max-width:880px;
+  margin:0 auto;
+  padding:28px 18px 48px;
+}
+.auth-card,.wizard-card{
+  padding:22px;
+  border-radius:24px;
+  background:var(--surface);
+  border:1px solid rgba(255,255,255,0.45);
+  box-shadow:0 14px 34px rgba(22,44,58,0.08);
+  backdrop-filter:blur(10px);
+}
+.auth-form,.onboarding-form{
+  display:grid;
+  gap:18px;
+  margin-top:18px;
+}
+.field-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
+  gap:14px;
+}
+.form-field{
+  display:grid;
+  gap:8px;
+}
+.form-field label{
+  display:block;
+  color:var(--muted);
+  font-size:0.78rem;
+  font-weight:700;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+}
+.form-field input,.form-field select{
+  width:100%;
+  border:1px solid rgba(15,118,110,0.2);
+  border-radius:14px;
+  background:rgba(255,255,255,0.94);
+  color:var(--text);
+  font:inherit;
+  padding:12px 14px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.6);
+}
+.form-field input:focus,.form-field select:focus{
+  outline:2px solid rgba(15,118,110,0.18);
+  border-color:var(--accent);
+}
+.field-help,.auth-note{
+  margin:0;
+  color:var(--muted);
+  line-height:1.55;
+}
+.field-help strong,.auth-note strong{
+  color:var(--hero);
+}
+.wizard-progress{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  margin-top:18px;
+}
+.step-pill{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:10px 14px;
+  border-radius:999px;
+  background:rgba(255,255,255,0.72);
+  border:1px solid rgba(255,255,255,0.5);
+  color:var(--hero);
+  font-size:0.85rem;
+  font-weight:700;
+  box-shadow:0 8px 18px rgba(22,44,58,0.08);
+}
+.step-pill strong{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:1.4rem;
+  height:1.4rem;
+  border-radius:999px;
+  background:rgba(23,55,72,0.08);
+  font-size:0.74rem;
+}
+.onboarding-step{
+  margin-top:18px;
+}
+.onboarding-step[hidden]{
+  display:none;
+}
+.onboarding-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  align-items:center;
+  justify-content:space-between;
+}
+.onboarding-actions .spacer{
+  flex:1 1 auto;
+}
+.self-test-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+  gap:14px;
+  margin-top:18px;
+}
+.self-test-item{
+  padding:16px;
+  border-radius:18px;
+  border:1px solid rgba(23,55,72,0.08);
+  background:rgba(255,255,255,0.9);
+  box-shadow:0 8px 22px rgba(22,44,58,0.05);
+}
+.self-test-item h3{
+  margin:0 0 6px;
+  font-family:"Georgia","Times New Roman",serif;
+  font-size:1.05rem;
+  color:var(--hero);
+}
+.self-test-item p{
+  margin:0;
+  color:var(--muted);
+  line-height:1.55;
+}
+.recovery-panel{
+  margin-top:18px;
+  padding:18px;
+  border-radius:20px;
+  background:linear-gradient(180deg, rgba(247,231,216,0.86), rgba(255,255,255,0.96));
+  border:1px solid rgba(199,103,30,0.18);
+}
+.recovery-panel h2{
+  margin:0 0 8px;
+  font-family:"Georgia","Times New Roman",serif;
+  font-size:1.2rem;
+  color:var(--hero);
+}
+.recovery-panel p{
+  margin:0;
+  color:var(--muted);
+  line-height:1.6;
+}
 .portal-nav a{
   padding:10px 14px;
   border-radius:999px;
@@ -360,6 +528,36 @@ a:hover{text-decoration:underline}
   color:var(--hero);
   font-weight:700;
   box-shadow:0 8px 18px rgba(22,44,58,0.08);
+}
+.portal-mode-bar{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-top:16px;
+}
+.portal-mode-help{
+  margin:0;
+  color:var(--muted);
+  line-height:1.55;
+}
+.portal-mode-toggle{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+}
+.portal-mode-toggle button{
+  width:auto;
+  background:rgba(255,255,255,0.82);
+  color:var(--hero);
+  border:1px solid rgba(23,55,72,0.12);
+  box-shadow:0 10px 24px rgba(22,44,58,0.08);
+}
+.portal-mode-toggle button.is-active{
+  color:#fff;
+  background:linear-gradient(135deg, var(--accent), #149a90);
+  box-shadow:0 10px 24px rgba(15,118,110,0.24);
 }
 .portal-intro{
   margin-top:18px;
@@ -767,6 +965,268 @@ button{
   .password-row{grid-template-columns:1fr}
   .password-toggle{width:100%}
   .console-command-row{grid-template-columns:1fr}
+  .onboarding-actions{justify-content:flex-start}
+  .onboarding-actions .spacer{display:none}
+}
+)clockcss";
+
+const char kPortalConsoleCss[] PROGMEM = R"clockcss(
+.portal-nav a{
+  padding:10px 14px;
+  border-radius:999px;
+  background:rgba(255,255,255,0.72);
+  border:1px solid rgba(255,255,255,0.5);
+  color:var(--hero);
+  font-weight:700;
+  box-shadow:0 8px 18px rgba(22,44,58,0.08);
+}
+.portal-intro{
+  margin-top:18px;
+  background:linear-gradient(180deg, rgba(255,255,255,0.92), rgba(245,239,231,0.92));
+}
+.portal-intro p{
+  margin:10px 0 0;
+  color:var(--muted);
+  line-height:1.6;
+}
+.portal-surface{margin-top:18px}
+.portal-form{display:block}
+.portal-form fieldset{
+  margin:0 0 18px;
+  padding:20px;
+  border:1px solid var(--line);
+  border-radius:22px;
+  background:var(--surface-strong);
+  box-shadow:0 12px 30px rgba(22,44,58,0.06);
+}
+.portal-form legend{
+  padding:0 10px;
+  color:var(--hero);
+  font-family:"Georgia","Times New Roman",serif;
+  font-size:1.15rem;
+}
+.portal-section-note{
+  margin:6px 0 0;
+  color:var(--muted);
+  line-height:1.55;
+}
+.portal-subsections{
+  display:grid;
+  gap:16px;
+  margin-top:16px;
+}
+.portal-subsection{
+  padding:18px;
+  border-radius:18px;
+  border:1px solid rgba(23,55,72,0.08);
+  background:linear-gradient(180deg, rgba(216,241,237,0.26), rgba(255,255,255,0.96));
+}
+.portal-subsection h3{
+  margin:0 0 6px;
+  font-family:"Georgia","Times New Roman",serif;
+  font-size:1.05rem;
+  color:var(--hero);
+}
+.portal-subsection p{
+  margin:0;
+  color:var(--muted);
+  line-height:1.55;
+}
+.portal-field-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(230px, 1fr));
+  gap:14px;
+  margin-top:14px;
+}
+.portal-field-card{
+  padding:16px;
+  border-radius:18px;
+  border:1px solid rgba(23,55,72,0.08);
+  background:rgba(255,255,255,0.9);
+  box-shadow:0 8px 22px rgba(22,44,58,0.05);
+}
+.portal-field-card > div,
+.portal-field-card > fieldset{
+  height:100%;
+}
+.portal-form fieldset > div{margin-top:14px}
+.portal-form fieldset > div:first-of-type{margin-top:8px}
+.portal-form label{
+  display:block;
+  margin-bottom:8px;
+  color:var(--muted);
+  font-size:0.78rem;
+  font-weight:700;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+}
+.portal-form input,.portal-form select{
+  width:100%;
+  border:1px solid rgba(15,118,110,0.2);
+  border-radius:14px;
+  background:rgba(255,255,255,0.94);
+  color:var(--text);
+  font:inherit;
+  padding:12px 14px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.6);
+}
+.portal-form input:focus,.portal-form select:focus{
+  outline:2px solid rgba(15,118,110,0.18);
+  border-color:var(--accent);
+}
+.portal-form input[type=checkbox]{
+  width:1.2rem;
+  height:1.2rem;
+  padding:0;
+  margin-top:4px;
+  accent-color:var(--accent);
+  justify-self:end;
+}
+.toggle-row{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:12px;
+  align-items:start;
+}
+.toggle-row label{margin:0;padding-top:2px}
+.password-row{
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) auto;
+  gap:10px;
+  align-items:end;
+}
+.password-row label{grid-column:1 / -1}
+.password-toggle{
+  width:auto;
+  min-width:82px;
+  border:1px solid rgba(15,118,110,0.22);
+  border-radius:14px;
+  background:rgba(216,241,237,0.68);
+  color:var(--hero);
+  font-weight:700;
+  padding:12px 14px;
+  cursor:pointer;
+}
+.de{
+  border-left:4px solid var(--bad);
+  padding-left:14px;
+}
+.em{
+  margin-top:8px;
+  color:var(--bad);
+  font-size:0.84rem;
+  line-height:1.5;
+}
+.portal-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:14px;
+  align-items:center;
+  justify-content:space-between;
+  padding-top:8px;
+}
+.portal-button-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-left:auto;
+}
+.portal-help{
+  margin:0;
+  max-width:32rem;
+  color:var(--muted);
+  line-height:1.55;
+}
+.portal-meta{
+  margin-top:16px;
+  color:var(--muted);
+  font-weight:700;
+}
+.portal-meta-muted{font-weight:600}
+.portal-meta-note{
+  margin:12px 0 0;
+  color:var(--muted);
+  font-weight:600;
+  line-height:1.6;
+}
+.console-toolbar{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  margin-top:18px;
+}
+.console-toolbar button{
+  width:auto;
+}
+.console-page-grid{
+  grid-template-columns:minmax(0, 1fr);
+}
+.console-view{
+  min-height:420px;
+  max-height:68vh;
+  overflow:auto;
+  margin-top:18px;
+  padding:18px;
+  border-radius:20px;
+  border:1px solid rgba(23,55,72,0.1);
+  background:#11222d;
+  color:#dbe9ee;
+  box-shadow:inset 0 1px 2px rgba(255,255,255,0.04);
+  font-family:"Courier New","SFMono-Regular",monospace;
+  font-size:0.92rem;
+  line-height:1.5;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+.console-status{
+  margin-top:12px;
+  color:var(--muted);
+  font-weight:700;
+}
+.console-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-top:18px;
+}
+.console-command-form{
+  display:grid;
+  gap:12px;
+  margin-top:18px;
+}
+.console-command-row{
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) auto;
+  gap:12px;
+  align-items:end;
+}
+.console-command-row input{
+  width:100%;
+  border:1px solid rgba(15,118,110,0.2);
+  border-radius:14px;
+  background:rgba(255,255,255,0.94);
+  color:var(--text);
+  font:inherit;
+  padding:12px 14px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.6);
+}
+.console-command-row input:focus{
+  outline:2px solid rgba(15,118,110,0.18);
+  border-color:var(--accent);
+}
+.console-note{
+  margin-top:12px;
+  color:var(--muted);
+  line-height:1.6;
+}
+@media (max-width: 720px){
+  .portal-mode-bar{align-items:flex-start}
+  .portal-actions{justify-content:flex-start}
+  .portal-button-row{width:100%;margin-left:0}
+  .portal-button-row .button-link{width:100%}
+  .password-row{grid-template-columns:1fr}
+  .password-toggle{width:100%}
+  .console-command-row{grid-template-columns:1fr}
 }
 )clockcss";
 
@@ -843,6 +1303,36 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
 document.addEventListener('DOMContentLoaded', function () {
   var nav = document.getElementById('portal-nav-links');
   var runtimeMeta = document.getElementById('portal-runtime');
+  var modeButtons = Array.prototype.slice.call(document.querySelectorAll('[data-config-view]'));
+  var modeStorageKey = 'ledsmartclock-config-mode';
+  var basicVisibleGroups = ['iwcSys', 'Display', 'Clock', 'CurrentTemp', 'CurrentWeather', 'DailyWeather', 'Alerts'];
+  var basicVisibleFields = {
+    iwcThingName: true,
+    iwcWifiSsid: true,
+    iwcWifiPassword: true,
+    iwcApPassword: true,
+    ipgeoapi: true,
+    weatherapi: true,
+    imperial: true,
+    brightness_level: true,
+    text_scroll_speed: true,
+    enable_alertflash: true,
+    show_date: true,
+    date_interval: true,
+    twelve_clock: true,
+    enable_fixed_tz: true,
+    fixed_offset: true,
+    show_current_temp: true,
+    current_temp_interval: true,
+    current_temp_duration: true,
+    show_current_weather: true,
+    current_weather_interval: true,
+    show_daily_weather: true,
+    daily_weather_interval: true,
+    show_aqi: true,
+    aqi_interval: true,
+    alert_interval: true
+  };
   var sectionNotes = {
     iwcSys: 'Network identity, credentials, API keys, and maintenance controls.',
     Display: 'Brightness, scrolling, colors, and date messaging.',
@@ -864,6 +1354,10 @@ document.addEventListener('DOMContentLoaded', function () {
   function buildFieldCard(node) {
     var card = document.createElement('div');
     card.className = 'portal-field-card';
+    var control = node.querySelector ? node.querySelector('[id]') : null;
+    if (control && control.id) {
+      card.dataset.configId = control.id;
+    }
     card.appendChild(node);
     return card;
   }
@@ -1003,6 +1497,52 @@ document.addEventListener('DOMContentLoaded', function () {
     systemGroup.dataset.portalStructured = 'true';
   }
 
+  function applyConfigMode(mode) {
+    var effectiveMode = mode === 'advanced' ? 'advanced' : 'basic';
+
+    document.querySelectorAll('.portal-form > fieldset[id]').forEach(function (group) {
+      var groupVisible = effectiveMode === 'advanced' || basicVisibleGroups.indexOf(group.id) !== -1;
+      group.hidden = !groupVisible;
+      if (!groupVisible) {
+        return;
+      }
+
+      group.querySelectorAll('.portal-field-card').forEach(function (card) {
+        var configId = card.dataset.configId || '';
+        var visible = effectiveMode === 'advanced' || !!basicVisibleFields[configId];
+        card.hidden = !visible;
+      });
+
+      group.querySelectorAll('.portal-subsection').forEach(function (section) {
+        var visibleCards = Array.prototype.some.call(section.querySelectorAll('.portal-field-card'), function (card) {
+          return !card.hidden;
+        });
+        section.hidden = !visibleCards;
+      });
+
+      var visibleStandaloneCards = Array.prototype.some.call(group.children, function (child) {
+        if (!child.classList || !child.classList.contains('portal-field-grid')) {
+          return false;
+        }
+        return Array.prototype.some.call(child.querySelectorAll('.portal-field-card'), function (card) {
+          return !card.hidden;
+        });
+      });
+      var visibleSubsections = Array.prototype.some.call(group.querySelectorAll('.portal-subsection'), function (section) {
+        return !section.hidden;
+      });
+      group.hidden = !visibleStandaloneCards && !visibleSubsections && group.id !== 'iwcSys';
+    });
+
+    modeButtons.forEach(function (button) {
+      button.classList.toggle('is-active', button.dataset.configView === effectiveMode);
+    });
+
+    if (runtimeMeta) {
+      runtimeMeta.dataset.configMode = effectiveMode;
+    }
+  }
+
   document.querySelectorAll('.portal-form > fieldset[id]').forEach(function (group) {
     addSectionNote(group);
   });
@@ -1062,6 +1602,65 @@ document.addEventListener('DOMContentLoaded', function () {
   if (!nav.children.length) {
     nav.style.display = 'none';
   }
+
+  modeButtons.forEach(function (button) {
+    button.addEventListener('click', function () {
+      var mode = button.dataset.configView === 'advanced' ? 'advanced' : 'basic';
+      try {
+        window.localStorage.setItem(modeStorageKey, mode);
+      } catch (error) {
+      }
+      applyConfigMode(mode);
+    });
+  });
+
+  var initialMode = 'basic';
+  try {
+    if (window.localStorage.getItem(modeStorageKey) === 'advanced') {
+      initialMode = 'advanced';
+    }
+  } catch (error) {
+  }
+  applyConfigMode(initialMode);
+});
+)clockjs";
+
+const char kOnboardingScript[] PROGMEM = R"clockjs(
+document.addEventListener('DOMContentLoaded', function () {
+  var steps = Array.prototype.slice.call(document.querySelectorAll('.onboarding-step[data-step]'));
+  if (!steps.length) {
+    return;
+  }
+
+  var currentStep = 1;
+  var totalSteps = steps.length;
+
+  function showStep(stepNumber) {
+    currentStep = Math.max(1, Math.min(totalSteps, stepNumber));
+    steps.forEach(function (step) {
+      var matches = Number(step.dataset.step || '1') === currentStep;
+      step.hidden = !matches;
+    });
+
+    document.querySelectorAll('[data-step-pill]').forEach(function (pill) {
+      var active = Number(pill.dataset.stepPill || '1') === currentStep;
+      pill.classList.toggle('tone-good', active);
+    });
+  }
+
+  document.querySelectorAll('[data-next-step]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      showStep(Number(button.dataset.nextStep || String(currentStep + 1)));
+    });
+  });
+
+  document.querySelectorAll('[data-prev-step]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      showStep(Number(button.dataset.prevStep || String(currentStep - 1)));
+    });
+  });
+
+  showStep(1);
 });
 )clockjs";
 
@@ -1447,6 +2046,176 @@ bool isSetupPortalState()
   iotwebconf::NetworkState state = iotWebConf.getState();
   return state == iotwebconf::NotConfigured || state == iotwebconf::ApMode;
 }
+
+/** Returns true when the device is in its normal secured online state. */
+bool isProtectedPortalState()
+{
+  return iotWebConf.getState() == iotwebconf::OnLine;
+}
+
+/** Percent-encodes a path so it can safely round-trip through query parameters. */
+String urlEncode(const String &value)
+{
+  String encoded;
+  encoded.reserve(value.length() * 3U);
+
+  for (size_t index = 0; index < value.length(); ++index)
+  {
+    const unsigned char currentChar = static_cast<unsigned char>(value[index]);
+    if (isalnum(currentChar) || currentChar == '-' || currentChar == '_' || currentChar == '.' || currentChar == '~' ||
+        currentChar == '/' || currentChar == '?')
+    {
+      encoded += static_cast<char>(currentChar);
+      continue;
+    }
+
+    char hex[4];
+    snprintf(hex, sizeof(hex), "%%%02X", currentChar);
+    encoded += hex;
+  }
+
+  return encoded;
+}
+
+/** Extracts one cookie value from the collected Cookie header. */
+String cookieValue(const char *name)
+{
+  if (!server.hasHeader("Cookie"))
+    return String();
+
+  const String header = server.header("Cookie");
+  const String cookieName = String(name) + '=';
+  int start = header.indexOf(cookieName);
+  if (start < 0)
+    return String();
+
+  start += cookieName.length();
+  int end = header.indexOf(';', start);
+  String value = end >= 0 ? header.substring(start, end) : header.substring(start);
+  value.trim();
+  return value;
+}
+
+/** Returns true when the current browser session already holds a valid web-session cookie. */
+bool hasValidWebSession()
+{
+  if (!isProtectedPortalState())
+    return true;
+  if (webSessionToken[0] == '\0')
+    return false;
+  if (static_cast<uint32_t>(millis() - webSessionIssuedAt) > (kWebSessionLifetimeSeconds * 1000UL))
+    return false;
+
+  String cookieToken = cookieValue(kWebSessionCookieName);
+  return cookieToken.length() > 0 && strcmp(cookieToken.c_str(), webSessionToken) == 0;
+}
+
+/** Clears the in-memory web-session token. */
+void clearWebSessionState()
+{
+  webSessionToken[0] = '\0';
+  webSessionIssuedAt = 0;
+  consoleAccessToken[0] = '\0';
+  consoleAccessTokenIssuedAt = 0;
+}
+
+/** Writes a Set-Cookie header for the session token with the requested lifetime. */
+void sendSessionCookie(const String &token, uint32_t maxAgeSeconds)
+{
+  String cookie = String(kWebSessionCookieName) + '=' + token + F("; Path=/; SameSite=Lax; HttpOnly; Max-Age=") + String(maxAgeSeconds);
+  server.sendHeader("Set-Cookie", cookie);
+}
+
+/** Starts a fresh authenticated web session after the password form succeeds. */
+void issueWebSession()
+{
+  snprintf(webSessionToken, sizeof(webSessionToken), "%08lx%08lx%08lx%08lx",
+           static_cast<unsigned long>(esp_random()),
+           static_cast<unsigned long>(esp_random()),
+           static_cast<unsigned long>(esp_random()),
+           static_cast<unsigned long>(esp_random()));
+  webSessionIssuedAt = millis();
+  sendSessionCookie(String(webSessionToken), kWebSessionLifetimeSeconds);
+}
+
+/** Clears the browser cookie for the authenticated web session. */
+void clearWebSessionCookie()
+{
+  clearWebSessionState();
+  sendSessionCookie(String(), 0);
+}
+
+/** Returns the safe post-login redirect target requested by the browser. */
+String requestedNextPath()
+{
+  String nextPath = server.hasArg("next") ? server.arg("next") : String("/");
+  if (nextPath.length() == 0 || nextPath.charAt(0) != '/' || nextPath.startsWith("//"))
+    return String("/");
+  return nextPath;
+}
+
+/** Redirects the browser to the supplied local path. */
+void redirectTo(const String &location)
+{
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Location", location, true);
+  server.send(303, "text/plain", "");
+}
+
+/** Redirects unauthenticated users to the custom password login page. */
+void redirectToLogin(const String &nextPath)
+{
+  if (!isProtectedPortalState())
+  {
+    redirectTo(String(kOnboardingPath));
+    return;
+  }
+
+  redirectTo(String(kLoginPath) + F("?next=") + urlEncode(nextPath));
+}
+
+/** Prompts for the custom web login if the current request lacks a valid session. */
+bool authorizeAdminRequest()
+{
+  if (!isProtectedPortalState())
+    return true;
+  if (hasValidWebSession())
+    return true;
+
+  redirectToLogin(server.uri());
+  return false;
+}
+
+/** Returns true when a handler only needs to know if the active browser is already authenticated. */
+bool isAdminSessionAuthorized()
+{
+  return !isProtectedPortalState() || hasValidWebSession();
+}
+
+/** Provides IotWebConf with the current server request while honoring the custom session login. */
+class SessionWebRequestWrapper : public iotwebconf::WebRequestWrapper
+{
+public:
+  const String hostHeader() const override { return server.hostHeader(); }
+  IPAddress localIP() override { return server.client().localIP(); }
+  uint16_t localPort() override { return server.client().localPort(); }
+  const String uri() const override { return server.uri(); }
+  bool authenticate(const char *username, const char *password) override
+  {
+    (void)username;
+    (void)password;
+    return isAdminSessionAuthorized();
+  }
+  void requestAuthentication() override { redirectToLogin(server.uri()); }
+  bool hasArg(const String &name) override { return server.hasArg(name); }
+  String arg(const String name) override { return server.arg(name); }
+  void sendHeader(const String &name, const String &value, bool first = false) override { server.sendHeader(name, value, first); }
+  void setContentLength(const size_t contentLength) override { server.setContentLength(contentLength); }
+  void send(int code, const char *content_type = nullptr, const String &content = String("")) override { server.send(code, content_type, content); }
+  void sendContent(const String &content) override { server.sendContent(content); }
+  void stop() override { server.client().stop(); }
+};
 
 /** HTML-escapes text sourced from runtime or remote API data. */
 String htmlEscape(const String &value)
@@ -1952,9 +2721,11 @@ void appendDocumentHead(String &html, const char *title, bool autoRefresh)
     html += F("<noscript><meta http-equiv='refresh' content='15'></noscript>");
   html += F("<title>");
   html += htmlEscape(String(title));
-  html += F("</title><style>");
-  html += FPSTR(kWebThemeCss);
-  html += F("</style></head><body>");
+  html += F("</title><link rel='stylesheet' href='");
+  html += kThemeCssPath;
+  html += F("?v=");
+  html += VERSION_SEMVER;
+  html += F("'></head><body>");
 }
 
 /** Opens the live-refresh shell used by pages that update in place. */
@@ -2043,27 +2814,207 @@ void appendNotice(String &html, const char *toneClass, const String &message)
   html += F("</section>");
 }
 
-/** Renders the setup-focused landing page used in AP or not-configured mode. */
-void appendSetupPage(String &html)
+/** Builds the default onboarding draft from the current in-memory configuration values. */
+OnboardingDraft currentOnboardingDraft()
 {
+  OnboardingDraft draft;
+  draft.wifiSsid = String(iotWebConf.getWifiSsidParameter()->valueBuffer);
+  draft.wifiPassword = String(iotWebConf.getWifiPasswordParameter()->valueBuffer);
+  draft.adminPassword = String(iotWebConf.getApPasswordParameter()->valueBuffer);
+  draft.weatherApiKey = String(weatherapi.value());
+  draft.ipGeoApiKey = String(ipgeoapi.value());
+  draft.useFixedTimezone = enable_fixed_tz.isChecked();
+  draft.fixedOffset = fixed_offset.value();
+  return draft;
+}
+
+/** Copies a classic IotWebConf parameter buffer with bounds checking. */
+bool copyParameterValue(iotwebconf::Parameter &parameter, const String &value, const char *fieldLabel, String &error)
+{
+  if (value.length() + 1 > static_cast<size_t>(parameter.getLength()))
+  {
+    error = String(fieldLabel) + F(" is too long for this device.");
+    return false;
+  }
+
+  strlcpy(parameter.valueBuffer, value.c_str(), static_cast<size_t>(parameter.getLength()));
+  return true;
+}
+
+/** Copies a typed char-array parameter with bounds checking. */
+template <size_t N>
+bool copyParameterValue(iotwebconf::TextTParameter<N> &parameter, const String &value, const char *fieldLabel, String &error)
+{
+  if (value.length() + 1 > N)
+  {
+    error = String(fieldLabel) + F(" is too long for this device.");
+    return false;
+  }
+
+  strlcpy(parameter.value(), value.c_str(), N);
+  return true;
+}
+
+/** Builds an onboarding draft from the current POST body so invalid submissions can be re-rendered. */
+OnboardingDraft submittedOnboardingDraft()
+{
+  OnboardingDraft draft = currentOnboardingDraft();
+  draft.wifiSsid = server.hasArg("wifi_ssid") ? server.arg("wifi_ssid") : draft.wifiSsid;
+  draft.wifiPassword = server.hasArg("wifi_password") ? server.arg("wifi_password") : draft.wifiPassword;
+  draft.adminPassword = server.hasArg("admin_password") ? server.arg("admin_password") : draft.adminPassword;
+  draft.weatherApiKey = server.hasArg("weather_api") ? server.arg("weather_api") : draft.weatherApiKey;
+  draft.ipGeoApiKey = server.hasArg("ipgeo_api") ? server.arg("ipgeo_api") : draft.ipGeoApiKey;
+  draft.useFixedTimezone = server.hasArg("timezone_mode") && server.arg("timezone_mode") == "fixed";
+  if (server.hasArg("fixed_offset"))
+    draft.fixedOffset = static_cast<int8_t>(constrain(server.arg("fixed_offset").toInt(), -12, 12));
+  return draft;
+}
+
+/** Renders one consistent onboarding or login form field. */
+void appendFormField(String &html, const char *label, const char *name, const String &value,
+                     const char *type, const char *help = nullptr, const char *extraAttributes = nullptr)
+{
+  html += F("<div class='form-field'><label for='");
+  html += name;
+  html += F("'>");
+  html += htmlEscape(String(label));
+  html += F("</label><input id='");
+  html += name;
+  html += F("' name='");
+  html += name;
+  html += F("' type='");
+  html += type;
+  html += F("' value='");
+  html += htmlEscape(value);
+  html += F("'");
+  if (extraAttributes != nullptr && extraAttributes[0] != '\0')
+  {
+    html += ' ';
+    html += extraAttributes;
+  }
+  html += F(">");
+  if (help != nullptr && help[0] != '\0')
+  {
+    html += F("<p class='field-help'>");
+    html += htmlEscape(String(help));
+    html += F("</p>");
+  }
+  html += F("</div>");
+}
+
+/** Renders the physical password recovery instructions shared by onboarding and login. */
+void appendPasswordRecoveryPanel(String &html)
+{
+  html += F("<section class='recovery-panel'><h2>Password Recovery</h2><p>If you forget the web password, hold the configuration button on GPIO ");
+  html += String(CONFIG_PIN);
+  html += F(" while powering on or resetting the clock. The device will return to the recovery setup portal so you can set a new password. In recovery mode the setup access point uses the default password <code>");
+  html += htmlEscape(String(wifiInitialApPassword));
+  html += F("</code>.</p></section>");
+}
+
+/** Renders one compact self-test result card used at the end of onboarding. */
+void appendSelfTestItem(String &html, const char *title, const char *toneClass, const String &summary, const String &detail)
+{
+  html += F("<article class='self-test-item ");
+  html += toneClass;
+  html += F("'><h3>");
+  html += htmlEscape(String(title));
+  html += F("</h3><p><strong>");
+  html += htmlEscape(summary);
+  html += F("</strong><br>");
+  html += htmlEscape(detail);
+  html += F("</p></article>");
+}
+
+/** Renders the live hardware and service checks shown after onboarding saves. */
+void appendOnboardingSelfTest(String &html)
+{
+  const bool rtcReady = systemClock.isInit();
+  const bool lightReady = Tsl.available();
+  const bool gpsReady = gps.moduleDetected || GPS.charsProcessed() > 0;
+  const bool networkReady = iotWebConf.getState() == iotwebconf::OnLine;
+
+  html += F("<section class='card'><div class='card-header'><h2>Final Self-Test</h2><p class='card-subtitle'>Use this quick checklist to confirm the new setup is healthy. If Wi-Fi is still in captive-portal mode, disconnect from the setup network so the clock can join your configured SSID and finish the remaining checks.</p></div><div class='self-test-grid'>");
+  appendSelfTestItem(html, "RTC Chip", rtcReady ? "tone-good" : "tone-bad",
+                     rtcReady ? String(F("Detected")) : String(F("Unavailable")),
+                     rtcReady ? String(F("The DS3231 clock responded during startup.")) : String(F("The RTC did not report a valid startup time.")));
+  appendSelfTestItem(html, "Light Sensor", lightReady ? "tone-good" : "tone-warn",
+                     lightReady ? String(F("Detected")) : String(F("Waiting")),
+                     lightReady ? String(F("Ambient brightness control is available.")) : String(F("The TSL2561 sensor has not reported ready yet.")));
+  appendSelfTestItem(html, "GPS Receiver", gpsReady ? "tone-good" : "tone-warn",
+                     gpsReady ? String(F("UART active")) : String(F("No UART traffic yet")),
+                     gpsReady ? String(F("The GPS parser is receiving data from the module.")) : String(F("Keep the GPS powered and check for satellite traffic after setup.")));
+  appendSelfTestItem(html, "Network", networkReady ? "tone-good" : "tone-warn",
+                     networkReady ? String(F("Connected")) : String(F("Waiting for Wi-Fi")),
+                     networkReady ? String(F("The clock is online at ")) + WiFi.localIP().toString()
+                                  : String(F("Disconnect from the setup AP so the clock can join the configured Wi-Fi network.")));
+  appendSelfTestItem(html, "Weather APIs", isApiValid(weatherapi.value()) ? "tone-good" : "tone-warn",
+                     isApiValid(weatherapi.value()) ? String(F("Configured")) : String(F("Missing OpenWeather key")),
+                     isApiValid(weatherapi.value()) ? String(F("Weather, forecast, reverse geocode, and AQI requests can run once networking is ready."))
+                                                    : String(F("Add the OpenWeather key in onboarding or advanced configuration.")));
+  appendSelfTestItem(html, "Timezone", enable_fixed_tz.isChecked() ? "tone-good" : "tone-neutral",
+                     enable_fixed_tz.isChecked() ? String(F("Fixed GMT offset")) : String(F("Automatic timezone")),
+                     enable_fixed_tz.isChecked() ? String(F("Using GMT ")) + String(fixed_offset.value())
+                                                 : String(F("The clock will use geolocation or saved timezone data for DST-aware local time.")));
+  html += F("</div><div class='action-row'>");
+  html += F("<a class='button-link secondary' href='");
+  html += kOnboardingMatrixTestPath;
+  html += F("?return=");
+  html += urlEncode(String(kOnboardingPath) + F("?saved=1"));
+  html += F("'>Run Matrix Test</a>");
+  html += F("<a class='button-link ghost' href='/'>Continue to the Clock</a>");
+  html += F("<a class='button-link ghost' href='/config'>Open Advanced Configuration</a>");
+  html += F("</div></section>");
+}
+
+/** Renders the password-only login page that protects the normal web UI. */
+void appendLoginPage(String &html, const char *noticeToneClass, const String &noticeMessage, const String &nextPath)
+{
+  appendDocumentHead(html, "LED Smart Clock Login", false);
+
+  html += F("<div class='auth-shell'><header class='hero'>");
+  html += F("<p class='eyebrow'>LED Smart Clock Secure Access</p>");
+  html += F("<h1>Enter Password</h1>");
+  html += F("<p class='lede'>The dashboard, diagnostics, console, firmware tools, and configuration portal all use the password set for this clock. Enter it once to start a secure browser session.</p>");
+  html += F("</header>");
+
+  if (noticeToneClass != nullptr && noticeMessage.length() > 0)
+    appendNotice(html, noticeToneClass, noticeMessage);
+
+  html += F("<section class='auth-card'><div class='card-header'><h2>Web Login</h2><p class='card-subtitle'>This login only asks for the password. The username is fixed internally and is not shown on the custom web interface.</p></div>");
+  html += F("<form class='auth-form' method='POST' action='");
+  html += kLoginPath;
+  html += F("'><input type='hidden' name='next' value='");
+  html += htmlEscape(nextPath);
+  html += F("'><div class='field-grid'>");
+  appendFormField(html, "Password", "password", String(), "password",
+                  "This is the same password used to secure the setup portal and the normal web interface.",
+                  "autocomplete='current-password' required");
+  html += F("</div><div class='onboarding-actions'><span class='spacer'></span><button type='submit'>Sign In</button></div></form></section>");
+
+  appendPasswordRecoveryPanel(html);
+  html += F("</div></body></html>");
+}
+
+/** Renders the first-boot onboarding flow used in AP or recovery mode. */
+void appendSetupPage(String &html, const OnboardingDraft *draft, const char *noticeToneClass, const String &noticeMessage, bool showSelfTest)
+{
+  OnboardingDraft effectiveDraft = draft != nullptr ? *draft : currentOnboardingDraft();
   appendDocumentHead(html, "LED Smart Clock Setup", false);
 
   html += F("<div class='shell'><header class='hero'>");
   html += F("<p class='eyebrow'>LED Smart Clock</p>");
-  html += F("<h1>Setup Portal</h1>");
-  html += F("<p class='lede'>Use the configuration page to join Wi-Fi, set admin credentials, and finish the initial weather and location setup for firmware v");
+  html += F("<h1>First-Boot Onboarding</h1>");
+  html += F("<p class='lede'>Walk through Wi-Fi, the clock password, API keys, timezone behavior, and a final self-test for firmware v");
   html += VERSION_SEMVER;
   html += F(".</p><div class='action-row'>");
-  html += F("<a class='button-link primary' href='/config'>Open Configuration</a>");
+  html += F("<a class='button-link primary' href='");
+  html += kConfigImportPath;
+  html += F("'>Import Existing Backup</a>");
+  html += F("<a class='button-link secondary' href='/config'>Advanced Configuration</a>");
   html += F("<a class='button-link secondary' href='");
   html += kDiagnosticsPath;
   html += F("'>Diagnostics</a>");
-  html += F("<a class='button-link secondary' href='");
-  html += kConsolePath;
-  html += F("'>Console</a>");
-  html += F("<a class='button-link secondary' href='");
-  html += kConfigImportPath;
-  html += F("'>Import Backup</a>");
   html += F("</div><div class='portal-chip-row'>");
   appendStatusChip(html, "State", htmlEscape(currentConnectionStateLabel()));
   appendStatusChip(html, "Access Point", htmlEscape(String(thingName)));
@@ -2071,20 +3022,77 @@ void appendSetupPage(String &html)
   html += F("</div><div class='metric-grid'>");
   appendMetricCard(html, "Firmware", htmlEscape(String(VERSION_SEMVER)), "tone-neutral");
   appendMetricCard(html, "Wi-Fi Mode", F("Captive Portal"), "tone-warn");
-  appendMetricCard(html, "Weather API", isApiValid(weatherapi.value()) ? F("Configured") : F("Needed"), isApiValid(weatherapi.value()) ? "tone-good" : "tone-warn");
-  appendMetricCard(html, "IP Geo API", isApiValid(ipgeoapi.value()) ? F("Configured") : F("Needed"), isApiValid(ipgeoapi.value()) ? "tone-good" : "tone-warn");
+  appendMetricCard(html, "Web Password", effectiveDraft.adminPassword.length() > 0 ? F("Set") : F("Needed"), effectiveDraft.adminPassword.length() > 0 ? "tone-good" : "tone-warn");
+  appendMetricCard(html, "Weather API", isApiValid(weatherapi.value()) ? F("Configured") : F("Optional"), isApiValid(weatherapi.value()) ? "tone-good" : "tone-warn");
   html += F("</div></header>");
 
-  appendNotice(html, "notice-warn", F("The landing page switches to the live status dashboard once Wi-Fi and the basic configuration are in place."));
-  appendNotice(html, "notice-good", F("Already have a backup from another clock or older firmware? Import it before editing settings so Wi-Fi, API keys, and display preferences can be restored in one step."));
+  appendNotice(html, "notice-good", F("Already have a backup from another clock or older firmware? Import it first so Wi-Fi credentials, passwords, API keys, and display preferences all restore in one step."));
+  if (noticeToneClass != nullptr && noticeMessage.length() > 0)
+    appendNotice(html, noticeToneClass, noticeMessage);
 
-  html += F("<section class='setup-steps'>");
-  html += F("<article class='setup-step'><h3>1. Join the clock</h3><p>Connect to the <strong>");
-  html += htmlEscape(String(thingName));
-  html += F("</strong> access point, then open the configuration page or import an existing backup.</p></article>");
-  html += F("<article class='setup-step'><h3>2. Restore or enter the essentials</h3><p>Either import a previous JSON backup or save the Wi-Fi network, admin password, AP password, and API keys so the clock can resolve time, weather, and location data.</p></article>");
-  html += F("<article class='setup-step'><h3>3. Finish the display setup</h3><p>Tune brightness, date, alerts, AQI, and sunrise or sunset behavior once the device joins your normal network.</p></article>");
-  html += F("</section></div></body></html>");
+  html += F("<section class='card'><div class='card-header'><h2>Guided Setup</h2><p class='card-subtitle'>Without JavaScript every section stays visible. With JavaScript enabled, the Next and Back buttons turn this into a focused step-by-step setup flow.</p></div><div class='wizard-progress'>");
+  html += F("<span class='step-pill' data-step-pill='1'><strong>1</strong>Wi-Fi & Password</span>");
+  html += F("<span class='step-pill' data-step-pill='2'><strong>2</strong>API Keys</span>");
+  html += F("<span class='step-pill' data-step-pill='3'><strong>3</strong>Timezone</span>");
+  html += F("<span class='step-pill' data-step-pill='4'><strong>4</strong>Review & Save</span></div>");
+  html += F("<form class='onboarding-form' method='POST' action='");
+  html += kOnboardingPath;
+  html += F("'>");
+
+  html += F("<section class='onboarding-step' data-step='1'><div class='card-header'><h2>Step 1: Wi-Fi & Password</h2><p class='card-subtitle'>Tell the clock which Wi-Fi network to join and set the password that secures the setup portal plus the full web interface after onboarding is finished.</p></div><div class='field-grid'>");
+  appendFormField(html, "Wi-Fi SSID", "wifi_ssid", effectiveDraft.wifiSsid, "text",
+                  "This is the normal Wi-Fi network the clock should join after setup.", "autocomplete='username' required");
+  appendFormField(html, "Wi-Fi Password", "wifi_password", effectiveDraft.wifiPassword, "password",
+                  "Leave blank only for an open Wi-Fi network.", "autocomplete='current-password'");
+  appendFormField(html, "Clock Web Password", "admin_password", effectiveDraft.adminPassword, "password",
+                  "This one password protects the dashboard, diagnostics, console, firmware page, configuration portal, and the setup AP.",
+                  "autocomplete='new-password' required minlength='8'");
+  html += F("</div><div class='onboarding-actions'><span class='spacer'></span><button type='button' data-next-step='2'>Next: API Keys</button></div></section>");
+
+  html += F("<section class='onboarding-step' data-step='2'><div class='card-header'><h2>Step 2: API Keys</h2><p class='card-subtitle'>Add the service keys the clock uses for weather, air quality, reverse geocoding, and automatic timezone/location fallback.</p></div><div class='field-grid'>");
+  appendFormField(html, "OpenWeather API Key", "weather_api", effectiveDraft.weatherApiKey, "text",
+                  "Recommended. Used for current weather, forecast, AQI, and reverse geocoding.", "autocomplete='off'");
+  appendFormField(html, "IPGeolocation.io API Key", "ipgeo_api", effectiveDraft.ipGeoApiKey, "text",
+                  "Optional but recommended for automatic timezone and coarse IP location fallback.", "autocomplete='off'");
+  html += F("</div><p class='field-help'>If you are restoring from a backup, these keys are usually already included there.</p><div class='onboarding-actions'><button type='button' class='button-link ghost' data-prev-step='1'>Back</button><span class='spacer'></span><button type='button' data-next-step='3'>Next: Timezone</button></div></section>");
+
+  html += F("<section class='onboarding-step' data-step='3'><div class='card-header'><h2>Step 3: Timezone Behavior</h2><p class='card-subtitle'>Choose whether the clock should determine local time automatically or always use a fixed GMT offset.</p></div><div class='field-grid'><div class='form-field'><label for='timezone_mode'>Timezone Mode</label><select id='timezone_mode' name='timezone_mode'><option value='auto'");
+  if (!effectiveDraft.useFixedTimezone)
+    html += F(" selected");
+  html += F(">Automatic (recommended)</option><option value='fixed'");
+  if (effectiveDraft.useFixedTimezone)
+    html += F(" selected");
+  html += F(">Fixed GMT offset</option></select><p class='field-help'>Automatic mode allows DST-aware timezone handling when the clock knows its location or saved timezone.</p></div>");
+  appendFormField(html, "Fixed GMT Offset", "fixed_offset", String(effectiveDraft.fixedOffset), "number",
+                  "Only used when Fixed GMT offset mode is selected above.", "min='-12' max='12' step='1'");
+  html += F("</div><div class='onboarding-actions'><button type='button' class='button-link ghost' data-prev-step='2'>Back</button><span class='spacer'></span><button type='button' data-next-step='4'>Next: Review</button></div></section>");
+
+  html += F("<section class='onboarding-step' data-step='4'><div class='card-header'><h2>Step 4: Review & Save</h2><p class='card-subtitle'>Save the onboarding values into the clock, then use the self-test below to verify hardware and service readiness.</p></div><div class='self-test-grid'>");
+  appendSelfTestItem(html, "Wi-Fi Ready", effectiveDraft.wifiSsid.length() > 0 ? "tone-good" : "tone-bad",
+                     effectiveDraft.wifiSsid.length() > 0 ? String(F("SSID entered")) : String(F("Missing SSID")),
+                     effectiveDraft.wifiSsid.length() > 0 ? String(F("The clock can attempt to join ")) + effectiveDraft.wifiSsid
+                                                          : String(F("Enter the Wi-Fi network name before saving onboarding.")));
+  appendSelfTestItem(html, "Password Ready", effectiveDraft.adminPassword.length() >= 8 ? "tone-good" : "tone-bad",
+                     effectiveDraft.adminPassword.length() >= 8 ? String(F("Password set")) : String(F("Password too short")),
+                     effectiveDraft.adminPassword.length() >= 8 ? String(F("The same password will secure both setup and the full web UI."))
+                                                                : String(F("Use at least 8 characters so the clock can stay in secured mode.")));
+  appendSelfTestItem(html, "OpenWeather", effectiveDraft.weatherApiKey.length() > 0 ? "tone-good" : "tone-warn",
+                     effectiveDraft.weatherApiKey.length() > 0 ? String(F("Configured")) : String(F("Optional but missing")),
+                     effectiveDraft.weatherApiKey.length() > 0 ? String(F("Weather, AQI, and reverse-geocode services can run."))
+                                                               : String(F("You can still finish setup now and add the key later.")));
+  appendSelfTestItem(html, "Timezone", effectiveDraft.useFixedTimezone ? "tone-good" : "tone-neutral",
+                     effectiveDraft.useFixedTimezone ? String(F("Fixed GMT offset")) : String(F("Automatic")),
+                     effectiveDraft.useFixedTimezone ? String(F("The clock will always use GMT ")) + String(effectiveDraft.fixedOffset)
+                                                     : String(F("The clock will use automatic location and timezone data when available.")));
+  html += F("</div><div class='onboarding-actions'><button type='button' class='button-link ghost' data-prev-step='3'>Back</button><span class='spacer'></span><button type='submit'>Save Onboarding</button></div></section></form></section>");
+
+  if (showSelfTest)
+    appendOnboardingSelfTest(html);
+
+  appendPasswordRecoveryPanel(html);
+  html += F("<script>");
+  html += FPSTR(kOnboardingScript);
+  html += F("</script></div></body></html>");
 }
 
 /** Renders the themed firmware update page and optional status notice. */
@@ -2104,6 +3112,9 @@ void appendFirmwareUpdatePage(String &html, const char *noticeToneClass, const S
   html += F("<a class='button-link secondary' href='");
   html += kConsolePath;
   html += F("'>Console</a>");
+  html += F("<a class='button-link ghost' href='");
+  html += kLogoutPath;
+  html += F("'>Log Out</a>");
   html += F("</div><div class='portal-chip-row'>");
   appendStatusChip(html, "Firmware", htmlEscape(String(VERSION_SEMVER)));
   appendStatusChip(html, "Address", activeAddressLabel());
@@ -2178,6 +3189,9 @@ void appendConfigBackupPage(String &html, const char *noticeToneClass, const Str
   html += F("<a class='button-link secondary' href='");
   html += kConsolePath;
   html += F("'>Console</a>");
+  html += F("<a class='button-link ghost' href='");
+  html += kLogoutPath;
+  html += F("'>Log Out</a>");
   html += F("</div><div class='portal-chip-row'>");
   appendStatusChip(html, "Firmware", htmlEscape(String(VERSION_SEMVER)));
   appendStatusChip(html, "Address", activeAddressLabel());
@@ -2237,6 +3251,7 @@ void appendConsolePage(String &html, const String &accessToken)
   html += F("<a class='button-link secondary' href='");
   html += kConsoleDownloadPath;
   html += F("'>Download Log</a>");
+  html += F("<a class='button-link secondary' href='#console-commands'>Commands</a>");
   html += F("</div><div class='portal-chip-row'>");
   appendStatusChip(html, "Address", activeAddressLabel());
   appendStatusChip(html, "Cursor", htmlEscape(String(cursor)));
@@ -2271,7 +3286,7 @@ void appendConsolePage(String &html, const String &accessToken)
   html += htmlEscape(snapshot);
   html += F("</pre><p id='console-status' class='console-status'>Connecting to live console feed...</p></section>");
 
-  appendCardStart(html, "Send Debug Commands", "Commands map to the existing serial shortcuts. The first non-space character is used, so enter values such as h, d, g, or s.");
+  html += F("<section id='console-commands' class='card card-span'><div class='card-header'><h2>Send Debug Commands</h2><p class='card-subtitle'>Commands map to the existing serial shortcuts. The first non-space character is used, so enter values such as h, d, g, or s.</p></div><dl class='kv-list'>");
   appendKeyValueRow(html, "Common Commands", F("<code>h</code> help, <code>d</code> dump debug, <code>g</code> GPS status, <code>s</code> coroutine states, <code>l</code> debug logging"));
   appendKeyValueRow(html, "Display Tests", F("<code>a</code> AQI, <code>w</code> current weather, <code>e</code> date, <code>q</code> daily weather, <code>t</code> alert flash"));
   appendKeyValueRow(html, "Caution", F("<code>r</code> queues a reboot from the web console after the HTTP response returns"));
@@ -2287,6 +3302,17 @@ void appendConsolePage(String &html, const String &accessToken)
   html += F("</main><script>");
   html += FPSTR(kConsolePageScript);
   html += F("</script></div></body></html>");
+}
+
+/** Serves the shared stylesheet used by the dashboard, config portal, and console pages. */
+void handleThemeCss()
+{
+  String css;
+  css.reserve(22000);
+  css += FPSTR(kWebThemeCss);
+  css += FPSTR(kPortalConsoleCss);
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "text/css; charset=UTF-8", css);
 }
 
 /** Renders the live diagnostics shell contents that can be refreshed in place. */
@@ -2310,6 +3336,9 @@ void appendDiagnosticsContent(String &html)
   html += F("<a class='button-link secondary' href='");
   html += kFirmwareUpdatePath;
   html += F("'>Firmware Update</a>");
+  html += F("<a class='button-link ghost' href='");
+  html += kLogoutPath;
+  html += F("'>Log Out</a>");
   html += F("</div><div class='portal-chip-row'>");
   appendStatusChip(html, "State", htmlEscape(currentConnectionStateLabel()));
   appendStatusChip(html, "Address", activeAddressLabel());
@@ -2474,6 +3503,9 @@ void appendStatusContent(String &html)
   html += kConsolePath;
   html += F("'>Console</a>");
   html += F("<a class='button-link secondary' href='/firmware'>Firmware Update</a>");
+  html += F("<a class='button-link ghost' href='");
+  html += kLogoutPath;
+  html += F("'>Log Out</a>");
   html += F("<a class='button-link danger' href='/reboot'>Reboot</a>");
   html += F("</div><div class='portal-chip-row'>");
   appendStatusChip(html, "State", htmlEscape(currentConnectionStateLabel()));
@@ -2610,9 +3642,14 @@ public:
     return F("<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1, user-scalable=no'><title>LED Smart Clock Configuration</title>");
   }
 
+  String getStyle() override
+  {
+    return String(F("<link rel='stylesheet' href='")) + kThemeCssPath + F("?v=") + VERSION_SEMVER + F("'>");
+  }
+
   String getStyleInner() override
   {
-    return FPSTR(kWebThemeCss);
+    return String();
   }
 
   String getScriptInner() override
@@ -2635,11 +3672,21 @@ public:
     html += F("</p><h1>Configuration</h1><p class='portal-lede'>Tune Wi-Fi, display behavior, weather services, alerts, and location rules from a single cohesive control surface.</p><div class='portal-chip-row'>");
   appendStatusChip(html, "State", htmlEscape(currentConnectionStateLabel()));
   appendStatusChip(html, "Address", activeAddressLabel());
-  html += F("</div></header><div id='portal-runtime' hidden data-ntp-server='");
+    html += F("</div><div class='action-row'>");
+    html += F("<a class='button-link primary' href='/'>Dashboard</a>");
+    html += F("<a class='button-link secondary' href='");
+    html += kDiagnosticsPath;
+    html += F("'>Diagnostics</a>");
+    html += F("<a class='button-link secondary' href='");
+    html += kConsolePath;
+    html += F("'>Console</a>");
+    html += F("<a class='button-link ghost' href='");
+    html += kLogoutPath;
+    html += F("'>Log Out</a></div></header><div id='portal-runtime' hidden data-ntp-server='");
   html += ntpServerLabel();
   html += F("' data-ntp-source='");
   html += ntpServerSourceLabel();
-  html += F("'></div><nav class='portal-nav' id='portal-nav-links'></nav>");
+  html += F("'></div><div class='portal-mode-bar'><p class='portal-mode-help'>Basic mode highlights the settings most people change often. Advanced mode reveals every saved option and maintenance control.</p><div class='portal-mode-toggle'><button type='button' data-config-view='basic'>Basic Mode</button><button type='button' data-config-view='advanced'>Advanced Mode</button></div></div><nav class='portal-nav' id='portal-nav-links'></nav>");
     html += F("<section class='portal-card portal-intro'><div class='card-header'><h2>Backup & Restore</h2><p class='card-subtitle'>Download a JSON backup before firmware work or major changes, then use restore to seed this clock from a previous setup. Import matches fields by stable IDs, so older backups can still restore the settings this firmware recognizes.</p></div><div class='action-row'>");
     html += F("<a class='button-link primary' href='");
     html += kConfigExportPath;
@@ -2661,7 +3708,7 @@ public:
 
   String getFormEnd() override
   {
-    return F("<div class='portal-actions'><p class='portal-help'>Save once you finish editing a batch of settings. Validation errors will stay inside the affected section. Cancel returns to the dashboard without writing any of the unsaved form changes.</p><div class='portal-button-row'><a class='button-link ghost' href='/'>Cancel</a><a class='button-link danger' href='/reboot'>Reboot</a><button type='submit'>Save Configuration</button></div></div></form>");
+    return F("<div class='portal-actions'><p class='portal-help'>Save once you finish editing a batch of settings. Validation errors will stay inside the affected section. Cancel returns to the dashboard without writing any of the unsaved form changes.</p><div class='portal-button-row'><a class='button-link ghost' href='/'>Cancel</a><a class='button-link ghost' href='/logout'>Log Out</a><a class='button-link danger' href='/reboot'>Reboot</a><button type='submit'>Save Configuration</button></div></div></form>");
   }
 
   String getUpdate() override
@@ -2679,17 +3726,194 @@ public:
 
 ClockHtmlFormatProvider clockHtmlFormatProvider;
 
-/** Prompts for admin credentials before executing a privileged web action. */
-bool authorizeAdminRequest()
+/** Convenience overload used by the root handler when no custom onboarding state is needed. */
+void appendSetupPage(String &html)
 {
-  if (iotWebConf.getState() != iotwebconf::OnLine)
-    return true;
+  appendSetupPage(html, nullptr, nullptr, String(), false);
+}
 
-  if (server.authenticate(IOTWEBCONF_ADMIN_USER_NAME, iotWebConf.getApPasswordParameter()->valueBuffer))
-    return true;
+/** Validates and writes the submitted onboarding values into the live configuration. */
+bool applyOnboardingDraft(const OnboardingDraft &draft, String &error)
+{
+  error = "";
 
-  server.requestAuthentication();
-  return false;
+  const String wifiSsid = draft.wifiSsid;
+  const String adminPassword = draft.adminPassword;
+  if (wifiSsid.length() == 0)
+  {
+    error = F("Wi-Fi SSID is required before onboarding can finish.");
+    return false;
+  }
+  if (adminPassword.length() < 8)
+  {
+    error = F("Choose a password that is at least 8 characters long.");
+    return false;
+  }
+
+  if (!copyParameterValue(*iotWebConf.getWifiSsidParameter(), wifiSsid, "Wi-Fi SSID", error) ||
+      !copyParameterValue(*iotWebConf.getWifiPasswordParameter(), draft.wifiPassword, "Wi-Fi password", error) ||
+      !copyParameterValue(*iotWebConf.getApPasswordParameter(), adminPassword, "Clock password", error) ||
+      !copyParameterValue(weatherapi, draft.weatherApiKey, "OpenWeather API key", error) ||
+      !copyParameterValue(ipgeoapi, draft.ipGeoApiKey, "IPGeolocation API key", error))
+  {
+    return false;
+  }
+
+  enable_fixed_tz.value() = draft.useFixedTimezone;
+  fixed_offset.value() = draft.fixedOffset;
+  normalizeLoadedConfigValues();
+  iotWebConf.saveConfig();
+  return true;
+}
+
+/** Handles GET requests for the password-only login page. */
+void handleLoginPage()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+
+  if (!isProtectedPortalState())
+  {
+    redirectTo(String(kOnboardingPath));
+    return;
+  }
+
+  if (hasValidWebSession())
+  {
+    redirectTo(requestedNextPath());
+    return;
+  }
+
+  String html;
+  html.reserve(7000);
+  appendLoginPage(html,
+                  server.hasArg("logged_out") ? "notice-good" : nullptr,
+                  server.hasArg("logged_out") ? String(F("You have been signed out of the clock web interface.")) : String(),
+                  requestedNextPath());
+  server.send(200, "text/html; charset=UTF-8", html);
+}
+
+/** Handles POST requests from the password-only login form. */
+void handleLoginPost()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+
+  if (!isProtectedPortalState())
+  {
+    redirectTo(String(kOnboardingPath));
+    return;
+  }
+
+  String html;
+  html.reserve(7000);
+  const String submittedPassword = server.hasArg("password") ? server.arg("password") : String();
+  const String nextPath = requestedNextPath();
+  if (submittedPassword == String(iotWebConf.getApPasswordParameter()->valueBuffer) &&
+      submittedPassword.length() > 0)
+  {
+    issueWebSession();
+    redirectTo(nextPath);
+    return;
+  }
+
+  appendLoginPage(html, "notice-bad", F("The supplied password did not match this clock."), nextPath);
+  server.send(401, "text/html; charset=UTF-8", html);
+}
+
+/** Clears the current browser session and returns the user to the login screen. */
+void handleLogout()
+{
+  clearWebSessionCookie();
+  String html;
+  html.reserve(7000);
+  appendLoginPage(html, "notice-good", F("You have been signed out of the clock web interface."), String("/"));
+  server.send(200, "text/html; charset=UTF-8", html);
+}
+
+/** Handles GET requests for first-boot or recovery-mode onboarding. */
+void handleOnboarding()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+
+  if (!isSetupPortalState())
+  {
+    if (!authorizeAdminRequest())
+      return;
+    redirectTo(String("/"));
+    return;
+  }
+
+  String html;
+  html.reserve(18000);
+  const bool showSelfTest = server.hasArg("saved") && server.arg("saved") == "1";
+  appendSetupPage(html, nullptr,
+                  showSelfTest ? "notice-good" : nullptr,
+                  showSelfTest ? String(F("Onboarding values were saved. Disconnect from the setup access point when you are ready for the clock to join your configured Wi-Fi network.")) : String(),
+                  showSelfTest);
+  server.send(200, "text/html; charset=UTF-8", html);
+}
+
+/** Handles POST submissions from the onboarding wizard. */
+void handleOnboardingPost()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+
+  if (!isSetupPortalState())
+  {
+    if (!authorizeAdminRequest())
+      return;
+    redirectTo(String("/"));
+    return;
+  }
+
+  OnboardingDraft draft = submittedOnboardingDraft();
+  String error;
+  if (!applyOnboardingDraft(draft, error))
+  {
+    String html;
+    html.reserve(18000);
+    appendSetupPage(html, &draft, "notice-bad", error, false);
+    server.send(400, "text/html; charset=UTF-8", html);
+    return;
+  }
+
+  String html;
+  html.reserve(18000);
+  appendSetupPage(html, &draft, "notice-good",
+                  F("Onboarding values were saved successfully. Use the self-test below, then disconnect from the setup AP so the clock can finish joining your normal Wi-Fi network."),
+                  true);
+  server.send(200, "text/html; charset=UTF-8", html);
+}
+
+/** Triggers a visible matrix scroll test and redirects back to the onboarding or main UI. */
+void handleOnboardingMatrixTest()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+
+  if (isProtectedPortalState() && !authorizeAdminRequest())
+    return;
+
+  strlcpy(scrolltext.message, "LED MATRIX SELF TEST", sizeof(scrolltext.message));
+  startScroll(hex2rgb(system_color.value()), false);
+
+  String returnPath = server.hasArg("return") ? server.arg("return") : String(kOnboardingPath);
+  if (returnPath.length() == 0 || returnPath.charAt(0) != '/' || returnPath.startsWith("//"))
+    returnPath = String(kOnboardingPath);
+  redirectTo(returnPath);
+}
+
+/** Routes the advanced configuration portal through the custom session-aware request wrapper. */
+void handleConfigPage()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+
+  SessionWebRequestWrapper requestWrapper;
+  iotWebConf.handleConfig(&requestWrapper);
 }
 
 /** Captures the latest OTA updater error as readable text for the themed status page. */
@@ -2760,8 +3984,7 @@ void handleFirmwareUpload()
   {
     resetFirmwareUploadState();
     Update.clearError();
-    firmwareUploadAuthenticated = (iotWebConf.getState() != iotwebconf::OnLine) ||
-                                  server.authenticate(IOTWEBCONF_ADMIN_USER_NAME, iotWebConf.getApPasswordParameter()->valueBuffer);
+    firmwareUploadAuthenticated = isAdminSessionAuthorized();
 
     if (!firmwareUploadAuthenticated)
     {
@@ -2894,8 +4117,7 @@ void handleConfigImportUpload()
   if (upload.status == UPLOAD_FILE_START)
   {
     resetConfigImportState();
-    configImportAuthenticated = (iotWebConf.getState() != iotwebconf::OnLine) ||
-                                server.authenticate(IOTWEBCONF_ADMIN_USER_NAME, iotWebConf.getApPasswordParameter()->valueBuffer);
+    configImportAuthenticated = isAdminSessionAuthorized();
 
     if (!configImportAuthenticated)
     {
@@ -3047,9 +4269,19 @@ void configureWebUi()
 
 void registerWebRoutes()
 {
+  server.collectHeaders(kCollectedHeaderKeys, sizeof(kCollectedHeaderKeys) / sizeof(kCollectedHeaderKeys[0]));
+  server.on(kThemeCssPath, HTTP_GET, handleThemeCss);
+  server.on(kLoginPath, HTTP_GET, handleLoginPage);
+  server.on(kLoginPath, HTTP_POST, handleLoginPost);
+  server.on(kLogoutPath, HTTP_GET, handleLogout);
+  server.on(kOnboardingPath, HTTP_GET, handleOnboarding);
+  server.on(kOnboardingPath, HTTP_POST, handleOnboardingPost);
+  server.on(kOnboardingMatrixTestPath, HTTP_GET, handleOnboardingMatrixTest);
   server.on("/", handleRoot);
   server.on(kDiagnosticsPath, []() {
     if (iotWebConf.handleCaptivePortal())
+      return;
+    if (!authorizeAdminRequest())
       return;
 
     String html;
@@ -3077,16 +4309,24 @@ void registerWebRoutes()
   server.on(kConfigImportPath, HTTP_POST, handleConfigImportPost, handleConfigImportUpload);
   server.on(kFirmwareUpdatePath, HTTP_GET, handleFirmwareUpdate);
   server.on(kFirmwareUpdatePath, HTTP_POST, handleFirmwareUpdatePost, handleFirmwareUpload);
-  server.on("/config", []()
-            { iotWebConf.handleConfig(); });
+  server.on("/config", handleConfigPage);
   server.on("/reboot", handleReboot);
   server.onNotFound([]()
-                    { iotWebConf.handleNotFound(); });
+                    {
+                      if (isProtectedPortalState() && !hasValidWebSession())
+                      {
+                        redirectToLogin(server.uri());
+                        return;
+                      }
+                      iotWebConf.handleNotFound();
+                    });
 }
 
 void handleRoot()
 {
   if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!isSetupPortalState() && !authorizeAdminRequest())
     return;
 
   String html;
@@ -3132,7 +4372,15 @@ void handleReboot()
 
 bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
 {
-  (void)webRequestWrapper;
   ESP_LOGD(TAG, "Validating web form...");
+  if (webRequestWrapper != nullptr && webRequestWrapper->hasArg("iwcApPassword"))
+  {
+    String submittedPassword = webRequestWrapper->arg("iwcApPassword");
+    if (submittedPassword.length() < 8)
+    {
+      iotWebConf.getApPasswordParameter()->errorMessage = "Use at least 8 characters for the clock web/setup password.";
+      return false;
+    }
+  }
   return true;
 }

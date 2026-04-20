@@ -18,11 +18,11 @@ The `Current Priorities` section is the active implementation order.
 
 ## Next Up
 
-- [ ] Add `Basic` and `Advanced` configuration modes so common settings are easier to find.
+- [x] Add `Basic` and `Advanced` configuration modes so common settings are easier to find.
 - [ ] Add search and filtering on the configuration page.
 - [ ] Add display preview and test actions for time, weather, AQI, alerts, colors, and brightness.
-- [ ] Add first-boot onboarding that walks through Wi-Fi, API keys, timezone, and a final self-test.
-- [ ] Remove the remaining legacy IotWebConf migration shim after enough devices have upgraded to key-based storage.
+- [x] Add first-boot onboarding that walks through Wi-Fi, API keys, timezone, a secured web password, and a final self-test.
+- [x] Remove the remaining legacy IotWebConf migration shim after enough devices have upgraded to key-based storage.
 - [ ] Add automated tests around config import/export, DST boundaries, and invalid backup handling.
 - [ ] Add a hardware self-test mode for RTC, light sensor, GPS UART, matrix output, and network reachability.
 - [ ] Add release metadata such as version, git commit, board target, and build date to the status page and release package.
@@ -47,3 +47,4 @@ The `Current Priorities` section is the active implementation order.
 - [x] Add an export-config prompt in the firmware update flow so users are reminded to back up settings before flashing new firmware.
 - [x] Add a first-run import prompt so a brand-new or reset clock can restore a saved configuration instead of being set up from scratch.
 - [x] Rework config storage so future firmware can add, remove, and reorder settings without depending on fragile positional mapping.
+- [x] Add a custom password-only web login with session-based protection for the dashboard, diagnostics, console, firmware tools, and advanced configuration portal, plus password recovery through the config button at boot.

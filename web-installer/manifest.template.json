@@ -1,0 +1,16 @@
+{
+  "name": "LED SmartClock",
+  "version": "__TAG__",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        {
+          "path": "./__TAG__/firmware.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

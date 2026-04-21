@@ -1881,7 +1881,7 @@ document.addEventListener('DOMContentLoaded', function () {
       showPopup(
         'tone-bad',
         'No firmware selected',
-        'Choose the compiled firmware.bin file before starting the OTA update.',
+        'Choose the compiled update.bin file before starting the OTA update.',
         null,
         'The upload has not started.',
         true
@@ -1894,7 +1894,7 @@ document.addEventListener('DOMContentLoaded', function () {
       showPopup(
         'tone-bad',
         'Unsupported file type',
-        'This screen only accepts the compiled firmware.bin image.',
+        'This screen only accepts the compiled update.bin image.',
         null,
         'Select the application image produced by PlatformIO and try again.',
         true
@@ -3470,7 +3470,7 @@ void appendFirmwareUpdatePage(String &html, const char *noticeToneClass, const S
   html += F("<div class='shell'><header class='hero'>");
   html += F("<p class='eyebrow'>LED Smart Clock Maintenance</p>");
   html += F("<h1>Firmware Update</h1>");
-  html += F("<p class='lede'>Upload the compiled <code>firmware.bin</code> application image to install a new release over the network without opening the enclosure.</p><div class='action-row'>");
+  html += F("<p class='lede'>Upload the compiled <code>update.bin</code> OTA image to install a new release over the network without opening the enclosure. For a first-time install on a blank ESP32, use the web installer and release <code>firmware.bin</code> image instead.</p><div class='action-row'>");
   html += F("<a class='button-link primary' href='/'>Dashboard</a>");
   html += F("<a class='button-link secondary' href='/config'>Configuration</a>");
   html += F("<a class='button-link secondary' href='");
@@ -3487,7 +3487,7 @@ void appendFirmwareUpdatePage(String &html, const char *noticeToneClass, const S
   appendStatusChip(html, "Address", activeAddressLabel());
   appendStatusChip(html, "Update Path", firmwareUpdatePathLabel());
   html += F("</div><div class='metric-grid'>");
-  appendMetricCard(html, "Accepted File", F("firmware.bin"), "tone-neutral");
+  appendMetricCard(html, "Accepted File", F("update.bin"), "tone-neutral");
   appendMetricCard(html, "Expected Size", F("About 2 MB"), "tone-neutral");
   appendMetricCard(html, "Upload Type", F("Application OTA"), "tone-good");
   html += F("</div></header>");
@@ -3504,29 +3504,31 @@ void appendFirmwareUpdatePage(String &html, const char *noticeToneClass, const S
   appendCardEnd(html);
 
   appendCardStart(html, "Before You Upload", "Use the OTA application image only. This screen does not replace the bootloader or partition table.");
-  appendKeyValueRow(html, "Required File", F("<code>firmware.bin</code>"));
-  appendKeyValueRow(html, "Typical Location", F("<code>.pio/build/esp32dev/firmware.bin</code>"));
-  appendKeyValueRow(html, "Release Download", F("Download <code>firmware.zip</code> from GitHub Releases, then extract and upload <code>firmware.bin</code>"));
+  appendKeyValueRow(html, "Required File", F("<code>update.bin</code>"));
+  appendKeyValueRow(html, "Typical Location", F("<code>.pio/build/esp32dev/update.bin</code>"));
+  appendKeyValueRow(html, "Release Download", F("Download <code>firmware.zip</code> from GitHub Releases, then extract and upload <code>update.bin</code>"));
+  appendKeyValueRow(html, "First Install", F("Use the online installer with release <code>firmware.bin</code> instead of this OTA page"));
   appendKeyValueRow(html, "Typical Size", F("Approximately 2 MB"));
   appendKeyValueRow(html, "Do Not Upload", F("<code>bootloader.bin</code> or <code>partitions.bin</code>"));
   appendCardEnd(html);
 
-  html += F("<section class='card upload-panel'><div class='card-header'><h2>Upload Firmware</h2><p class='card-subtitle'>Choose the freshly built <code>firmware.bin</code> file, then submit it once. The device will validate, write, and reboot into the new firmware if the upload succeeds.</p></div>");
+  html += F("<section class='card upload-panel'><div class='card-header'><h2>Upload Firmware</h2><p class='card-subtitle'>Choose the freshly built <code>update.bin</code> file, then submit it once. The device will validate, write, and reboot into the new firmware if the upload succeeds.</p></div>");
 
   if (showForm)
   {
     html += F("<form class='upload-form' method='POST' action='");
     html += kFirmwareUpdatePath;
     html += F("' enctype='multipart/form-data'>");
-    html += F("<section class='upload-field'><h3>Select Firmware Image</h3><p>Only the application image is supported here. Leave compressed or filesystem images for separate workflows.</p><input id='firmware-upload' type='file' name='firmware' accept='.bin' required></section>");
+    html += F("<section class='upload-field'><h3>Select Firmware Image</h3><p>Only the OTA application image is supported here. Leave the full first-install <code>firmware.bin</code> image and any compressed packages for separate workflows.</p><input id='firmware-upload' type='file' name='firmware' accept='.bin' required></section>");
     html += F("<div class='upload-actions'><button type='submit'>Upload Firmware</button><a class='button-link ghost' href='/'>Cancel</a></div></form>");
-    html += F("<div id='upload-popup' class='upload-popup' hidden><section id='upload-popup-card' class='upload-popup-card tone-neutral' aria-live='polite'><h3 id='upload-popup-title'>Ready to upload</h3><p id='upload-popup-text'>Choose the compiled firmware image to begin.</p><div id='upload-progress' class='upload-progress' hidden><div class='upload-progress-track'><span id='upload-progress-bar' class='upload-progress-bar'></span></div><div id='upload-progress-label' class='upload-progress-label'>0% transferred</div><div id='upload-progress-meta' class='upload-progress-meta'>The browser will show transfer progress here while the OTA image uploads.</div></div><button id='upload-dismiss' class='upload-dismiss' type='button' hidden>Dismiss</button></section></div>");
+    html += F("<div id='upload-popup' class='upload-popup' hidden><section id='upload-popup-card' class='upload-popup-card tone-neutral' aria-live='polite'><h3 id='upload-popup-title'>Ready to upload</h3><p id='upload-popup-text'>Choose the compiled <code>update.bin</code> image to begin.</p><div id='upload-progress' class='upload-progress' hidden><div class='upload-progress-track'><span id='upload-progress-bar' class='upload-progress-bar'></span></div><div id='upload-progress-label' class='upload-progress-label'>0% transferred</div><div id='upload-progress-meta' class='upload-progress-meta'>The browser will show transfer progress here while the OTA image uploads.</div></div><button id='upload-dismiss' class='upload-dismiss' type='button' hidden>Dismiss</button></section></div>");
   }
 
   html += F("<ul class='upload-list'>");
   html += F("<li>Download a JSON configuration backup before installing a new firmware so Wi-Fi, API keys, and display settings can be restored quickly if needed.</li>");
-  html += F("<li>Get updates from the project GitHub Releases page. If you download <code>firmware.zip</code>, extract it first and upload only <code>firmware.bin</code> here.</li>");
-  html += F("<li>Upload the same <code>firmware.bin</code> you would normally flash to the OTA app partition.</li>");
+  html += F("<li>Get updates from the project GitHub Releases page. If you download <code>firmware.zip</code>, extract it first and upload only <code>update.bin</code> here.</li>");
+  html += F("<li>Use the release <code>firmware.bin</code> image only for first-time installs through the web installer or a full USB flash workflow.</li>");
+  html += F("<li>Upload the same <code>update.bin</code> you would normally flash to the OTA app partition.</li>");
   html += F("<li>Keep the browser open until the transfer completes and the success message appears.</li>");
   html += F("<li>If a release changes <code>bootloader.bin</code> or <code>partitions.bin</code>, install those over USB instead of this page.</li>");
   html += F("</ul></section></main>");
@@ -4138,7 +4140,7 @@ public:
 
   String getUpdate() override
   {
-    return F("<div class='portal-meta'><a class='portal-inline-action' href='{u}'>Open Firmware Update</a><p class='portal-meta-note'>Web updates can flash the compiled <code>firmware.bin</code> image into the OTA application slot. If a release changes the partition table or bootloader, those images still need to be flashed over USB.</p></div>");
+    return F("<div class='portal-meta'><a class='portal-inline-action' href='{u}'>Open Firmware Update</a><p class='portal-meta-note'>Web updates flash the compiled <code>update.bin</code> image into the OTA application slot. First-time installs use the release <code>firmware.bin</code> image through the web installer or USB. If a release changes the partition table or bootloader, those images still need to be flashed over USB.</p></div>");
   }
 
   String getConfigVer() override { return String(); }
@@ -4384,7 +4386,7 @@ void handleFirmwareUpdatePost()
   {
     String message = firmwareUploadError.length() > 0
                          ? firmwareUploadError
-                         : String(F("Firmware upload did not start. Choose a firmware.bin file and try again."));
+                         : String(F("Firmware upload did not start. Choose an update.bin file and try again."));
     appendFirmwareUpdatePage(html, "notice-bad", htmlEscape(message), true);
     server.send(400, "text/html; charset=UTF-8", html);
     resetFirmwareUploadState();
@@ -4426,13 +4428,13 @@ void handleFirmwareUpload()
 
     if (upload.name != "firmware")
     {
-      firmwareUploadError = F("Unexpected upload field. Choose a firmware.bin file and try again.");
+      firmwareUploadError = F("Unexpected upload field. Choose an update.bin file and try again.");
       return;
     }
 
     if (!upload.filename.endsWith(".bin"))
     {
-      firmwareUploadError = F("Only the compiled firmware.bin image is supported on this page.");
+      firmwareUploadError = F("Only the compiled update.bin image is supported on this page.");
       return;
     }
 

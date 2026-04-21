@@ -14,7 +14,7 @@ Current firmware release: `2.6.1`
 - Adjusts brightness automatically from ambient light, with user controls.
 - Supports first-boot onboarding, optional web password protection, dark mode, and Basic or Advanced config views.
 - Supports configuration backup and restore with version-tolerant JSON imports.
-- Supports OTA updates from the browser using `firmware.bin`.
+- Supports first-time installs from a browser-based web installer and later OTA updates using `update.bin`.
 
 ## Web Interface
 
@@ -81,7 +81,14 @@ Important:
 
 ## First-Time Installation
 
-For a first install, use USB flashing.
+The easiest first install is the browser-based web installer:
+
+- `https://cosmicc.github.io/LEDSmartClock/`
+- Uses the release `firmware.bin` image for a full blank-device install
+- Requires Chrome or Edge on desktop with Web Serial support
+- After the clock is installed, later OTA updates use `update.bin`
+
+If browser flashing is unavailable, use one of the USB paths below.
 
 ### Build From Source
 
@@ -112,9 +119,28 @@ If automatic reset does not work:
 2. Tap `EN` or `RESET`.
 3. Release `BOOT` when upload starts.
 
-### Manual USB Recovery Flash
+### Manual USB Flash
 
-If the web UI is unavailable, you can flash directly with `esptool.py`.
+If browser flashing or OTA is unavailable, you can flash directly with `esptool.py`.
+
+#### From A Release
+
+If you downloaded `firmware.zip` from GitHub Releases, flash the merged first-install image like this:
+
+```bash
+esptool.py \
+  --chip esp32 \
+  --port /dev/ttyUSB0 \
+  --baud 460800 \
+  --before default_reset \
+  --after hard_reset \
+  write_flash \
+  0x0 firmware.bin
+```
+
+That single `firmware.bin` already includes the bootloader, partition table, OTA data, and application image for a fresh install.
+
+#### From A Local Build
 
 From the local build output directory:
 
@@ -133,24 +159,25 @@ esptool.py \
   0x1000 bootloader.bin \
   0x11000 partitions.bin \
   0x18000 ota_data_initial.bin \
-  0x20000 firmware.bin
+  0x20000 update.bin
 ```
 
 This is the safest recovery method from a local build because it writes the full image set used by the project.
 
 ### Prebuilt Release Artifacts
 
-GitHub releases are intended to include a `firmware.zip` package containing:
+GitHub releases include a `firmware.zip` package containing:
 
 - `firmware.bin`
-- `bootloader.bin`
-- `partitions.bin`
+- `update.bin`
+- `installer.txt`
 
 Notes:
 
-- `firmware.bin` is the file used for OTA updates.
-- First-time USB flashing may also require `bootloader.bin` and `partitions.bin`.
-- A local PlatformIO build remains the most complete recovery path because it also includes `ota_data_initial.bin`.
+- `firmware.bin` is the merged first-install image used by the web installer and by manual USB flashing at offset `0x0`.
+- `update.bin` is the OTA application image used by the clock web UI after the device is already installed.
+- `installer.txt` is a short explainer that tells users which file is for first-time installs and which file is for OTA updates.
+- A local PlatformIO build remains the most complete recovery path because it also includes `bootloader.bin`, `partitions.bin`, and `ota_data_initial.bin`.
 
 ## First Boot And Setup
 
@@ -176,11 +203,11 @@ Useful setup notes:
 
 ## OTA Updates
 
-After the first USB install, updates can be applied from the browser.
+After the clock is installed, updates can be applied from the browser.
 
 OTA behavior:
 
-- Upload `firmware.bin` only.
+- Upload `update.bin` only.
 - Typical firmware size is about `2 MB`.
 - The firmware page shows upload progress and final success or failure status.
 - The page reminds you to export a config backup before flashing.
@@ -256,7 +283,7 @@ platformio run -t upload
 ## Known Caveats
 
 - The current PlatformIO target is `esp32dev`, while older project notes referenced `ESP32-S3` hardware.
-- OTA updates only cover `firmware.bin`.
+- OTA updates only cover `update.bin`.
 - Weather and geolocation features depend on valid API keys and network access.
 - Some GPS problems are hardware, wiring, antenna, or sky-visibility issues rather than firmware issues.
 

@@ -1,0 +1,166 @@
+:root {
+  --bg-top: #f7f1e7;
+  --bg-bottom: #e6ddd2;
+  --surface: rgba(255, 255, 255, 0.9);
+  --surface-strong: rgba(255, 255, 255, 0.96);
+  --line: rgba(27, 36, 48, 0.12);
+  --text: #1d2935;
+  --muted: #5e6a72;
+  --hero: #173748;
+  --hero-2: #245766;
+  --accent: #0f766e;
+  --accent-strong: #0b5c56;
+  --shadow: 0 24px 48px rgba(19, 43, 53, 0.16);
+  --radius: 24px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 30%),
+    radial-gradient(circle at top right, rgba(199, 103, 30, 0.18), transparent 34%),
+    linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+  min-height: 100vh;
+}
+
+.shell {
+  width: min(1040px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 40px;
+}
+
+.hero,
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.hero {
+  padding: 28px;
+  background:
+    linear-gradient(135deg, rgba(23, 55, 72, 0.96), rgba(36, 87, 102, 0.92));
+  color: #f2f8fb;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.74rem;
+  opacity: 0.82;
+}
+
+h1,
+h2 {
+  margin: 0 0 12px;
+}
+
+.lede {
+  margin: 0;
+  max-width: 48rem;
+  line-height: 1.65;
+  color: rgba(242, 248, 251, 0.88);
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+  align-items: center;
+}
+
+.button,
+esp-web-install-button::part(button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+esp-web-install-button {
+  --esp-tools-button-color: #0f766e;
+  --esp-tools-button-text-color: #f7fffd;
+  --esp-tools-button-border-radius: 999px;
+}
+
+.button.secondary {
+  background: rgba(255, 255, 255, 0.16);
+  color: #f4fbff;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.button.ghost {
+  background: transparent;
+  color: #f4fbff;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.card {
+  margin-top: 20px;
+  padding: 22px 24px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+p,
+li {
+  line-height: 1.65;
+}
+
+ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  padding: 1px 4px;
+  border-radius: 6px;
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--accent-strong);
+}
+
+@media (max-width: 720px) {
+  .shell {
+    width: min(100% - 20px, 1040px);
+    padding-top: 18px;
+  }
+
+  .hero,
+  .card {
+    border-radius: 18px;
+  }
+
+  .hero,
+  .card {
+    padding: 20px;
+  }
+
+  .action-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .button,
+  esp-web-install-button {
+    width: 100%;
+  }
+}

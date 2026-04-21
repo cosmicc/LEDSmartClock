@@ -13,10 +13,14 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.vars.outputs.tag_name }}
 
     steps:
       - name: Resolve tag name
@@ -44,13 +48,22 @@ jobs:
       - name: Build firmware
         run: pio run -e esp32dev
 
-      - name: Package release binaries
+      - name: Package release binaries and installer site
         run: |
-          rm -f firmware.zip
+          rm -rf dist site firmware.zip
+          python scripts/build_release_package.py \
+            --build-dir .pio/build/esp32dev \
+            --release-dir dist \
+            --site-dir site \
+            --tag "${{ steps.vars.outputs.tag_name }}" \
+            --repository "${{ github.repository }}"
           zip -j firmware.zip \
-            .pio/build/esp32dev/firmware.bin \
-            .pio/build/esp32dev/bootloader.bin \
-            .pio/build/esp32dev/partitions.bin
+            dist/firmware.bin \
+            dist/update.bin \
+            dist/installer.txt
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
 
       - name: Upload firmware.zip to release
         uses: softprops/action-gh-release@v2
@@ -58,3 +71,20 @@ jobs:
           tag_name: ${{ steps.vars.outputs.tag_name }}
           files: firmware.zip
           overwrite_files: true
+
+      - name: Upload installer site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy-pages:
+    needs: build-and-upload
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy installer site
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LED SmartClock Web Installer</title>
+    <meta name="theme-color" content="#173748">
+    <link rel="stylesheet" href="styles.css">
+    <script
+      type="module"
+      src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"
+    ></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">LED SmartClock</p>
+        <h1>Web Installer</h1>
+        <p class="lede">
+          Install LED SmartClock on a blank ESP32 over USB without setting up PlatformIO.
+          This installer flashes the full initial image for release <strong>__TAG__</strong>.
+        </p>
+        <div class="action-row">
+          <esp-web-install-button manifest="manifest.json?v=__TAG__"></esp-web-install-button>
+          <a class="button secondary" href="__ZIP_URL__">Download firmware.zip</a>
+          <a class="button ghost" href="./__TAG__/update.bin">Download update.bin</a>
+        </div>
+      </header>
+
+      <section class="card">
+        <h2>What This Installs</h2>
+        <p>
+          The installer flashes the merged <code>firmware.bin</code> image for first-time installs.
+          After the clock is installed, future updates should use <code>update.bin</code> from the clock's
+          own web interface.
+        </p>
+        <ul>
+          <li><strong>Initial install:</strong> <code>firmware.bin</code> via this page</li>
+          <li><strong>OTA updates later:</strong> <code>update.bin</code> via the clock web UI</li>
+          <li><strong>Release package:</strong> <code>firmware.zip</code> contains both files</li>
+        </ul>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h2>Before You Start</h2>
+          <ul>
+            <li>Use Google Chrome or Microsoft Edge on desktop.</li>
+            <li>Connect the ESP32 over USB with a data cable.</li>
+            <li>Close any serial monitor or other program using the port.</li>
+            <li>If auto-reset fails, hold <code>BOOT</code> while starting the install.</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h2>After Flashing</h2>
+          <ul>
+            <li>Wait for the clock to reboot.</li>
+            <li>Join the <code>LEDSMARTCLOCK</code> setup AP if this is a fresh install.</li>
+            <li>Use onboarding to set Wi-Fi, password protection, and API keys.</li>
+            <li>Use the built-in OTA page for later updates with <code>update.bin</code>.</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="card">
+        <h2>Manual Recovery</h2>
+        <p>
+          If browser flashing is unavailable, download <code>firmware.zip</code> and flash over USB using the
+          instructions in the project README.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

@@ -30,6 +30,10 @@ extern iotwebconf::CheckboxTParameter serialdebug;
 extern iotwebconf::TextTParameter<33> ipgeoapi;
 /** API key for OpenWeather weather, geocode, and AQI services. */
 extern iotwebconf::TextTParameter<33> weatherapi;
+/** Enables password protection for the normal web dashboard and tools. */
+extern iotwebconf::CheckboxTParameter web_password_protection;
+/** Switches the browser UI between the light theme and dark theme. */
+extern iotwebconf::CheckboxTParameter web_dark_mode;
 
 /** Display-related configuration section shown on the web settings page. */
 extern iotwebconf::ParameterGroup group1;
@@ -62,6 +66,8 @@ extern iotwebconf::IntTParameter<int8_t> fixed_offset;
 extern iotwebconf::TextTParameter<64> ntp_server;
 /** Forces the preferred NTP server even when DHCP offers its own NTP server. */
 extern iotwebconf::CheckboxTParameter override_dhcp_ntp;
+/** Preferred GPS UART baud rate used when talking to the receiver module. */
+extern iotwebconf::IntTParameter<int32_t> gps_baud;
 /** Enables blinking of the colon between the clock digits. */
 extern iotwebconf::CheckboxTParameter colonflicker;
 /** Speeds up the colon blink cadence when blinking is enabled. */
@@ -92,6 +98,8 @@ extern iotwebconf::CheckboxTParameter show_current_weather;
 extern iotwebconf::ColorTParameter current_weather_color;
 /** Interval between current-weather presentations. */
 extern iotwebconf::IntTParameter<int8_t> current_weather_interval;
+/** Chooses the short current-weather scroller instead of the detailed version. */
+extern iotwebconf::CheckboxTParameter current_weather_short_text;
 
 /** Daily-weather configuration section. */
 extern iotwebconf::ParameterGroup group5;
@@ -101,6 +109,8 @@ extern iotwebconf::CheckboxTParameter show_daily_weather;
 extern iotwebconf::ColorTParameter daily_weather_color;
 /** Interval between daily forecast presentations. */
 extern iotwebconf::IntTParameter<int8_t> daily_weather_interval;
+/** Chooses the short daily-forecast scroller instead of the detailed version. */
+extern iotwebconf::CheckboxTParameter daily_weather_short_text;
 
 /** Air-quality configuration section. */
 extern iotwebconf::ParameterGroup group6;
@@ -151,3 +161,6 @@ extern iotwebconf::CheckboxTParameter enable_fixed_loc;
 extern iotwebconf::TextTParameter<12> fixedLat;
 /** User-entered longitude used when fixed-location mode is enabled. */
 extern iotwebconf::TextTParameter<12> fixedLon;
+
+/** GPS receiver configuration section. */
+extern iotwebconf::ParameterGroup group10;

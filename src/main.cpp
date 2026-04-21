@@ -129,6 +129,99 @@ String formatGpsDataAge(unsigned long ageMillis)
   uint32_t roundedSeconds = static_cast<uint32_t>((ageMillis + 999UL) / 1000UL);
   return elapsedTime(roundedSeconds);
 }
+
+/** Formats a GPS event timestamp into a readable age label with an unset fallback. */
+String formatGpsEventAge(acetime_t timestamp)
+{
+  if (timestamp == 0 || timestamp == LocalTime::kInvalidSeconds)
+    return F("Pending");
+
+  const acetime_t now = systemClock.getNow();
+  if (now == LocalTime::kInvalidSeconds || now <= timestamp)
+    return F("Pending");
+
+  return elapsedTime(static_cast<uint32_t>(now - timestamp));
+}
+
+constexpr size_t kGpsRawNmeaCapacity = 6144U;
+char sGpsRawNmeaBuffer[kGpsRawNmeaCapacity]{};
+size_t sGpsRawNmeaHead = 0;
+size_t sGpsRawNmeaLength = 0;
+
+/** Returns true when the supplied GPS UART baud is one of the supported receiver rates. */
+bool isSupportedGpsBaudValue(uint32_t baud)
+{
+  switch (baud)
+  {
+    case 4800UL:
+    case 9600UL:
+    case 19200UL:
+    case 38400UL:
+    case 57600UL:
+    case 115200UL:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** Appends one incoming GPS UART byte into the retained raw NMEA troubleshooting buffer. */
+void appendGpsRawNmeaByte(uint8_t byte)
+{
+  if (byte == '\0')
+    return;
+
+  sGpsRawNmeaBuffer[sGpsRawNmeaHead] = static_cast<char>(byte);
+  sGpsRawNmeaHead = (sGpsRawNmeaHead + 1U) % kGpsRawNmeaCapacity;
+  if (sGpsRawNmeaLength < kGpsRawNmeaCapacity)
+    ++sGpsRawNmeaLength;
+
+  ++gps.rawBytesCaptured;
+  if (byte == '\n')
+    ++gps.rawSentenceCount;
+}
+
+/** Resets the live GPS-fix bookkeeping without clearing maintenance counters. */
+void clearGpsRuntimeState()
+{
+  gps.fix = false;
+  gps.sats = 0;
+  gps.lat = 0.0;
+  gps.lon = 0.0;
+  gps.elevation = 0;
+  gps.hdop = 0;
+  gps.timestamp = 0;
+  gps.lastcheck = 0;
+  gps.lockage = 0;
+  gps.packetdelay = 0;
+  gps.moduleDetected = false;
+  gps.waitingForFix = false;
+  gps.lastReportedSats = 255;
+  gps.firstByteMillis = 0;
+  gps.lastByteMillis = 0;
+  gps.lastNoDataLogMillis = 0;
+  gps.lastProgressLogMillis = 0;
+}
+
+/** Opens the GPS UART using the selected baud and records the live receiver state. */
+void startGpsUart(const char *reason, bool logToSerial)
+{
+  const uint32_t baud = gpsConfiguredBaud();
+  Serial1.flush();
+  Serial1.end();
+  Serial1.begin(baud, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+  while (Serial1.available() > 0)
+    Serial1.read();
+
+  gps.activeBaud = baud;
+  ++gps.uartRestartCount;
+
+  if (logToSerial)
+  {
+    ESP_LOGI(TAG, "GPS UART started on RX:%d TX:%d at %lu baud (%s). Waiting for module traffic and satellite lock.",
+             GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(baud), reason == nullptr ? "startup" : reason);
+  }
+}
 } // namespace
 
 extern "C" void app_main()
@@ -218,9 +311,10 @@ extern "C" void app_main()
   Tsl.on();
   Tsl.setSensitivity(true, Tsl2561::EXP_14);
   ESP_EARLY_LOGD(TAG, "Initializing GPS Module...");
-  Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN); // Initialize GPS UART
-  ESP_EARLY_LOGI(TAG, "GPS UART started on RX:%d TX:%d at %d baud. Waiting for module traffic and satellite lock.",
-                 GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD);
+  startGpsUart("startup", false);
+  gps.uartRestartCount = 0;
+  ESP_EARLY_LOGI(TAG, "GPS UART started on RX:%d TX:%d at %lu baud. Waiting for module traffic and satellite lock.",
+                 GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(gpsActiveBaud()));
   ESP_EARLY_LOGD(TAG, "Initializing coroutine scheduler...");
   sysClock.setName("sysclock");
   coroutineManager.setName("manager");
@@ -306,6 +400,10 @@ extern "C" void app_main()
 // callbacks
 void configSaved()
 {
+  normalizeLoadedConfigValues();
+  if (!web_password_protection.isChecked())
+    strlcpy(iotWebConf.getApPasswordParameter()->valueBuffer, wifiInitialApPassword,
+            static_cast<size_t>(iotWebConf.getApPasswordParameter()->getLength()));
   persistConfigurationState("config save");
   applyRuntimeConfiguration();
 }
@@ -314,6 +412,8 @@ void applyRuntimeConfiguration()
 {
   updateCoords();
   processTimezone();
+  if (gps.activeBaud != gpsConfiguredBaud())
+    restartGpsUart("config update");
   gpsClock.refreshNtpServer();
   rebuildApiUrls();
   noteDiagnosticPending(DiagnosticService::Weather, isApiValid(weatherapi.value()),
@@ -377,6 +477,87 @@ void connectWifi(const char *ssid, const char *password)
   noteDiagnosticPending(DiagnosticService::Wifi, true, "Connecting",
                         String(F("Attempting to join SSID ")) + ssid + F("."));
   WiFi.begin(ssid, password);
+}
+
+bool isSupportedGpsBaud(uint32_t baud)
+{
+  return isSupportedGpsBaudValue(baud);
+}
+
+uint32_t gpsConfiguredBaud()
+{
+  const int32_t configured = gps_baud.value();
+  return isSupportedGpsBaudValue(static_cast<uint32_t>(configured)) ? static_cast<uint32_t>(configured) : DEFAULT_GPS_BAUD;
+}
+
+uint32_t gpsActiveBaud()
+{
+  return gps.activeBaud != 0 ? gps.activeBaud : gpsConfiguredBaud();
+}
+
+void clearGpsRawNmea()
+{
+  sGpsRawNmeaHead = 0;
+  sGpsRawNmeaLength = 0;
+  memset(sGpsRawNmeaBuffer, 0, sizeof(sGpsRawNmeaBuffer));
+}
+
+String getGpsRawNmeaSnapshot()
+{
+  if (sGpsRawNmeaLength == 0)
+    return String();
+
+  String snapshot;
+  snapshot.reserve(sGpsRawNmeaLength + 1U);
+  const size_t start = (sGpsRawNmeaHead + kGpsRawNmeaCapacity - sGpsRawNmeaLength) % kGpsRawNmeaCapacity;
+  size_t index = start;
+  for (size_t copied = 0; copied < sGpsRawNmeaLength; ++copied)
+  {
+    snapshot += sGpsRawNmeaBuffer[index];
+    index = (index + 1U) % kGpsRawNmeaCapacity;
+  }
+  return snapshot;
+}
+
+size_t gpsRawNmeaLength()
+{
+  return sGpsRawNmeaLength;
+}
+
+void restartGpsUart(const char *reason)
+{
+  startGpsUart(reason == nullptr ? "manual restart" : reason, true);
+  noteDiagnosticPending(DiagnosticService::Gps, true, "UART restarted",
+                        String(F("GPS UART restarted at ")) + gpsActiveBaud() + F(" baud.") +
+                            (reason == nullptr ? String() : String(F(" Reason: ")) + reason));
+}
+
+void resetGpsParser(const char *reason, bool restartUart)
+{
+  GPS = TinyGPSPlus();
+  clearGpsRuntimeState();
+  ++gps.parserResetCount;
+  gps.lastResetMillis = millis();
+  strlcpy(gps.lastResetReason, reason == nullptr ? "manual reset" : reason, sizeof(gps.lastResetReason));
+  clearGpsRawNmea();
+  updateCoords();
+  updateLocation();
+  ESP_LOGW(TAG, "GPS parser reset requested (%s).", gps.lastResetReason);
+  if (restartUart)
+    startGpsUart(gps.lastResetReason, true);
+
+  noteDiagnosticPending(DiagnosticService::Gps, true, restartUart ? "Parser reset" : "Parser cleared",
+                        String(F("GPS parser state was reset. Listening on RX ")) + GPS_RX_PIN +
+                            F(" / TX ") + GPS_TX_PIN + F(" at ") + gpsActiveBaud() + F(" baud."));
+}
+
+void processGpsSerialByte(int incomingByte)
+{
+  if (incomingByte < 0)
+    return;
+
+  appendGpsRawNmeaByte(static_cast<uint8_t>(incomingByte));
+  GPS.encode(static_cast<char>(incomingByte));
 }
 
 // Regular Functions
@@ -462,7 +643,19 @@ void print_debugData(ConsoleMirrorPrint &out)
   out.printf("Clock - Status:%s | TimeSource:%s | CurrentTZ:%s | Timezone:%s | DstActive:%s | NtpReady:%s | NtpServer:%s(%s) | Skew:%d Seconds | LastAttempt:%s | NextAttempt:%s | NextNtp:%s | LastSync:%s\n", clock_status[systemClock.getSyncStatusCode()], runtimeState.timeSource, getSystemTimezoneOffsetString().c_str(), getSystemTimezoneName().c_str(), yesno[isSystemTimezoneDstActive()], yesno[gpsClock.ntpIsReady], runtimeState.ntpServer, runtimeState.ntpServerSource, systemClock.getClockSkew(), elapsedTime(systemClock.getSecondsSinceSyncAttempt()).c_str(), elapsedTime(systemClock.getSecondsToSyncAttempt()).c_str(), elapsedTime((now - runtimeState.lastNtpCheck) - NTPCHECKTIME * 60).c_str(), elapsedTime(now - systemClock.getLastSyncTime()).c_str());
   out.printf("Loc - SavedLat:%.5f | SavedLon:%.5f | CurrentLat:%.5f | CurrentLon:%.5f | LocValid:%s\n", atof(savedlat.value()), atof(savedlon.value()), current.lat, current.lon, yesno[isCoordsValid()]);
   out.printf("IPGeo - Complete:%s | Lat:%.5f | Lon:%.5f | TZoffset:%d | Timezone:%s | ValidApi:%s | Retries:%d | LastAttempt:%s | LastSuccess:%s\n", yesno[checkipgeo.complete], ipgeo.lat, ipgeo.lon, ipgeo.tzoffset, ipgeo.timezone, yesno[isApiValid(ipgeoapi.value())], checkipgeo.retries, elapsedTime(now - checkipgeo.lastattempt).c_str(), elapsedTime(now - checkipgeo.lastsuccess).c_str());
-  out.printf("GPS - Chars:%s | With-Fix:%s | Failed:%s | Passed:%s | Sats:%d | Hdop:%d | Elev:%d | Lat:%.5f | Lon:%.5f | FixAge:%s | LocAge:%s\n", formatLargeNumber(GPS.charsProcessed()).c_str(), formatLargeNumber(GPS.sentencesWithFix()).c_str(), formatLargeNumber(GPS.failedChecksum()).c_str(), formatLargeNumber(GPS.passedChecksum()).c_str(), gps.sats, gps.hdop, gps.elevation, gps.lat, gps.lon, elapsedTime(now - gps.timestamp).c_str(), elapsedTime(now - gps.lockage).c_str());
+  out.printf("GPS - Baud:%lu | Chars:%s | With-Fix:%s | Failed:%s | Passed:%s | Sats:%d | Hdop:%d | Elev:%d | Lat:%.5f | Lon:%.5f | FixAge:%s | LocAge:%s\n",
+             static_cast<unsigned long>(gpsActiveBaud()),
+             formatLargeNumber(GPS.charsProcessed()).c_str(),
+             formatLargeNumber(GPS.sentencesWithFix()).c_str(),
+             formatLargeNumber(GPS.failedChecksum()).c_str(),
+             formatLargeNumber(GPS.passedChecksum()).c_str(),
+             gps.sats,
+             gps.hdop,
+             gps.elevation,
+             gps.lat,
+             gps.lon,
+             formatGpsEventAge(gps.timestamp).c_str(),
+             formatGpsEventAge(gps.lockage).c_str());
   out.printf("Weather Current - Icon:%s | Temp:%d%s | FeelsLike:%d%s | Humidity:%d%% | Clouds:%d%% | Wind:%d/%d%s | UVI:%d(%s) | Desc:%s | ValidApi:%s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", weather.current.icon, weather.current.temp, tempunit, weather.current.feelsLike, tempunit, weather.current.humidity, weather.current.cloudcover, weather.current.windSpeed, weather.current.windGust, speedunit, weather.current.uvi, uv_index(weather.current.uvi).c_str(), weather.current.description, yesno[isApiValid(weatherapi.value())], checkweather.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkweather.lastattempt).c_str(), elapsedTime(now - checkweather.lastsuccess).c_str(), nextShowDebug(now, lastshown.currentweather, static_cast<uint32_t>(current_weather_interval.value()) * T1H).c_str());
   out.printf("Weather Day - Icon:%s | LoTemp:%d%s | HiTemp:%d%s | Humidity:%d%% | Clouds:%d%% | Wind: %d/%d%s | UVI:%d(%s) | MoonPhase:%.2f | Desc: %s | NextShow:%s\n", weather.day.icon, weather.day.tempMin, tempunit, weather.day.tempMax, tempunit, weather.day.humidity, weather.day.cloudcover, weather.day.windSpeed, weather.day.windGust, speedunit, weather.day.uvi, uv_index(weather.day.uvi).c_str(), weather.day.moonPhase, weather.current.description, nextShowDebug(now, lastshown.dayweather, static_cast<uint32_t>(daily_weather_interval.value()) * T1H).c_str());
   out.printf("AQI Current - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f | Desc: %s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", air_quality[aqi.current.aqi], aqi.current.co, aqi.current.no, aqi.current.no2, aqi.current.o3, aqi.current.so2, aqi.current.pm25, aqi.current.pm10, aqi.current.nh3, (aqi.current.description).c_str(), checkaqi.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkaqi.lastattempt).c_str(), elapsedTime(now - checkaqi.lastsuccess).c_str(), nextShowDebug(now, lastshown.aqi, static_cast<uint32_t>(aqi_interval.value()) * T1M).c_str());
@@ -516,15 +709,24 @@ void print_gpsStatus(ConsoleMirrorPrint &out)
   String satsAge = formatGpsDataAge(GPS.satellites.age());
   String altitudeAge = formatGpsDataAge(GPS.altitude.age());
   String hdopAge = formatGpsDataAge(GPS.hdop.age());
+  String lastResetAge = gps.lastResetMillis == 0 ? String(F("Never"))
+                                                 : elapsedTime((nowMillis - gps.lastResetMillis + 999UL) / 1000UL);
 
   out.printf("[^------------------------- GPS Status --------------------------^]\n");
-  out.printf("GPS UART - RX:%d | TX:%d | Baud:%d | ModuleDetected:%s | LastByte:%s | SerialAvail:%d\n",
-         GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD, yesno[gps.moduleDetected], lastByteAge.c_str(), Serial1.available());
+  out.printf("GPS UART - RX:%d | TX:%d | Baud:%lu | ModuleDetected:%s | LastByte:%s | SerialAvail:%d | Restarts:%lu\n",
+         GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(gpsActiveBaud()), yesno[gps.moduleDetected], lastByteAge.c_str(), Serial1.available(),
+         static_cast<unsigned long>(gps.uartRestartCount));
   out.printf("GPS Parser - Chars:%s | Passed:%s | Failed:%s | SentencesWithFix:%s\n",
          formatLargeNumber(GPS.charsProcessed()).c_str(),
          formatLargeNumber(GPS.passedChecksum()).c_str(),
          formatLargeNumber(GPS.failedChecksum()).c_str(),
          formatLargeNumber(GPS.sentencesWithFix()).c_str());
+  out.printf("GPS Recovery - ParserResets:%lu | LastReset:%s | Reason:%s | RawBytes:%s | RawSentences:%s\n",
+         static_cast<unsigned long>(gps.parserResetCount),
+         lastResetAge.c_str(),
+         gps.lastResetReason[0] == '\0' ? "n/a" : gps.lastResetReason,
+         formatLargeNumber(static_cast<int>(gps.rawBytesCaptured)).c_str(),
+         formatLargeNumber(static_cast<int>(gps.rawSentenceCount)).c_str());
   out.printf("GPS State - Fix:%s | WaitingForFix:%s | Sats:%u | LocationValid:%s | TimeValid:%s | DateValid:%s\n",
          yesno[gps.fix], yesno[gps.waitingForFix], gps.sats,
          yesno[GPS.location.isValid()], yesno[GPS.time.isValid()], yesno[GPS.date.isValid()]);
@@ -532,8 +734,8 @@ void print_gpsStatus(ConsoleMirrorPrint &out)
          locationAge.c_str(), timeAge.c_str(), satsAge.c_str(), altitudeAge.c_str(), hdopAge.c_str());
   out.printf("GPS Live - Lat:%.6f | Lon:%.6f | Elev:%dft | HDOP:%d | LastFix:%s | LastLocation:%s\n",
          gps.lat, gps.lon, gps.elevation, gps.hdop,
-         elapsedTime(systemClock.getNow() - gps.timestamp).c_str(),
-         elapsedTime(systemClock.getNow() - gps.lockage).c_str());
+         formatGpsEventAge(gps.timestamp).c_str(),
+         formatGpsEventAge(gps.lockage).c_str());
   out.printf("GPS Override - FixedLocation:%s | CurrentCoords:%.6f,%.6f | CurrentSource:%s\n",
          yesno[enable_fixed_loc.isChecked()], current.lat, current.lon, current.locsource);
   out.printf("[^----------------------------------------------------------------^]\n");
@@ -543,6 +745,20 @@ void print_gpsStatus()
 {
   ConsoleMirrorPrint out(true);
   print_gpsStatus(out);
+}
+
+void print_gpsRawNmea(ConsoleMirrorPrint &out)
+{
+  out.printf("[^------------------------ GPS Raw NMEA -------------------------^]\n");
+  String snapshot = getGpsRawNmeaSnapshot();
+  out.printf("%s\n", snapshot.length() > 0 ? snapshot.c_str() : "No raw NMEA captured yet.");
+  out.printf("[^----------------------------------------------------------------^]\n");
+}
+
+void print_gpsRawNmea()
+{
+  ConsoleMirrorPrint out(true);
+  print_gpsRawNmea(out);
 }
 
 bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediateRestart)
@@ -555,18 +771,37 @@ bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediate
   case 'g':
     print_gpsStatus(out);
     return true;
+  case 'n':
+    print_gpsRawNmea(out);
+    return true;
+  case 'p':
+    resetGpsParser("debug command", true);
+    out.printf("GPS parser reset and UART restarted at %lu baud.\n", static_cast<unsigned long>(gpsActiveBaud()));
+    return true;
+  case 'u':
+    restartGpsUart("debug command");
+    out.printf("GPS UART restarted at %lu baud.\n", static_cast<unsigned long>(gpsActiveBaud()));
+    return true;
   case 's':
     CoroutineScheduler::list(out);
     return true;
   case 'a':
-    lastshown.aqi = systemClock.getNow() - (aqi_interval.value() * 60);
-    showready.aqi = true;
-    out.printf("Triggered air quality display.\n");
+    if (!checkaqi.complete)
+    {
+      out.printf("AQI test unavailable. No air quality data has been loaded yet.\n");
+      return true;
+    }
+    showready.testaqi = true;
+    out.printf("Queued AQI scroller test without changing the next scheduled run.\n");
     return true;
   case 'w':
-    lastshown.currentweather = systemClock.getNow() - (current_weather_interval.value() * 60 * 60);
-    showready.currentweather = true;
-    out.printf("Triggered current weather display.\n");
+    if (!checkweather.complete)
+    {
+      out.printf("Current weather test unavailable. No weather data has been loaded yet.\n");
+      return true;
+    }
+    showready.testcurrentweather = true;
+    out.printf("Queued current weather scroller test without changing the next scheduled run.\n");
     return true;
   case 'e':
     lastshown.date = systemClock.getNow() - ((date_interval.value()) * 60 * 60);
@@ -574,9 +809,26 @@ bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediate
     out.printf("Triggered date display.\n");
     return true;
   case 'q':
-    lastshown.dayweather = systemClock.getNow() - (daily_weather_interval.value() * 60 * 60);
-    showready.dayweather = true;
-    out.printf("Triggered daily weather display.\n");
+    if (!checkweather.complete)
+    {
+      out.printf("Daily weather test unavailable. No weather data has been loaded yet.\n");
+      return true;
+    }
+    showready.testdayweather = true;
+    out.printf("Queued daily weather scroller test without changing the next scheduled run.\n");
+    return true;
+  case 'x':
+    showready.testalerts = true;
+    out.printf("Queued alert scroller test%s.\n", alerts.active ? "" : " using a sample alert because none are active");
+    return true;
+  case 'y':
+    if (!checkweather.complete)
+    {
+      out.printf("Temperature/icon test unavailable. No weather data has been loaded yet.\n");
+      return true;
+    }
+    showready.testcurrenttemp = true;
+    out.printf("Queued temperature and icon display test without changing the next scheduled run.\n");
     return true;
   case 'c':
     out.printf("Main task stack size: %s bytes remaining\n", formatLargeNumber(uxTaskGetStackHighWaterMark(NULL)).c_str());
@@ -608,11 +860,16 @@ bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediate
     out.printf("Help:\n");
     out.printf("  d: Display debug data\n");
     out.printf("  g: Display GPS status\n");
+    out.printf("  n: Display retained raw GPS NMEA tail\n");
+    out.printf("  p: Reset GPS parser and restart GPS UART\n");
+    out.printf("  u: Restart GPS UART using the configured baud\n");
     out.printf("  s: Display coroutines states\n");
-    out.printf("  a: Force display of current air quality\n");
-    out.printf("  w: Force display of current weather\n");
+    out.printf("  a: Test AQI scroller without changing schedule\n");
+    out.printf("  w: Test current weather scroller without changing schedule\n");
     out.printf("  e: Display the current date\n");
-    out.printf("  q: Force display of day weather\n");
+    out.printf("  q: Test daily weather scroller without changing schedule\n");
+    out.printf("  x: Test alert scroller (uses a sample alert if none are active)\n");
+    out.printf("  y: Test temperature and icon display without changing schedule\n");
     out.printf("  c: Display current main task stack size remaining (bytes)\n");
     out.printf("  t: Test alertflash\n");
 #ifdef COROUTINE_PROFILER
@@ -665,14 +922,18 @@ void processTimezone()
   auto applyTimezoneOffset = [&](int16_t offset, const char *source) {
     current.tzoffset = offset;
     current.timezone = TimeZone::forHours(offset);
-    ESP_LOGD(TAG, "Using %s fixed timezone offset: %d", source, offset);
+    ESP_LOGD(TAG, "Using %s fixed timezone offset: %s", source,
+             formatTimeOffset(TimeOffset::forHours(offset)).c_str());
   };
 
   auto persistTimezoneSelection = [&](int16_t offset, const char *zoneName, const char *source) {
     bool changed = false;
     if (offset != savedoffset)
     {
-      ESP_LOGI(TAG, "%s timezone offset [%d] is different than saved timezone offset [%d], saving new timezone", source, offset, savedoffset);
+      ESP_LOGI(TAG, "%s timezone offset [%s] is different than saved timezone offset [%s], saving new timezone",
+               source,
+               formatTimeOffset(TimeOffset::forHours(offset)).c_str(),
+               formatTimeOffset(TimeOffset::forHours(savedoffset)).c_str());
       savedtzoffset.value() = offset;
       savedoffset = offset;
       changed = true;
@@ -896,7 +1157,7 @@ void display_showStatus()
     sclr = DARKCYAN;
   else
     sclr = DARKRED;
-  if (enable_system_status.isChecked() || sclr == DARKRED)
+  if (enable_system_status.isChecked())
     matrix->drawPixel(0, 7, sclr);
   // Check the AQI and wether an alert is present
   if (enable_aqi_status.isChecked() && checkaqi.complete)

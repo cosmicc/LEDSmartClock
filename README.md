@@ -205,7 +205,7 @@ Because these backups contain secrets, store them privately.
 
 The firmware now persists settings in a key-based store instead of relying on IotWebConf's old positional EEPROM layout.
 
-- Firmware version: `2.5.2`
+- Firmware version: `2.6.1`
 - Adding new settings no longer shifts old settings into the wrong slots.
 - Reordering the web configuration page does not corrupt saved config.
 - Backup and restore use the same stable setting IDs as normal persistence.
@@ -266,7 +266,7 @@ The current top roadmap items are:
 2. Completed: a downloadable in-memory log buffer and live web console so debugging does not depend on a live serial cable.
 3. Completed: a dashboard service-health summary with concise status badges and recent-state reporting.
 4. Next: add manual timezone selection by real zone name, such as `America/New_York`.
-5. Next: add GPS recovery tools such as parser reset, raw NMEA inspection, and baud selection.
+5. Completed: GPS recovery tools including parser reset, raw NMEA inspection, diagnostics actions, and configurable baud selection.
 
 ## Contributing
 

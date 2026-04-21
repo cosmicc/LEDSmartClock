@@ -44,3 +44,6 @@ bool readConsoleLogSnapshot(String &out, uint32_t &cursor, bool &truncated);
 
 /** Reads console output newer than the supplied cursor from the RAM buffer. */
 bool readConsoleLogSince(uint32_t since, String &out, uint32_t &cursor, bool &truncated);
+
+/** Clears the retained RAM console buffer and resets its cursor. */
+void clearConsoleLog();

@@ -12,6 +12,10 @@ char *capString(char *str);
 ace_time::acetime_t convertUnixEpochToAceTime(uint32_t ntpSeconds);
 /** Converts a Unix epoch into the currently configured AceTime epoch. */
 ace_time::acetime_t convert1970Epoch(ace_time::acetime_t epoch1970);
+/** Converts an AceTime epoch into Unix epoch seconds for debug output. */
+long aceEpochToUnixSeconds(ace_time::acetime_t epochSeconds);
+/** Formats a timestamp for logs using local time, Unix seconds, and AceTime seconds. */
+String formatDebugTimestamp(ace_time::acetime_t epochSeconds);
 /** Records the latest active time source string in runtime state. */
 void setTimeSource(const String &inputString);
 /** Convenience wrapper around the system clock. */
@@ -40,6 +44,10 @@ const AlertEntry *displayAlert();
 void advanceAlertRotation();
 /** Summarizes the retained active alert titles in priority order. */
 String summarizeActiveAlerts(uint8_t maxItems = 3);
+/** Builds the current-conditions scroll text using the configured short/long mode. */
+void buildCurrentWeatherScrollText(char *buffer, size_t length);
+/** Builds the daily-forecast scroll text using the configured short/long mode. */
+void buildDailyWeatherScrollText(char *buffer, size_t length);
 /** Compares two fixed-width location strings for exact equality. */
 bool cmpLocs(const char a1[32], const char a2[32]);
 /** Converts a numeric UV index into a descriptive label. */

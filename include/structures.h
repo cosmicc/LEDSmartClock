@@ -26,6 +26,13 @@ struct GPSData
   uint32_t lastByteMillis = 0;
   uint32_t lastNoDataLogMillis = 0;
   uint32_t lastProgressLogMillis = 0;
+  uint32_t activeBaud = DEFAULT_GPS_BAUD;
+  uint32_t parserResetCount = 0;
+  uint32_t uartRestartCount = 0;
+  uint32_t rawBytesCaptured = 0;
+  uint32_t rawSentenceCount = 0;
+  uint32_t lastResetMillis = 0;
+  char lastResetReason[48]{};
 };
 
 struct RgbColor
@@ -224,6 +231,11 @@ struct ShowReady {
   bool date;
   bool dayweather;
   bool aqi;
+  bool testalerts;
+  bool testcurrentweather;
+  bool testcurrenttemp;
+  bool testdayweather;
+  bool testaqi;
   bool reset;
   bool loc;
   bool ip;

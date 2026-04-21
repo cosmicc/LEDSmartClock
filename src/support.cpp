@@ -117,6 +117,25 @@ ace_time::acetime_t convert1970Epoch(ace_time::acetime_t epoch1970)
   return epoch2050;
 }
 
+long aceEpochToUnixSeconds(ace_time::acetime_t epochSeconds)
+{
+  return static_cast<long>(static_cast<int64_t>(epochSeconds) +
+                           Epoch::secondsToCurrentEpochFromUnixEpoch64());
+}
+
+String formatDebugTimestamp(ace_time::acetime_t epochSeconds)
+{
+  if (epochSeconds == LocalTime::kInvalidSeconds)
+    return F("invalid");
+
+  String formatted = getCustomZonedTimestamp(epochSeconds);
+  formatted += F(" | unix=");
+  formatted += String(aceEpochToUnixSeconds(epochSeconds));
+  formatted += F(" | ace=");
+  formatted += String(epochSeconds);
+  return formatted;
+}
+
 void setTimeSource(const String &inputString)
 {
   const size_t capacity = sizeof(runtimeState.timeSource);
@@ -412,6 +431,104 @@ String summarizeActiveAlerts(uint8_t maxItems)
   }
 
   return summary;
+}
+
+namespace
+{
+/** Copies a weather description into a local buffer and capitalizes it for scroll text. */
+void copyWeatherDescription(char *dest, size_t length, const char *source, const char *fallback)
+{
+  if (length == 0)
+    return;
+
+  const char *selected = hasVisibleText(source) ? source : fallback;
+  strlcpy(dest, selected, length);
+  capString(dest);
+}
+
+/** Returns the compact temperature unit used in scrolling weather summaries. */
+const char *weatherTempUnitLabel()
+{
+  return imperial.isChecked() ? "F" : "C";
+}
+
+/** Returns the compact wind-speed unit used in scrolling weather summaries. */
+const char *weatherSpeedUnitLabel()
+{
+  return imperial.isChecked() ? "mph" : "kph";
+}
+} // namespace
+
+void buildCurrentWeatherScrollText(char *buffer, size_t length)
+{
+  if (buffer == nullptr || length == 0)
+    return;
+
+  char description[sizeof(weather.current.description)]{};
+  copyWeatherDescription(description, sizeof(description), weather.current.description, "Weather");
+  const uint8_t gust = weather.current.windGust > weather.current.windSpeed ? weather.current.windGust : weather.current.windSpeed;
+
+  if (current_weather_short_text.isChecked())
+  {
+    snprintf(buffer, length, "Now %s %d%s Feels:%d%s Wind:%u%s",
+             description,
+             weather.current.temp,
+             weatherTempUnitLabel(),
+             weather.current.feelsLike,
+             weatherTempUnitLabel(),
+             weather.current.windSpeed,
+             weatherSpeedUnitLabel());
+    return;
+  }
+
+  snprintf(buffer, length, "Current %s Temp:%d%s Feels:%d%s Humidity:%u%% Wind:%u/%u%s Clouds:%u%% AQI:%s UV:%s",
+           description,
+           weather.current.temp,
+           weatherTempUnitLabel(),
+           weather.current.feelsLike,
+           weatherTempUnitLabel(),
+           weather.current.humidity,
+           weather.current.windSpeed,
+           gust,
+           weatherSpeedUnitLabel(),
+           weather.current.cloudcover,
+           air_quality[aqi.current.aqi],
+           uv_index(weather.current.uvi).c_str());
+}
+
+void buildDailyWeatherScrollText(char *buffer, size_t length)
+{
+  if (buffer == nullptr || length == 0)
+    return;
+
+  char description[sizeof(weather.day.description)]{};
+  copyWeatherDescription(description, sizeof(description), weather.day.description, "Forecast");
+  const uint8_t gust = weather.day.windGust > weather.day.windSpeed ? weather.day.windGust : weather.day.windSpeed;
+
+  if (daily_weather_short_text.isChecked())
+  {
+    snprintf(buffer, length, "Today %s Hi:%d%s Lo:%d%s",
+             description,
+             weather.day.tempMax,
+             weatherTempUnitLabel(),
+             weather.day.tempMin,
+             weatherTempUnitLabel());
+    return;
+  }
+
+  snprintf(buffer, length, "Today %s Hi:%d%s Lo:%d%s Humidity:%u%% Wind:%u/%u%s Clouds:%u%% AQI:%s UV:%s",
+           description,
+           weather.day.tempMax,
+           weatherTempUnitLabel(),
+           weather.day.tempMin,
+           weatherTempUnitLabel(),
+           weather.day.humidity,
+           weather.day.windSpeed,
+           gust,
+           weatherSpeedUnitLabel(),
+           weather.day.cloudcover,
+           air_quality[aqi.day.aqi],
+           uv_index(weather.day.uvi).c_str());
 }
 
 bool cmpLocs(const char a1[32], const char a2[32])

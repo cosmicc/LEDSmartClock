@@ -187,8 +187,10 @@ void configureSntpRuntime()
   esp_sntp_set_time_sync_notification_cb([](struct timeval *tv) {
     sLastSntpUnixTime = (tv == nullptr) ? 0 : tv->tv_sec;
     ++sSntpSyncCount;
-    ESP_LOGI(TAG, "GPSClock: SNTP sync callback received time %ld using %s (%s).",
-             static_cast<long>(sLastSntpUnixTime), runtimeState.ntpServer, runtimeState.ntpServerSource);
+    const acetime_t epochSeconds =
+        (sLastSntpUnixTime <= 0) ? Clock::kInvalidSeconds : convert1970Epoch(static_cast<acetime_t>(sLastSntpUnixTime));
+    ESP_LOGI(TAG, "GPSClock: SNTP sync callback received time %s using %s (%s).",
+             formatDebugTimestamp(epochSeconds).c_str(), runtimeState.ntpServer, runtimeState.ntpServerSource);
   });
   esp_sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
   esp_sntp_set_sync_interval(getSntpSyncIntervalMillis());
@@ -315,7 +317,7 @@ acetime_t GPSClock::getNow() const
   while ((millis() - waitStart) < mRequestTimeout)
   {
     while (Serial1.available())
-      GPS.encode(Serial1.read());
+      processGpsSerialByte(Serial1.read());
     if (isResponseReady())
       return readResponse();
     delay(1);
@@ -331,7 +333,7 @@ acetime_t GPSClock::getNow() const
 void GPSClock::sendRequest() const
 {
   while (Serial1.available())
-    GPS.encode(Serial1.read());
+    processGpsSerialByte(Serial1.read());
   if (GPS.time.isUpdated() || !ntpIsReady || iotWebConf.getState() != 4)
   {
     return;
@@ -419,12 +421,14 @@ acetime_t GPSClock::readResponse() const
     {
       setTimeSource("gps");
       resetLastNtpCheck(gpsSeconds);
-      ESP_LOGI(TAG, "GPSClock: readResponse(): gpsSeconds: %d | skew: %dsec | age: %dms", gpsSeconds, abs(Now()) - abs(gpsSeconds), GPS.time.age());
+      ESP_LOGI(TAG, "GPSClock: readResponse(): GPS time %s | skew: %dsec | age: %dms",
+               formatDebugTimestamp(gpsSeconds).c_str(), abs(Now()) - abs(gpsSeconds), GPS.time.age());
       return gpsSeconds;
     }
     else
     {
-      ESP_LOGW(TAG, "GPSClock: readResponse(): Stale GPS time skipped: gpsSeconds: %d | skew: %dsec | age: %dms", gpsSeconds, abs(Now()) - abs(gpsSeconds), GPS.time.age());
+      ESP_LOGW(TAG, "GPSClock: readResponse(): stale GPS time skipped: %s | skew: %dsec | age: %dms",
+               formatDebugTimestamp(gpsSeconds).c_str(), abs(Now()) - abs(gpsSeconds), GPS.time.age());
       return kInvalidSeconds;
     }
   }
@@ -447,15 +451,16 @@ acetime_t GPSClock::readResponse() const
     if (freshSntpSync)
     {
       resetLastNtpCheck(epochSeconds);
-      ESP_LOGI(TAG, "GPSClock: readResponse(): fresh SNTP sync unixSeconds: %ld | epochSeconds: %d | skew: %dsec",
-               static_cast<long>(sLastSntpUnixTime), epochSeconds, abs(Now()) - abs(epochSeconds));
+      ESP_LOGI(TAG, "GPSClock: readResponse(): fresh SNTP sync %s | skew: %dsec",
+               formatDebugTimestamp(epochSeconds).c_str(), abs(Now()) - abs(epochSeconds));
       noteDiagnosticSuccess(DiagnosticService::Ntp, true, "Fresh sync",
                             String(runtimeState.ntpServer) + F(" (") + runtimeState.ntpServerSource + F(")"),
                             0, 0);
     }
     else
     {
-      ESP_LOGD(TAG, "GPSClock: readResponse(): using cached SNTP-backed system time: %d", epochSeconds);
+      ESP_LOGD(TAG, "GPSClock: readResponse(): using cached SNTP-backed system time: %s",
+               formatDebugTimestamp(epochSeconds).c_str());
       noteDiagnosticPending(DiagnosticService::Ntp, true, "Using cached sync",
                             String(runtimeState.ntpServer) + F(" (") + runtimeState.ntpServerSource + F(")"));
     }
@@ -468,6 +473,7 @@ acetime_t GPSClock::readResponse() const
     if (rtcSeconds != kInvalidSeconds)
     {
       setTimeSource("rtc");
+      ESP_LOGD(TAG, "GPSClock: readResponse(): using RTC-backed time: %s", formatDebugTimestamp(rtcSeconds).c_str());
       noteDiagnosticPending(DiagnosticService::Ntp, true, "RTC fallback",
                             F("No fresh NTP sync is active. The clock is currently using the RTC chip."));
       return rtcSeconds;

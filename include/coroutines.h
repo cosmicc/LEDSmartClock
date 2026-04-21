@@ -330,17 +330,14 @@ COROUTINE(showWeather)
 {
   COROUTINE_LOOP() 
   {
-  COROUTINE_AWAIT((showready.currentweather || isNextShowReady(lastshown.currentweather, current_weather_interval.value(), T1H)) && checkweather.complete && show_current_weather.isChecked() && displaytoken.isReady(2));
+  COROUTINE_AWAIT((showready.testcurrentweather || ((showready.currentweather || isNextShowReady(lastshown.currentweather, current_weather_interval.value(), T1H)) && show_current_weather.isChecked())) && checkweather.complete && displaytoken.isReady(2));
+  const bool testMode = showready.testcurrentweather;
   displaytoken.setToken(2);
-  lastshown.currentweather = systemClock.getNow();
+  if (!testMode)
+    lastshown.currentweather = systemClock.getNow();
   startFlash(hex2rgb(current_weather_color.value()), 1);
   COROUTINE_AWAIT(!alertflash.active);
-  char speedunit[7];
-  if (imperial.isChecked())
-    memcpy(speedunit, imperial_units[1], 7);
-  else
-    memcpy(speedunit, metric_units[1], 7);
-  snprintf(scrolltext.message, 512, "Current %s Humidity:%d%% Wind:%d/%d%s Clouds:%d%% AQi:%s UVi:%s", capString(weather.current.description), weather.current.humidity, weather.current.windSpeed, weather.current.windGust, speedunit, weather.current.cloudcover, air_quality[aqi.current.aqi], uv_index(weather.current.uvi).c_str());
+  buildCurrentWeatherScrollText(scrolltext.message, sizeof(scrolltext.message));
   startScroll(hex2rgb(current_weather_color.value()), true);
   memcpy(scrolltext.icon, weather.current.icon, sizeof(weather.current.icon[0]) * 4);
   COROUTINE_AWAIT(!scrolltext.active);
@@ -355,6 +352,7 @@ COROUTINE(showWeather)
     COROUTINE_DELAY(50);
   }
   showready.currentweather = false;
+  showready.testcurrentweather = false;
   displaytoken.resetToken(2);
   }
 }
@@ -363,12 +361,14 @@ COROUTINE(showTemp)
 {
   COROUTINE_LOOP()
   {
-  COROUTINE_AWAIT(isNextShowReady(lastshown.currenttemp, current_temp_interval.value(), T1M) && checkweather.complete && show_current_temp.isChecked() && displaytoken.isReady(2));
+  COROUTINE_AWAIT((showready.testcurrenttemp || ((showready.currenttemp || isNextShowReady(lastshown.currenttemp, current_temp_interval.value(), T1M)) && show_current_temp.isChecked())) && checkweather.complete && displaytoken.isReady(2));
+  const bool testMode = showready.testcurrenttemp;
   displaytoken.setToken(2);
   // Suspend the clock immediately so the temperature panel cannot race the
   // next clock redraw while it owns the display token.
   showClock.suspend();
-  lastshown.currenttemp = systemClock.getNow();
+  if (!testMode)
+    lastshown.currenttemp = systemClock.getNow();
   cotimer.millis = millis();
   ESP_LOGI(TAG, "Showing Temperature");
   while (millis() - cotimer.millis < static_cast<uint32_t>(current_temp_duration.value()) * 1000U)
@@ -381,6 +381,7 @@ COROUTINE(showTemp)
     COROUTINE_DELAY(50);
   }
   showready.currenttemp = false;
+  showready.testcurrenttemp = false;
   displaytoken.resetToken(2);
   }
 }
@@ -389,29 +390,20 @@ COROUTINE(showWeatherDaily)
 {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT((showready.dayweather || isNextShowReady(lastshown.dayweather, daily_weather_interval.value(), T1H)) && checkweather.complete && show_daily_weather.isChecked() && displaytoken.isReady(8));
+    COROUTINE_AWAIT((showready.testdayweather || ((showready.dayweather || isNextShowReady(lastshown.dayweather, daily_weather_interval.value(), T1H)) && show_daily_weather.isChecked())) && checkweather.complete && displaytoken.isReady(8));
+    const bool testMode = showready.testdayweather;
     displaytoken.setToken(8);
-    lastshown.dayweather = systemClock.getNow();
+    if (!testMode)
+      lastshown.dayweather = systemClock.getNow();
     startFlash(hex2rgb(daily_weather_color.value()), 1);
     memcpy(scrolltext.icon, weather.day.icon, sizeof(weather.day.icon[0]) * 4);
     COROUTINE_AWAIT(!alertflash.active);
-    char speedunit[7];
-    char tempunit[7];
-    if (imperial.isChecked())
-    {
-        memcpy(speedunit, imperial_units[1], 7);
-        memcpy(tempunit, imperial_units[3], 7);
-    }
-    else
-    {
-      memcpy(speedunit, metric_units[1], 7);
-      memcpy(tempunit, metric_units[3], 7);
-    }
-    snprintf(scrolltext.message, 512, "Today %s Hi:%d Lo:%d Humidity:%d%% Wind:%d/%d%s Clouds:%d%% AQi:%s UVi:%s", capString(weather.day.description), weather.day.tempMax, weather.day.tempMin, weather.day.humidity, weather.day.windSpeed, weather.day.windGust, speedunit, weather.day.cloudcover, air_quality[aqi.day.aqi], uv_index(weather.day.uvi).c_str());
+    buildDailyWeatherScrollText(scrolltext.message, sizeof(scrolltext.message));
     startScroll(hex2rgb(daily_weather_color.value()), true);
     COROUTINE_AWAIT(!scrolltext.active);
     cotimer.millis = millis();
     showready.dayweather = false;
+    showready.testdayweather = false;
     displaytoken.resetToken(8);
   }
 }
@@ -420,9 +412,11 @@ COROUTINE(showAirquality)
 {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT((showready.aqi || isNextShowReady(lastshown.aqi, aqi_interval.value(), T1M)) && checkaqi.complete && show_aqi.isChecked() && displaytoken.isReady(9));
+    COROUTINE_AWAIT((showready.testaqi || ((showready.aqi || isNextShowReady(lastshown.aqi, aqi_interval.value(), T1M)) && show_aqi.isChecked())) && checkaqi.complete && displaytoken.isReady(9));
+    const bool testMode = showready.testaqi;
     displaytoken.setToken(9);
-    lastshown.aqi = systemClock.getNow();
+    if (!testMode)
+      lastshown.aqi = systemClock.getNow();
     // set color using lookup value and bit-shift if enable_aqi_color.isChecked() is false
     if (enable_aqi_color.isChecked())
       aqi.current.color = hex2rgb(aqi_color.value());
@@ -435,6 +429,7 @@ COROUTINE(showAirquality)
     COROUTINE_AWAIT(!scrolltext.active);
     cotimer.millis = millis();
     showready.aqi = false;
+    showready.testaqi = false;
     displaytoken.resetToken(9);
   }
 }
@@ -445,7 +440,10 @@ COROUTINE(showAlerts)
 {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(showready.alerts && displaytoken.isReady(3));
+    COROUTINE_AWAIT((showready.alerts || showready.testalerts) && displaytoken.isReady(3));
+    const bool testMode = showready.testalerts;
+    bool useWatchTone = false;
+    const char *alertMessage = nullptr;
     if (alerts.active)
     {
       const AlertEntry *selectedEntry = displayAlert();
@@ -455,10 +453,10 @@ COROUTINE(showAlerts)
       }
       else
       {
-        bool useWatchTone = selectedEntry->watch;
-        const char *alertMessage = hasVisibleText(selectedEntry->displayText)
-                                       ? selectedEntry->displayText
-                                       : selectedEntry->event;
+        useWatchTone = selectedEntry->watch;
+        alertMessage = hasVisibleText(selectedEntry->displayText)
+                           ? selectedEntry->displayText
+                           : selectedEntry->event;
 
         displaytoken.setToken(3);
         startFlash(alertcolors[useWatchTone], 3);
@@ -466,12 +464,27 @@ COROUTINE(showAlerts)
         strlcpy(scrolltext.message, alertMessage, sizeof(scrolltext.message));
         startScroll(alertcolors[useWatchTone], false);
         COROUTINE_AWAIT(!scrolltext.active);
-        lastshown.alerts = systemClock.getNow();
-        advanceAlertRotation();
+        if (!testMode)
+        {
+          lastshown.alerts = systemClock.getNow();
+          advanceAlertRotation();
+        }
         displaytoken.resetToken(3);
       }
     }
+    else if (testMode)
+    {
+      constexpr char kSampleAlertMessage[] = "Test Alert Tornado Warning Seek shelter now";
+      displaytoken.setToken(3);
+      startFlash(alertcolors[0], 3);
+      COROUTINE_AWAIT(!alertflash.active);
+      strlcpy(scrolltext.message, kSampleAlertMessage, sizeof(scrolltext.message));
+      startScroll(alertcolors[0], false);
+      COROUTINE_AWAIT(!scrolltext.active);
+      displaytoken.resetToken(3);
+    }
     showready.alerts = false;
+    showready.testalerts = false;
   }
 }
 
@@ -1000,7 +1013,7 @@ COROUTINE_LOOP()
     size_t bytesRead = 0;
     while (Serial1.available() > 0)
     {
-        GPS.encode(Serial1.read());
+        processGpsSerialByte(Serial1.read());
         bytesRead++;
     }
     if (bytesRead > 0)
@@ -1026,11 +1039,11 @@ COROUTINE_LOOP()
     {
         if (gps.lastNoDataLogMillis == 0 || (nowMillis - gps.lastNoDataLogMillis) >= kGpsNoDataLogIntervalMs)
         {
-            ESP_LOGW(TAG, "GPS has not produced any UART traffic yet on RX:%d TX:%d @ %d baud. Check module power, wiring, and baud rate.",
-                     GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD);
+            ESP_LOGW(TAG, "GPS has not produced any UART traffic yet on RX:%d TX:%d @ %lu baud. Check module power, wiring, and baud rate.",
+                     GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(gpsActiveBaud()));
             noteDiagnosticPending(DiagnosticService::Gps, true, "Waiting for UART",
                                   String(F("No GPS UART traffic has been seen yet on RX ")) + GPS_RX_PIN + F(" / TX ") + GPS_TX_PIN +
-                                      F(" at ") + GPS_BAUD + F(" baud."));
+                                      F(" at ") + gpsActiveBaud() + F(" baud."));
             gps.lastNoDataLogMillis = nowMillis;
         }
     }

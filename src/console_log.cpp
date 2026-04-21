@@ -184,3 +184,13 @@ bool readConsoleLogSince(uint32_t since, String &out, uint32_t &cursor, bool &tr
 {
   return copyConsoleWindow(since, out, cursor, truncated);
 }
+
+void clearConsoleLog()
+{
+  portENTER_CRITICAL(&sConsoleLogMux);
+  sConsoleLogHead = 0;
+  sConsoleLogLength = 0;
+  sConsoleLogCursor = 0;
+  memset(sConsoleLogBuffer, 0, sizeof(sConsoleLogBuffer));
+  portEXIT_CRITICAL(&sConsoleLogMux);
+}

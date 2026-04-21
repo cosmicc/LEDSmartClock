@@ -13,7 +13,7 @@ The `Current Priorities` section is the active implementation order.
    Surface concise badges such as `GPS: no UART`, `NTP: timeout`, or `Weather: auth failed` so the landing page makes failures obvious.
 4. [ ] Add manual timezone selection by zone name.
    Allow a user to select or enter a real timezone such as `America/New_York` instead of relying only on IP geolocation or a fixed GMT offset.
-5. [ ] Add GPS recovery and troubleshooting controls.
+5. [x] Add GPS recovery and troubleshooting controls.
    Extend the current diagnostics with actions such as parser reset, raw NMEA view, and configurable GPS baud selection.
 
 ## Next Up

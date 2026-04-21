@@ -14,7 +14,7 @@
 #define WDT_TIMEOUT 30             // Watchdog Timeout seconds
 #define CONFIG_PIN 19              // Config reset button pin
 #define STATUS_PIN 2               // Use built-in ESP32 led for iotwebconf status
-#define GPS_BAUD 9600              // GPS UART gpsSpeed
+#define DEFAULT_GPS_BAUD 9600      // Default GPS UART baud rate
 #define GPS_RX_PIN 16              // GPS UART RX PIN
 #define GPS_TX_PIN 17              // GPS UART TX PIN
 #define DAYHUE 35                  // 6am daytime hue start
@@ -192,8 +192,30 @@ void print_debugData();
 void print_gpsStatus(ConsoleMirrorPrint &out);
 /** Prints focused GPS receiver, parser, and fix information to the default serial/web console output. */
 void print_gpsStatus();
+/** Prints the retained raw NMEA tail to the selected console output. */
+void print_gpsRawNmea(ConsoleMirrorPrint &out);
+/** Prints the retained raw NMEA tail to the default serial/web console output. */
+void print_gpsRawNmea();
 /** Executes one single-character debug command from serial or the web console. */
 bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediateRestart = true);
+/** Returns true when the supplied GPS UART baud is one of the supported receiver rates. */
+bool isSupportedGpsBaud(uint32_t baud);
+/** Returns the configured GPS UART baud, falling back to the default when invalid. */
+uint32_t gpsConfiguredBaud();
+/** Returns the baud rate currently active on the GPS UART. */
+uint32_t gpsActiveBaud();
+/** Restarts the GPS UART using the current configured baud. */
+void restartGpsUart(const char *reason);
+/** Resets the GPS parser state and optionally restarts the UART at the current baud. */
+void resetGpsParser(const char *reason, bool restartUart = true);
+/** Clears the retained raw NMEA troubleshooting buffer. */
+void clearGpsRawNmea();
+/** Returns the number of retained raw NMEA bytes currently buffered for troubleshooting. */
+size_t gpsRawNmeaLength();
+/** Returns the retained raw NMEA troubleshooting tail as plain text. */
+String getGpsRawNmeaSnapshot();
+/** Feeds one incoming GPS UART byte into the raw capture and TinyGPS parser. */
+void processGpsSerialByte(int incomingByte);
 /** Refreshes the active coordinates used by remote services. */
 void updateCoords();
 /** Recomputes the current location strings from the latest location sources. */

@@ -11,6 +11,10 @@ constexpr char kConsolePath[] = "/console";
 constexpr char kConsoleLogPath[] = "/console/log";
 constexpr char kConsoleCommandPath[] = "/console/command";
 constexpr char kConsoleDownloadPath[] = "/console/download";
+constexpr char kConsoleClearPath[] = "/console/clear";
+constexpr char kDisplayTestPath[] = "/display-test";
+constexpr char kGpsActionPath[] = "/gps/action";
+constexpr char kGpsRawPath[] = "/gps/raw";
 constexpr char kThemeCssPath[] = "/theme.css";
 constexpr char kLoginPath[] = "/login";
 constexpr char kLogoutPath[] = "/logout";
@@ -57,6 +61,7 @@ struct OnboardingDraft
   String adminPassword;
   String weatherApiKey;
   String ipGeoApiKey;
+  bool enableWebPassword = true;
   bool useFixedTimezone = false;
   int8_t fixedOffset = 0;
 };
@@ -81,9 +86,75 @@ const char kWebThemeCss[] PROGMEM = R"clockcss(
   --bad:#b45309;
   --bad-soft:#fee9dc;
   --shadow:0 18px 45px rgba(22,44,58,0.12);
+  --shell-bg:#e6ddd2;
+  --hero-lede:rgba(255,255,255,0.84);
+  --hero-chip-bg:rgba(255,255,255,0.14);
+  --hero-chip-border:rgba(255,255,255,0.16);
+  --soft-chip-bg:rgba(255,255,255,0.72);
+  --soft-chip-border:rgba(255,255,255,0.5);
+  --soft-chip-text:var(--hero);
+  --tile-bg:rgba(255,255,255,0.9);
+  --tile-border:rgba(23,55,72,0.08);
+  --tile-shadow:0 8px 22px rgba(22,44,58,0.05);
+  --panel-bg:linear-gradient(180deg, rgba(255,255,255,0.96), rgba(245,239,231,0.92));
+  --section-bg:linear-gradient(180deg, rgba(216,241,237,0.26), rgba(255,255,255,0.96));
+  --field-bg:rgba(255,255,255,0.94);
+  --field-border:rgba(15,118,110,0.2);
+  --field-shadow:inset 0 1px 0 rgba(255,255,255,0.6);
+  --secondary-button-bg:rgba(255,255,255,0.14);
+  --secondary-button-border:rgba(255,255,255,0.16);
+  --secondary-button-text:#f3f7f8;
+  --ghost-button-bg:rgba(255,255,255,0.84);
+  --ghost-button-border:rgba(23,55,72,0.12);
+  --ghost-button-text:var(--hero);
+  --console-bg:#11222d;
+  --console-text:#dbe9ee;
+}
+html[data-web-theme='dark']{
+  --bg-top:#08131b;
+  --bg-bottom:#101d28;
+  --surface:rgba(14,23,31,0.9);
+  --surface-strong:rgba(18,29,38,0.96);
+  --line:rgba(148,177,194,0.18);
+  --text:#e8f0f4;
+  --muted:#a6bac6;
+  --hero:#08151e;
+  --hero-2:#123141;
+  --accent:#36b2a4;
+  --accent-soft:rgba(54,178,164,0.16);
+  --warm:#ef9a56;
+  --warm-soft:rgba(239,154,86,0.16);
+  --good:#4fc37a;
+  --good-soft:rgba(79,195,122,0.16);
+  --bad:#f08b63;
+  --bad-soft:rgba(240,139,99,0.16);
+  --shadow:0 18px 45px rgba(0,0,0,0.35);
+  --shell-bg:#101d28;
+  --hero-lede:rgba(232,240,244,0.82);
+  --hero-chip-bg:rgba(22,35,45,0.74);
+  --hero-chip-border:rgba(167,196,211,0.14);
+  --soft-chip-bg:rgba(22,35,45,0.78);
+  --soft-chip-border:rgba(167,196,211,0.14);
+  --soft-chip-text:#d9e9f1;
+  --tile-bg:rgba(19,31,40,0.92);
+  --tile-border:rgba(167,196,211,0.12);
+  --tile-shadow:0 8px 22px rgba(0,0,0,0.18);
+  --panel-bg:linear-gradient(180deg, rgba(20,33,43,0.98), rgba(14,23,31,0.92));
+  --section-bg:linear-gradient(180deg, rgba(54,178,164,0.14), rgba(19,31,40,0.96));
+  --field-bg:rgba(10,18,24,0.9);
+  --field-border:rgba(54,178,164,0.28);
+  --field-shadow:inset 0 1px 0 rgba(255,255,255,0.03);
+  --secondary-button-bg:rgba(22,35,45,0.74);
+  --secondary-button-border:rgba(167,196,211,0.14);
+  --secondary-button-text:#e8f0f4;
+  --ghost-button-bg:rgba(22,35,45,0.92);
+  --ghost-button-border:rgba(167,196,211,0.14);
+  --ghost-button-text:#e8f0f4;
+  --console-bg:#071117;
+  --console-text:#dbe9ee;
 }
 *{box-sizing:border-box}
-html{background:#e6ddd2}
+html{background:var(--shell-bg)}
 body{
   margin:0;
   min-height:100vh;
@@ -132,7 +203,7 @@ a:hover{text-decoration:underline}
 .lede,.portal-lede{
   max-width:52rem;
   margin:0;
-  color:rgba(255,255,255,0.84);
+  color:var(--hero-lede);
   line-height:1.6;
 }
 .action-row,.portal-chip-row,.portal-nav{
@@ -160,14 +231,14 @@ a:hover{text-decoration:underline}
   box-shadow:0 10px 24px rgba(15,118,110,0.24);
 }
 .button-link.secondary{
-  color:#f3f7f8;
-  background:rgba(255,255,255,0.14);
-  border:1px solid rgba(255,255,255,0.16);
+  color:var(--secondary-button-text);
+  background:var(--secondary-button-bg);
+  border:1px solid var(--secondary-button-border);
 }
 .button-link.ghost,.portal-inline-action.ghost{
-  color:var(--hero);
-  background:rgba(255,255,255,0.84);
-  border:1px solid rgba(23,55,72,0.12);
+  color:var(--ghost-button-text);
+  background:var(--ghost-button-bg);
+  border:1px solid var(--ghost-button-border);
   box-shadow:0 10px 24px rgba(22,44,58,0.08);
 }
 .button-link.danger,.portal-inline-action.danger{
@@ -184,8 +255,8 @@ a:hover{text-decoration:underline}
   border-radius:999px;
   font-size:0.9rem;
   font-weight:700;
-  background:rgba(255,255,255,0.14);
-  border:1px solid rgba(255,255,255,0.16);
+  background:var(--hero-chip-bg);
+  border:1px solid var(--hero-chip-border);
 }
 .status-chip strong{font-size:0.78rem;opacity:0.72;text-transform:uppercase;letter-spacing:0.08em}
 .metric-grid{
@@ -197,7 +268,7 @@ a:hover{text-decoration:underline}
 .metric-card,.setup-step,.portal-card,.card{
   border-radius:24px;
   background:var(--surface);
-  border:1px solid rgba(255,255,255,0.45);
+  border:1px solid var(--hero-chip-border);
   box-shadow:0 14px 34px rgba(22,44,58,0.08);
   backdrop-filter:blur(10px);
 }
@@ -232,7 +303,7 @@ a:hover{text-decoration:underline}
 .service-health-card{
   padding:16px 18px;
   border-radius:20px;
-  border:1px solid rgba(27,36,48,0.08);
+  border:1px solid var(--tile-border);
   box-shadow:0 10px 24px rgba(22,44,58,0.06);
 }
 .service-health-card h3{
@@ -257,9 +328,9 @@ a:hover{text-decoration:underline}
   font-weight:700;
   letter-spacing:0.08em;
   text-transform:uppercase;
-  color:var(--hero);
-  background:rgba(255,255,255,0.68);
-  border:1px solid rgba(27,36,48,0.08);
+  color:var(--soft-chip-text);
+  background:var(--soft-chip-bg);
+  border:1px solid var(--soft-chip-border);
 }
 .service-health-card p{
   margin:12px 0 0;
@@ -273,7 +344,7 @@ a:hover{text-decoration:underline}
   gap:12px;
   margin-top:14px;
   padding-top:12px;
-  border-top:1px solid rgba(27,36,48,0.08);
+  border-top:1px solid var(--line);
 }
 .service-health-meta span{
   color:var(--muted);
@@ -285,10 +356,10 @@ a:hover{text-decoration:underline}
 .service-health-meta strong{
   font-size:0.95rem;
 }
-.tone-good{background:linear-gradient(180deg, var(--good-soft), rgba(255,255,255,0.96))}
-.tone-warn{background:linear-gradient(180deg, var(--warm-soft), rgba(255,255,255,0.96))}
-.tone-bad{background:linear-gradient(180deg, var(--bad-soft), rgba(255,255,255,0.96))}
-.tone-neutral{background:linear-gradient(180deg, rgba(216,241,237,0.4), rgba(255,255,255,0.96))}
+.tone-good{background:linear-gradient(180deg, var(--good-soft), var(--surface-strong))}
+.tone-warn{background:linear-gradient(180deg, var(--warm-soft), var(--surface-strong))}
+.tone-bad{background:linear-gradient(180deg, var(--bad-soft), var(--surface-strong))}
+.tone-neutral{background:linear-gradient(180deg, var(--accent-soft), var(--surface-strong))}
 .notice{
   margin-top:18px;
   padding:16px 18px;
@@ -364,7 +435,7 @@ a:hover{text-decoration:underline}
 }
 .setup-step{
   padding:20px;
-  background:linear-gradient(180deg, rgba(255,255,255,0.96), rgba(245,239,231,0.92));
+  background:var(--panel-bg);
 }
 .setup-step h3{
   margin:0 0 8px;
@@ -385,7 +456,7 @@ a:hover{text-decoration:underline}
   padding:22px;
   border-radius:24px;
   background:var(--surface);
-  border:1px solid rgba(255,255,255,0.45);
+  border:1px solid var(--hero-chip-border);
   box-shadow:0 14px 34px rgba(22,44,58,0.08);
   backdrop-filter:blur(10px);
 }
@@ -413,13 +484,13 @@ a:hover{text-decoration:underline}
 }
 .form-field input,.form-field select{
   width:100%;
-  border:1px solid rgba(15,118,110,0.2);
+  border:1px solid var(--field-border);
   border-radius:14px;
-  background:rgba(255,255,255,0.94);
+  background:var(--field-bg);
   color:var(--text);
   font:inherit;
   padding:12px 14px;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,0.6);
+  box-shadow:var(--field-shadow);
 }
 .form-field input:focus,.form-field select:focus{
   outline:2px solid rgba(15,118,110,0.18);
@@ -445,9 +516,9 @@ a:hover{text-decoration:underline}
   gap:8px;
   padding:10px 14px;
   border-radius:999px;
-  background:rgba(255,255,255,0.72);
-  border:1px solid rgba(255,255,255,0.5);
-  color:var(--hero);
+  background:var(--soft-chip-bg);
+  border:1px solid var(--soft-chip-border);
+  color:var(--soft-chip-text);
   font-size:0.85rem;
   font-weight:700;
   box-shadow:0 8px 18px rgba(22,44,58,0.08);
@@ -487,9 +558,9 @@ a:hover{text-decoration:underline}
 .self-test-item{
   padding:16px;
   border-radius:18px;
-  border:1px solid rgba(23,55,72,0.08);
-  background:rgba(255,255,255,0.9);
-  box-shadow:0 8px 22px rgba(22,44,58,0.05);
+  border:1px solid var(--tile-border);
+  background:var(--tile-bg);
+  box-shadow:var(--tile-shadow);
 }
 .self-test-item h3{
   margin:0 0 6px;
@@ -506,7 +577,7 @@ a:hover{text-decoration:underline}
   margin-top:18px;
   padding:18px;
   border-radius:20px;
-  background:linear-gradient(180deg, rgba(247,231,216,0.86), rgba(255,255,255,0.96));
+  background:linear-gradient(180deg, var(--warm-soft), var(--surface-strong));
   border:1px solid rgba(199,103,30,0.18);
 }
 .recovery-panel h2{
@@ -523,9 +594,9 @@ a:hover{text-decoration:underline}
 .portal-nav a{
   padding:10px 14px;
   border-radius:999px;
-  background:rgba(255,255,255,0.72);
-  border:1px solid rgba(255,255,255,0.5);
-  color:var(--hero);
+  background:var(--soft-chip-bg);
+  border:1px solid var(--soft-chip-border);
+  color:var(--soft-chip-text);
   font-weight:700;
   box-shadow:0 8px 18px rgba(22,44,58,0.08);
 }
@@ -549,9 +620,9 @@ a:hover{text-decoration:underline}
 }
 .portal-mode-toggle button{
   width:auto;
-  background:rgba(255,255,255,0.82);
-  color:var(--hero);
-  border:1px solid rgba(23,55,72,0.12);
+  background:var(--soft-chip-bg);
+  color:var(--soft-chip-text);
+  border:1px solid var(--soft-chip-border);
   box-shadow:0 10px 24px rgba(22,44,58,0.08);
 }
 .portal-mode-toggle button.is-active{
@@ -561,7 +632,7 @@ a:hover{text-decoration:underline}
 }
 .portal-intro{
   margin-top:18px;
-  background:linear-gradient(180deg, rgba(255,255,255,0.92), rgba(245,239,231,0.92));
+  background:var(--panel-bg);
 }
 .portal-intro p{
   margin:10px 0 0;
@@ -597,8 +668,8 @@ a:hover{text-decoration:underline}
 .portal-subsection{
   padding:18px;
   border-radius:18px;
-  border:1px solid rgba(23,55,72,0.08);
-  background:linear-gradient(180deg, rgba(216,241,237,0.26), rgba(255,255,255,0.96));
+  border:1px solid var(--tile-border);
+  background:var(--section-bg);
 }
 .portal-subsection h3{
   margin:0 0 6px;
@@ -620,9 +691,9 @@ a:hover{text-decoration:underline}
 .portal-field-card{
   padding:16px;
   border-radius:18px;
-  border:1px solid rgba(23,55,72,0.08);
-  background:rgba(255,255,255,0.9);
-  box-shadow:0 8px 22px rgba(22,44,58,0.05);
+  border:1px solid var(--tile-border);
+  background:var(--tile-bg);
+  box-shadow:var(--tile-shadow);
 }
 .portal-field-card > div,
 .portal-field-card > fieldset{
@@ -641,13 +712,13 @@ a:hover{text-decoration:underline}
 }
 .portal-form input,.portal-form select{
   width:100%;
-  border:1px solid rgba(15,118,110,0.2);
+  border:1px solid var(--field-border);
   border-radius:14px;
-  background:rgba(255,255,255,0.94);
+  background:var(--field-bg);
   color:var(--text);
   font:inherit;
   padding:12px 14px;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,0.6);
+  box-shadow:var(--field-shadow);
 }
 .portal-form input:focus,.portal-form select:focus{
   outline:2px solid rgba(15,118,110,0.18);
@@ -680,8 +751,8 @@ a:hover{text-decoration:underline}
   min-width:82px;
   border:1px solid rgba(15,118,110,0.22);
   border-radius:14px;
-  background:rgba(216,241,237,0.68);
-  color:var(--hero);
+  background:var(--accent-soft);
+  color:var(--text);
   font-weight:700;
   padding:12px 14px;
   cursor:pointer;
@@ -749,9 +820,9 @@ button{
 .upload-field{
   padding:18px;
   border-radius:18px;
-  border:1px solid rgba(23,55,72,0.08);
-  background:rgba(255,255,255,0.92);
-  box-shadow:0 8px 22px rgba(22,44,58,0.05);
+  border:1px solid var(--tile-border);
+  background:var(--tile-bg);
+  box-shadow:var(--tile-shadow);
 }
 .upload-field h3{
   margin:0 0 8px;
@@ -815,7 +886,7 @@ button{
   width:min(100%, 540px);
   padding:24px;
   border-radius:24px;
-  border:1px solid rgba(255,255,255,0.44);
+  border:1px solid var(--hero-chip-border);
   box-shadow:0 18px 45px rgba(22,44,58,0.18);
 }
 .upload-popup-card h3{
@@ -861,9 +932,9 @@ button{
 }
 .upload-dismiss{
   margin-top:18px;
-  color:var(--hero);
-  background:rgba(255,255,255,0.84);
-  border:1px solid rgba(23,55,72,0.12);
+  color:var(--ghost-button-text);
+  background:var(--ghost-button-bg);
+  border:1px solid var(--ghost-button-border);
   box-shadow:0 10px 24px rgba(22,44,58,0.08);
 }
 .console-toolbar{
@@ -885,9 +956,9 @@ button{
   margin-top:18px;
   padding:18px;
   border-radius:20px;
-  border:1px solid rgba(23,55,72,0.1);
-  background:#11222d;
-  color:#dbe9ee;
+  border:1px solid var(--tile-border);
+  background:var(--console-bg);
+  color:var(--console-text);
   box-shadow:inset 0 1px 2px rgba(255,255,255,0.04);
   font-family:"Courier New","SFMono-Regular",monospace;
   font-size:0.92rem;
@@ -909,6 +980,13 @@ button{
   color:var(--muted);
   font-weight:700;
 }
+.gps-raw-view{
+  min-height:260px;
+  max-height:42vh;
+}
+.gps-actions{
+  margin-top:18px;
+}
 .console-actions{
   display:flex;
   flex-wrap:wrap;
@@ -928,13 +1006,13 @@ button{
 }
 .console-command-row input{
   width:100%;
-  border:1px solid rgba(15,118,110,0.2);
+  border:1px solid var(--field-border);
   border-radius:14px;
-  background:rgba(255,255,255,0.94);
+  background:var(--field-bg);
   color:var(--text);
   font:inherit;
   padding:12px 14px;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,0.6);
+  box-shadow:var(--field-shadow);
 }
 .console-command-row input:focus{
   outline:2px solid rgba(15,118,110,0.18);
@@ -974,15 +1052,15 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
 .portal-nav a{
   padding:10px 14px;
   border-radius:999px;
-  background:rgba(255,255,255,0.72);
-  border:1px solid rgba(255,255,255,0.5);
-  color:var(--hero);
+  background:var(--soft-chip-bg);
+  border:1px solid var(--soft-chip-border);
+  color:var(--soft-chip-text);
   font-weight:700;
   box-shadow:0 8px 18px rgba(22,44,58,0.08);
 }
 .portal-intro{
   margin-top:18px;
-  background:linear-gradient(180deg, rgba(255,255,255,0.92), rgba(245,239,231,0.92));
+  background:var(--panel-bg);
 }
 .portal-intro p{
   margin:10px 0 0;
@@ -1018,8 +1096,8 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
 .portal-subsection{
   padding:18px;
   border-radius:18px;
-  border:1px solid rgba(23,55,72,0.08);
-  background:linear-gradient(180deg, rgba(216,241,237,0.26), rgba(255,255,255,0.96));
+  border:1px solid var(--tile-border);
+  background:var(--section-bg);
 }
 .portal-subsection h3{
   margin:0 0 6px;
@@ -1041,9 +1119,9 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
 .portal-field-card{
   padding:16px;
   border-radius:18px;
-  border:1px solid rgba(23,55,72,0.08);
-  background:rgba(255,255,255,0.9);
-  box-shadow:0 8px 22px rgba(22,44,58,0.05);
+  border:1px solid var(--tile-border);
+  background:var(--tile-bg);
+  box-shadow:var(--tile-shadow);
 }
 .portal-field-card > div,
 .portal-field-card > fieldset{
@@ -1062,13 +1140,13 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
 }
 .portal-form input,.portal-form select{
   width:100%;
-  border:1px solid rgba(15,118,110,0.2);
+  border:1px solid var(--field-border);
   border-radius:14px;
-  background:rgba(255,255,255,0.94);
+  background:var(--field-bg);
   color:var(--text);
   font:inherit;
   padding:12px 14px;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,0.6);
+  box-shadow:var(--field-shadow);
 }
 .portal-form input:focus,.portal-form select:focus{
   outline:2px solid rgba(15,118,110,0.18);
@@ -1101,8 +1179,8 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
   min-width:82px;
   border:1px solid rgba(15,118,110,0.22);
   border-radius:14px;
-  background:rgba(216,241,237,0.68);
-  color:var(--hero);
+  background:var(--accent-soft);
+  color:var(--text);
   font-weight:700;
   padding:12px 14px;
   cursor:pointer;
@@ -1168,9 +1246,9 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
   margin-top:18px;
   padding:18px;
   border-radius:20px;
-  border:1px solid rgba(23,55,72,0.1);
-  background:#11222d;
-  color:#dbe9ee;
+  border:1px solid var(--tile-border);
+  background:var(--console-bg);
+  color:var(--console-text);
   box-shadow:inset 0 1px 2px rgba(255,255,255,0.04);
   font-family:"Courier New","SFMono-Regular",monospace;
   font-size:0.92rem;
@@ -1202,13 +1280,13 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
 }
 .console-command-row input{
   width:100%;
-  border:1px solid rgba(15,118,110,0.2);
+  border:1px solid var(--field-border);
   border-radius:14px;
-  background:rgba(255,255,255,0.94);
+  background:var(--field-bg);
   color:var(--text);
   font:inherit;
   padding:12px 14px;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,0.6);
+  box-shadow:var(--field-shadow);
 }
 .console-command-row input:focus{
   outline:2px solid rgba(15,118,110,0.18);
@@ -1300,16 +1378,19 @@ const char kLiveRefreshScript[] PROGMEM = R"clockjs(
 )clockjs";
 
 const char kConfigPortalScript[] PROGMEM = R"clockjs(
-document.addEventListener('DOMContentLoaded', function () {
+(function () {
+  function initPortalConfigPage() {
   var nav = document.getElementById('portal-nav-links');
   var runtimeMeta = document.getElementById('portal-runtime');
   var modeButtons = Array.prototype.slice.call(document.querySelectorAll('[data-config-view]'));
   var modeStorageKey = 'ledsmartclock-config-mode';
-  var basicVisibleGroups = ['iwcSys', 'Display', 'Clock', 'CurrentTemp', 'CurrentWeather', 'DailyWeather', 'Alerts'];
+  var basicVisibleGroups = ['iwcSys', 'Display', 'Clock', 'CurrentTemp', 'CurrentWeather', 'DailyWeather', 'Alerts', 'Status'];
   var basicVisibleFields = {
     iwcThingName: true,
     iwcWifiSsid: true,
     iwcWifiPassword: true,
+    web_password_protection: true,
+    web_dark_mode: true,
     iwcApPassword: true,
     ipgeoapi: true,
     weatherapi: true,
@@ -1327,23 +1408,30 @@ document.addEventListener('DOMContentLoaded', function () {
     current_temp_duration: true,
     show_current_weather: true,
     current_weather_interval: true,
+    current_weather_short_text: true,
     show_daily_weather: true,
     daily_weather_interval: true,
+    daily_weather_short_text: true,
     show_aqi: true,
     aqi_interval: true,
-    alert_interval: true
+    alert_interval: true,
+    enable_system_status: true,
+    enable_aqi_status: true,
+    enable_uvi_status: true,
+    green_status: true
   };
   var sectionNotes = {
-    iwcSys: 'Network identity, credentials, API keys, and maintenance controls.',
+    iwcSys: 'Network identity, credentials, web theme, API keys, and maintenance controls.',
     Display: 'Brightness, scrolling, colors, and date messaging.',
     Clock: 'Clock format, timezone fallback, and clock-face appearance.',
     CurrentTemp: 'Temperature display cadence and custom coloring.',
     CurrentWeather: 'Current-conditions scrolling and presentation timing.',
     DailyWeather: 'Forecast and AQI summaries used during the daily rotation.',
     Alerts: 'Alert polling cadence and interrupt timing.',
-    Status: 'Corner status pixels that summarize system, AQI, and UV state.',
+    Status: 'Corner status pixels that summarize system, AQI, and UV state. Turn any of the three corners off entirely here.',
     Sun: 'Sunrise and sunset messages based on local solar events.',
-    Location: 'Coordinate overrides and location-change messaging.'
+    Location: 'Coordinate overrides and location-change messaging.',
+    GPS: 'Receiver-specific troubleshooting controls such as UART baud and hardware recovery.'
   };
 
   if (runtimeMeta && runtimeMeta.dataset.ntpServer) {
@@ -1421,11 +1509,13 @@ document.addEventListener('DOMContentLoaded', function () {
     var sections = [
       {
         title: 'Connectivity & Access',
-        description: 'How you reach the clock, secure the portal, and keep the device discoverable.',
+        description: 'How you reach the clock, secure the portal, choose the web theme, and keep the device discoverable.',
         nodes: [
           findWrapper('iwcThingName'),
           findWrapper('iwcWifiSsid'),
           findWrapper('iwcWifiPassword'),
+          findWrapper('web_password_protection'),
+          findWrapper('web_dark_mode'),
           findWrapper('iwcApPassword'),
           findWrapper('iwcApTimeout')
         ]
@@ -1543,6 +1633,21 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
+  function syncPortalPasswordProtection() {
+    var protectionToggle = document.getElementById('web_password_protection');
+    var passwordField = document.getElementById('iwcApPassword');
+    if (!protectionToggle || !passwordField) {
+      return;
+    }
+
+    var passwordCard = passwordField.closest('.portal-field-card') || passwordField.parentElement;
+    if (!passwordCard) {
+      return;
+    }
+
+    passwordCard.hidden = !protectionToggle.checked;
+  }
+
   document.querySelectorAll('.portal-form > fieldset[id]').forEach(function (group) {
     addSectionNote(group);
   });
@@ -1581,9 +1686,19 @@ document.addEventListener('DOMContentLoaded', function () {
     wrapper.appendChild(button);
   });
 
+  var protectionToggle = document.getElementById('web_password_protection');
+  if (protectionToggle && protectionToggle.dataset.portalBound !== 'true') {
+    protectionToggle.dataset.portalBound = 'true';
+    protectionToggle.addEventListener('change', syncPortalPasswordProtection);
+  }
+  syncPortalPasswordProtection();
+
   if (!nav) {
     return;
   }
+
+  nav.innerHTML = '';
+  nav.style.display = '';
 
   document.querySelectorAll('.portal-form > fieldset[id]').forEach(function (group) {
     var legend = group.firstElementChild;
@@ -1604,6 +1719,10 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   modeButtons.forEach(function (button) {
+    if (button.dataset.modeBound === 'true') {
+      return;
+    }
+    button.dataset.modeBound = 'true';
     button.addEventListener('click', function () {
       var mode = button.dataset.configView === 'advanced' ? 'advanced' : 'basic';
       try {
@@ -1611,6 +1730,7 @@ document.addEventListener('DOMContentLoaded', function () {
       } catch (error) {
       }
       applyConfigMode(mode);
+      syncPortalPasswordProtection();
     });
   });
 
@@ -1622,12 +1742,23 @@ document.addEventListener('DOMContentLoaded', function () {
   } catch (error) {
   }
   applyConfigMode(initialMode);
-});
+  syncPortalPasswordProtection();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPortalConfigPage, { once: true });
+  } else {
+    initPortalConfigPage();
+  }
+  window.addEventListener('pageshow', initPortalConfigPage);
+})();
 )clockjs";
 
 const char kOnboardingScript[] PROGMEM = R"clockjs(
 document.addEventListener('DOMContentLoaded', function () {
   var steps = Array.prototype.slice.call(document.querySelectorAll('.onboarding-step[data-step]'));
+  var protectionMode = document.getElementById('web_protection');
+  var adminPassword = document.getElementById('admin_password');
   if (!steps.length) {
     return;
   }
@@ -1660,6 +1791,21 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
+  function syncProtectionFields() {
+    if (!protectionMode || !adminPassword || !adminPassword.parentElement) {
+      return;
+    }
+    var enabled = protectionMode.value !== 'disabled';
+    adminPassword.parentElement.hidden = !enabled;
+    adminPassword.required = enabled;
+    adminPassword.minLength = enabled ? 8 : 0;
+  }
+
+  if (protectionMode) {
+    protectionMode.addEventListener('change', syncProtectionFields);
+  }
+
+  syncProtectionFields();
   showStep(1);
 });
 )clockjs";
@@ -2010,6 +2156,46 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
+  document.querySelectorAll('[data-console-clear]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      if (!window.confirm('Clear the retained web console buffer? This only removes the in-memory log tail.')) {
+        return;
+      }
+
+      fetch(withToken('/console/clear'), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+        },
+        body: 'token=' + encodeURIComponent(accessToken)
+      }).then(function (response) {
+        return response.text().then(function (body) {
+          var payload = {};
+          try {
+            payload = body ? JSON.parse(body) : {};
+          } catch (error) {
+            payload = {};
+          }
+
+          if (!response.ok || payload.ok === false) {
+            var message = payload.error || ('HTTP ' + response.status);
+            throw new Error(message);
+          }
+
+          cursor = Number(payload.cursor || 0);
+          if (output) {
+            output.textContent = '';
+            output.dataset.cursor = String(cursor);
+          }
+          setStatus(payload.message || 'Console buffer cleared.');
+        });
+      }).catch(function (error) {
+        setStatus('Clear failed: ' + error.message);
+      });
+    });
+  });
+
   if (output) {
     var initialText = output.textContent || '';
     output.textContent = '';
@@ -2034,6 +2220,167 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 )clockjs";
 
+const char kDiagnosticsPageScript[] PROGMEM = R"clockjs(
+document.addEventListener('DOMContentLoaded', function () {
+  var rawPollTimer = null;
+  var rawPollInFlight = false;
+  var actionStatus = document.getElementById('diagnostics-action-status');
+
+  function rawOutput() {
+    return document.getElementById('gps-raw-output');
+  }
+
+  function rawStatus() {
+    return document.getElementById('gps-raw-status');
+  }
+
+  function setRawStatus(text) {
+    var status = rawStatus();
+    if (status) {
+      status.textContent = text;
+    }
+  }
+
+  function setActionStatus(text) {
+    if (actionStatus) {
+      actionStatus.textContent = text;
+    }
+  }
+
+  function scheduleRawPoll(delayMs) {
+    if (rawPollTimer) {
+      window.clearTimeout(rawPollTimer);
+    }
+    if (document.hidden) {
+      return;
+    }
+    rawPollTimer = window.setTimeout(fetchRawNmea, delayMs);
+  }
+
+  function fetchRawNmea() {
+    var output = rawOutput();
+    if (!output || rawPollInFlight || document.hidden) {
+      return;
+    }
+
+    rawPollInFlight = true;
+    fetch('/gps/raw', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: {'X-Requested-With': 'ledsmartclock-gps'}
+    }).then(function (response) {
+      if (!response.ok) {
+        return response.text().then(function (body) {
+          throw new Error('HTTP ' + response.status + (body ? ': ' + body : ''));
+        });
+      }
+      return response.text().then(function (text) {
+        var wasNearBottom = (output.scrollTop + output.clientHeight + 40) >= output.scrollHeight;
+        output.textContent = text || 'No raw NMEA captured yet.';
+        if (wasNearBottom) {
+          output.scrollTop = output.scrollHeight;
+        }
+        setRawStatus('Live GPS raw view connected.');
+      });
+    }).catch(function (error) {
+      setRawStatus('GPS raw view failed: ' + error.message);
+    }).finally(function () {
+      rawPollInFlight = false;
+      scheduleRawPoll(1500);
+    });
+  }
+
+  document.addEventListener('click', function (event) {
+    var displayButton = event.target.closest('[data-display-test]');
+    if (displayButton) {
+      event.preventDefault();
+
+      var action = displayButton.dataset.displayTest || '';
+      if (!action) {
+        return;
+      }
+
+      setActionStatus('Queueing display test "' + action + '"...');
+      fetch('/display-test', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+        },
+        body: 'action=' + encodeURIComponent(action)
+      }).then(function (response) {
+        return response.text().then(function (body) {
+          var payload = {};
+          try {
+            payload = body ? JSON.parse(body) : {};
+          } catch (error) {
+            payload = {};
+          }
+
+          if (!response.ok || payload.ok === false) {
+            throw new Error(payload.error || ('HTTP ' + response.status));
+          }
+
+          setActionStatus(payload.message || ('Queued display test "' + action + '".'));
+        });
+      }).catch(function (error) {
+        setActionStatus('Display test failed: ' + error.message);
+      });
+      return;
+    }
+
+    var button = event.target.closest('[data-gps-action]');
+    if (!button) {
+      return;
+    }
+    event.preventDefault();
+
+    var action = button.dataset.gpsAction || '';
+    if (!action) {
+      return;
+    }
+
+    setRawStatus('Sending GPS action "' + action + '"...');
+    fetch('/gps/action', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+      },
+      body: 'action=' + encodeURIComponent(action)
+    }).then(function (response) {
+      return response.text().then(function (body) {
+        var payload = {};
+        try {
+          payload = body ? JSON.parse(body) : {};
+        } catch (error) {
+          payload = {};
+        }
+
+        if (!response.ok || payload.ok === false) {
+          throw new Error(payload.error || ('HTTP ' + response.status));
+        }
+
+        setRawStatus(payload.message || ('GPS action "' + action + '" completed.'));
+        fetchRawNmea();
+      });
+    }).catch(function (error) {
+      setRawStatus('GPS action failed: ' + error.message);
+    });
+  });
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      window.clearTimeout(rawPollTimer);
+    } else {
+      scheduleRawPoll(250);
+    }
+  });
+
+  scheduleRawPoll(250);
+});
+)clockjs";
+
 /** Returns the current portal/network state as an array-safe label. */
 String currentConnectionStateLabel()
 {
@@ -2050,7 +2397,7 @@ bool isSetupPortalState()
 /** Returns true when the device is in its normal secured online state. */
 bool isProtectedPortalState()
 {
-  return iotWebConf.getState() == iotwebconf::OnLine;
+  return iotWebConf.getState() == iotwebconf::OnLine && web_password_protection.isChecked();
 }
 
 /** Percent-encodes a path so it can safely round-trip through query parameters. */
@@ -2168,7 +2515,7 @@ void redirectToLogin(const String &nextPath)
 {
   if (!isProtectedPortalState())
   {
-    redirectTo(String(kOnboardingPath));
+    redirectTo(isSetupPortalState() ? String(kOnboardingPath) : String("/"));
     return;
   }
 
@@ -2714,9 +3061,14 @@ void appendServiceHealthCard(String &html, DiagnosticService service, acetime_t 
 /** Opens the page shell and injects the shared CSS theme. */
 void appendDocumentHead(String &html, const char *title, bool autoRefresh)
 {
-  html += F("<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>");
+  const bool darkMode = web_dark_mode.isChecked();
+  html += F("<!DOCTYPE html><html lang='en' data-web-theme='");
+  html += (darkMode ? F("dark") : F("light"));
+  html += F("'><head><meta charset='utf-8'>");
   html += F("<meta name='viewport' content='width=device-width, initial-scale=1, user-scalable=no'>");
-  html += F("<meta name='theme-color' content='#173748'>");
+  html += F("<meta name='theme-color' content='");
+  html += (darkMode ? F("#101d28") : F("#173748"));
+  html += F("'>");
   if (autoRefresh)
     html += F("<noscript><meta http-equiv='refresh' content='15'></noscript>");
   html += F("<title>");
@@ -2820,7 +3172,8 @@ OnboardingDraft currentOnboardingDraft()
   OnboardingDraft draft;
   draft.wifiSsid = String(iotWebConf.getWifiSsidParameter()->valueBuffer);
   draft.wifiPassword = String(iotWebConf.getWifiPasswordParameter()->valueBuffer);
-  draft.adminPassword = String(iotWebConf.getApPasswordParameter()->valueBuffer);
+  draft.enableWebPassword = web_password_protection.isChecked();
+  draft.adminPassword = draft.enableWebPassword ? String(iotWebConf.getApPasswordParameter()->valueBuffer) : String();
   draft.weatherApiKey = String(weatherapi.value());
   draft.ipGeoApiKey = String(ipgeoapi.value());
   draft.useFixedTimezone = enable_fixed_tz.isChecked();
@@ -2861,6 +3214,7 @@ OnboardingDraft submittedOnboardingDraft()
   OnboardingDraft draft = currentOnboardingDraft();
   draft.wifiSsid = server.hasArg("wifi_ssid") ? server.arg("wifi_ssid") : draft.wifiSsid;
   draft.wifiPassword = server.hasArg("wifi_password") ? server.arg("wifi_password") : draft.wifiPassword;
+  draft.enableWebPassword = !server.hasArg("web_protection") || server.arg("web_protection") != "disabled";
   draft.adminPassword = server.hasArg("admin_password") ? server.arg("admin_password") : draft.adminPassword;
   draft.weatherApiKey = server.hasArg("weather_api") ? server.arg("weather_api") : draft.weatherApiKey;
   draft.ipGeoApiKey = server.hasArg("ipgeo_api") ? server.arg("ipgeo_api") : draft.ipGeoApiKey;
@@ -3005,7 +3359,7 @@ void appendSetupPage(String &html, const OnboardingDraft *draft, const char *not
   html += F("<div class='shell'><header class='hero'>");
   html += F("<p class='eyebrow'>LED Smart Clock</p>");
   html += F("<h1>First-Boot Onboarding</h1>");
-  html += F("<p class='lede'>Walk through Wi-Fi, the clock password, API keys, timezone behavior, and a final self-test for firmware v");
+  html += F("<p class='lede'>Walk through Wi-Fi, optional web password protection, API keys, timezone behavior, and a final self-test for firmware v");
   html += VERSION_SEMVER;
   html += F(".</p><div class='action-row'>");
   html += F("<a class='button-link primary' href='");
@@ -3022,7 +3376,7 @@ void appendSetupPage(String &html, const OnboardingDraft *draft, const char *not
   html += F("</div><div class='metric-grid'>");
   appendMetricCard(html, "Firmware", htmlEscape(String(VERSION_SEMVER)), "tone-neutral");
   appendMetricCard(html, "Wi-Fi Mode", F("Captive Portal"), "tone-warn");
-  appendMetricCard(html, "Web Password", effectiveDraft.adminPassword.length() > 0 ? F("Set") : F("Needed"), effectiveDraft.adminPassword.length() > 0 ? "tone-good" : "tone-warn");
+  appendMetricCard(html, "Web Access", effectiveDraft.enableWebPassword ? F("Protected") : F("Open"), effectiveDraft.enableWebPassword ? "tone-good" : "tone-neutral");
   appendMetricCard(html, "Weather API", isApiValid(weatherapi.value()) ? F("Configured") : F("Optional"), isApiValid(weatherapi.value()) ? "tone-good" : "tone-warn");
   html += F("</div></header>");
 
@@ -3031,7 +3385,7 @@ void appendSetupPage(String &html, const OnboardingDraft *draft, const char *not
     appendNotice(html, noticeToneClass, noticeMessage);
 
   html += F("<section class='card'><div class='card-header'><h2>Guided Setup</h2><p class='card-subtitle'>Without JavaScript every section stays visible. With JavaScript enabled, the Next and Back buttons turn this into a focused step-by-step setup flow.</p></div><div class='wizard-progress'>");
-  html += F("<span class='step-pill' data-step-pill='1'><strong>1</strong>Wi-Fi & Password</span>");
+  html += F("<span class='step-pill' data-step-pill='1'><strong>1</strong>Wi-Fi & Access</span>");
   html += F("<span class='step-pill' data-step-pill='2'><strong>2</strong>API Keys</span>");
   html += F("<span class='step-pill' data-step-pill='3'><strong>3</strong>Timezone</span>");
   html += F("<span class='step-pill' data-step-pill='4'><strong>4</strong>Review & Save</span></div>");
@@ -3039,14 +3393,21 @@ void appendSetupPage(String &html, const OnboardingDraft *draft, const char *not
   html += kOnboardingPath;
   html += F("'>");
 
-  html += F("<section class='onboarding-step' data-step='1'><div class='card-header'><h2>Step 1: Wi-Fi & Password</h2><p class='card-subtitle'>Tell the clock which Wi-Fi network to join and set the password that secures the setup portal plus the full web interface after onboarding is finished.</p></div><div class='field-grid'>");
+  html += F("<section class='onboarding-step' data-step='1'><div class='card-header'><h2>Step 1: Wi-Fi & Access</h2><p class='card-subtitle'>Tell the clock which Wi-Fi network to join, then choose whether the dashboard and maintenance pages should require a password after onboarding is finished.</p></div><div class='field-grid'>");
   appendFormField(html, "Wi-Fi SSID", "wifi_ssid", effectiveDraft.wifiSsid, "text",
                   "This is the normal Wi-Fi network the clock should join after setup.", "autocomplete='username' required");
   appendFormField(html, "Wi-Fi Password", "wifi_password", effectiveDraft.wifiPassword, "password",
                   "Leave blank only for an open Wi-Fi network.", "autocomplete='current-password'");
+  html += F("<div class='form-field'><label for='web_protection'>Password Protect The Web Interface</label><select id='web_protection' name='web_protection'><option value='enabled'");
+  if (effectiveDraft.enableWebPassword)
+    html += F(" selected");
+  html += F(">Enabled (recommended)</option><option value='disabled'");
+  if (!effectiveDraft.enableWebPassword)
+    html += F(" selected");
+  html += F(">Disabled</option></select><p class='field-help'>When enabled, the dashboard, diagnostics, console, firmware page, and configuration portal require the clock password before access.</p></div>");
   appendFormField(html, "Clock Web Password", "admin_password", effectiveDraft.adminPassword, "password",
-                  "This one password protects the dashboard, diagnostics, console, firmware page, configuration portal, and the setup AP.",
-                  "autocomplete='new-password' required minlength='8'");
+                  "Only required when password protection is enabled above. Recovery setup still remains available with the physical configuration button.",
+                  "autocomplete='new-password' minlength='8'");
   html += F("</div><div class='onboarding-actions'><span class='spacer'></span><button type='button' data-next-step='2'>Next: API Keys</button></div></section>");
 
   html += F("<section class='onboarding-step' data-step='2'><div class='card-header'><h2>Step 2: API Keys</h2><p class='card-subtitle'>Add the service keys the clock uses for weather, air quality, reverse geocoding, and automatic timezone/location fallback.</p></div><div class='field-grid'>");
@@ -3072,10 +3433,16 @@ void appendSetupPage(String &html, const OnboardingDraft *draft, const char *not
                      effectiveDraft.wifiSsid.length() > 0 ? String(F("SSID entered")) : String(F("Missing SSID")),
                      effectiveDraft.wifiSsid.length() > 0 ? String(F("The clock can attempt to join ")) + effectiveDraft.wifiSsid
                                                           : String(F("Enter the Wi-Fi network name before saving onboarding.")));
-  appendSelfTestItem(html, "Password Ready", effectiveDraft.adminPassword.length() >= 8 ? "tone-good" : "tone-bad",
-                     effectiveDraft.adminPassword.length() >= 8 ? String(F("Password set")) : String(F("Password too short")),
-                     effectiveDraft.adminPassword.length() >= 8 ? String(F("The same password will secure both setup and the full web UI."))
-                                                                : String(F("Use at least 8 characters so the clock can stay in secured mode.")));
+  appendSelfTestItem(html, "Web Access", effectiveDraft.enableWebPassword
+                                                ? (effectiveDraft.adminPassword.length() >= 8 ? "tone-good" : "tone-bad")
+                                                : "tone-neutral",
+                     effectiveDraft.enableWebPassword
+                         ? (effectiveDraft.adminPassword.length() >= 8 ? String(F("Password protection enabled")) : String(F("Password too short")))
+                         : String(F("No password required")),
+                     effectiveDraft.enableWebPassword
+                         ? (effectiveDraft.adminPassword.length() >= 8 ? String(F("The web interface will require the clock password after setup."))
+                                                                      : String(F("Use at least 8 characters or disable protection before saving.")))
+                         : String(F("The dashboard and maintenance pages will open directly without a login.")));
   appendSelfTestItem(html, "OpenWeather", effectiveDraft.weatherApiKey.length() > 0 ? "tone-good" : "tone-warn",
                      effectiveDraft.weatherApiKey.length() > 0 ? String(F("Configured")) : String(F("Optional but missing")),
                      effectiveDraft.weatherApiKey.length() > 0 ? String(F("Weather, AQI, and reverse-geocode services can run."))
@@ -3278,6 +3645,7 @@ void appendConsolePage(String &html, const String &accessToken)
     html += htmlEscape(accessToken);
   }
   html += F("'>Download Console Log</a>");
+  html += F("<button type='button' class='button-link danger' data-console-clear='true'>Clear Console Buffer</button>");
   html += F("<span class='status-chip'><strong>Incremental Feed</strong><span><code>/console/log</code></span></span>");
   html += F("<span class='status-chip'><strong>Buffer Scope</strong><span>Recent runtime output retained in RAM only</span></span>");
   html += F("</div><pre id='console-output' class='console-view' data-cursor='");
@@ -3287,17 +3655,26 @@ void appendConsolePage(String &html, const String &accessToken)
   html += F("</pre><p id='console-status' class='console-status'>Connecting to live console feed...</p></section>");
 
   html += F("<section id='console-commands' class='card card-span'><div class='card-header'><h2>Send Debug Commands</h2><p class='card-subtitle'>Commands map to the existing serial shortcuts. The first non-space character is used, so enter values such as h, d, g, or s.</p></div><dl class='kv-list'>");
-  appendKeyValueRow(html, "Common Commands", F("<code>h</code> help, <code>d</code> dump debug, <code>g</code> GPS status, <code>s</code> coroutine states, <code>l</code> debug logging"));
-  appendKeyValueRow(html, "Display Tests", F("<code>a</code> AQI, <code>w</code> current weather, <code>e</code> date, <code>q</code> daily weather, <code>t</code> alert flash"));
+  appendKeyValueRow(html, "Common Commands", F("<code>h</code> help, <code>d</code> dump debug, <code>g</code> GPS status, <code>n</code> raw NMEA, <code>p</code> GPS reset, <code>s</code> coroutine states, <code>l</code> debug logging"));
+  appendKeyValueRow(html, "Display Tests", F("<code>a</code> AQI scroller, <code>w</code> current weather, <code>q</code> daily weather, <code>x</code> alert scroller, <code>y</code> temp + icon, <code>e</code> date, <code>t</code> alert flash"));
+  appendKeyValueRow(html, "Schedule Impact", F("<code>a</code>, <code>w</code>, <code>q</code>, <code>x</code>, and <code>y</code> run one-shot tests without changing the next scheduled display time."));
+  appendKeyValueRow(html, "Receiver Recovery", F("<code>p</code> resets the GPS parser and restarts the UART, <code>u</code> restarts only the GPS UART using the configured baud"));
   appendKeyValueRow(html, "Caution", F("<code>r</code> queues a reboot from the web console after the HTTP response returns"));
   html += F("</dl><div class='console-toolbar'>");
   html += F("<button type='button' data-console-command='h'>Help</button>");
   html += F("<button type='button' data-console-command='d'>Debug Dump</button>");
   html += F("<button type='button' data-console-command='g'>GPS Status</button>");
+  html += F("<button type='button' data-console-command='w'>Current Weather</button>");
+  html += F("<button type='button' data-console-command='q'>Daily Weather</button>");
+  html += F("<button type='button' data-console-command='a'>AQI</button>");
+  html += F("<button type='button' data-console-command='x'>Alert Scroll</button>");
+  html += F("<button type='button' data-console-command='y'>Temp + Icon</button>");
+  html += F("<button type='button' data-console-command='n'>Raw NMEA</button>");
+  html += F("<button type='button' data-console-command='p'>Reset GPS</button>");
   html += F("<button type='button' data-console-command='s'>Coroutines</button>");
   html += F("<button type='button' data-console-command='l'>Debug Logs</button>");
   html += F("<button type='button' data-console-command='r'>Reboot</button>");
-  html += F("</div><form id='console-command-form' class='console-command-form'><div class='console-command-row'><input id='console-command' name='cmd' type='text' maxlength='8' placeholder='Enter a command such as h, d, g, s, or r'><button type='submit'>Send Command</button></div></form>");
+  html += F("</div><form id='console-command-form' class='console-command-form'><div class='console-command-row'><input id='console-command' name='cmd' type='text' maxlength='8' placeholder='Enter a command such as w, q, a, x, y, g, n, or r'><button type='submit'>Send Command</button></div></form>");
   html += F("<p class='console-note'>Web commands use the same handlers as the USB serial console, and their output is written back into this same RAM log buffer.</p></section>");
   html += F("</main><script>");
   html += FPSTR(kConsolePageScript);
@@ -3319,10 +3696,15 @@ void handleThemeCss()
 void appendDiagnosticsContent(String &html)
 {
   const acetime_t now = systemClock.getNow();
+  const uint32_t nowMillis = millis();
   const size_t healthyCount = countDiagnostics(true, true);
   const size_t pendingCount = countPendingDiagnostics();
   const size_t disabledCount = countDisabledDiagnostics();
   const size_t attentionCount = countAttentionDiagnostics();
+  const String gpsRawSnapshot = getGpsRawNmeaSnapshot();
+  const String gpsLastByteAge = gps.moduleDetected ? elapsedTime((nowMillis - gps.lastByteMillis + 999UL) / 1000UL) : String(F("Never"));
+  const String gpsLastResetAge = gps.lastResetMillis == 0 ? String(F("Never"))
+                                                          : elapsedTime((nowMillis - gps.lastResetMillis + 999UL) / 1000UL);
 
   html += F("<header class='hero'>");
   html += F("<p class='eyebrow'>LED Smart Clock Diagnostics</p>");
@@ -3355,6 +3737,7 @@ void appendDiagnosticsContent(String &html)
   else if (pendingCount > 0)
     appendNotice(html, "notice-warn", F("Some services are still waiting on Wi-Fi, coordinates, API keys, or first successful data. Waiting states are normal during boot and setup."));
 
+  html += F("<p id='diagnostics-action-status' class='console-status'>Display and GPS actions run immediately without changing the normal schedule.</p>");
   html += F("<main class='content-grid'>");
 
   appendTonedCardStart(html, "Connectivity", "Current network state, captive portal mode, and HTTP transport readiness.", diagnosticTone(DiagnosticService::Wifi));
@@ -3388,15 +3771,38 @@ void appendDiagnosticsContent(String &html)
   appendTonedCardStart(html, "GPS", "Receiver UART activity, fix acquisition, and the live navigation data currently available.", diagnosticTone(DiagnosticService::Gps));
   appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::Gps));
   appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::Gps));
+  appendKeyValueRow(html, "Configured Baud", htmlEscape(String(gpsConfiguredBaud())));
+  appendKeyValueRow(html, "Active UART Baud", htmlEscape(String(gpsActiveBaud())));
   appendKeyValueRow(html, "Module Detected", gps.moduleDetected ? F("Yes") : F("No"));
+  appendKeyValueRow(html, "Last UART Byte", htmlEscape(gpsLastByteAge));
   appendKeyValueRow(html, "Fix", gps.fix ? F("Yes") : F("No"));
   appendKeyValueRow(html, "Waiting For Fix", gps.waitingForFix ? F("Yes") : F("No"));
   appendKeyValueRow(html, "Satellites", htmlEscape(String(gps.sats)));
   appendKeyValueRow(html, "Coordinates", htmlEscape(String(gps.lat, 5) + F(", ") + String(gps.lon, 5)));
   appendKeyValueRow(html, "HDOP", htmlEscape(String(gps.hdop)));
   appendKeyValueRow(html, "Elevation", htmlEscape(String(gps.elevation) + F(" ft")));
+  appendKeyValueRow(html, "Parsed Chars", htmlEscape(formatLargeNumber(GPS.charsProcessed())));
+  appendKeyValueRow(html, "Sentences With Fix", htmlEscape(formatLargeNumber(GPS.sentencesWithFix())));
+  appendKeyValueRow(html, "Parser Resets", htmlEscape(String(gps.parserResetCount)));
+  appendKeyValueRow(html, "UART Restarts", htmlEscape(String(gps.uartRestartCount)));
+  appendKeyValueRow(html, "Last Reset", htmlEscape(gpsLastResetAge));
+  appendKeyValueRow(html, "Reset Reason", safeText(String(gps.lastResetReason), "None"));
   appendKeyValueRow(html, "Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::Gps).lastSuccess));
   appendKeyValueRow(html, "Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::Gps).lastFailure));
+  html += F("<div class='console-toolbar gps-actions'>");
+  html += F("<button type='button' data-gps-action='restart_uart'>Restart UART</button>");
+  html += F("<button type='button' data-gps-action='reset_parser'>Reset Parser &amp; UART</button>");
+  html += F("<button type='button' data-gps-action='clear_raw'>Clear Raw NMEA</button>");
+  html += F("</div>");
+  appendCardEnd(html);
+
+  appendTonedCardStart(html, "GPS Raw NMEA", "Recent raw NMEA traffic captured from the GPS UART. Use it to confirm the receiver is alive, the baud is correct, and complete sentences are arriving.", diagnosticTone(DiagnosticService::Gps));
+  appendKeyValueRow(html, "Retained Bytes", htmlEscape(String(gpsRawNmeaLength())));
+  appendKeyValueRow(html, "Captured Bytes", htmlEscape(formatLargeNumber(static_cast<int>(gps.rawBytesCaptured))));
+  appendKeyValueRow(html, "Captured Sentences", htmlEscape(formatLargeNumber(static_cast<int>(gps.rawSentenceCount))));
+  html += F("<pre id='gps-raw-output' class='console-view gps-raw-view'>");
+  html += htmlEscape(gpsRawSnapshot.length() > 0 ? gpsRawSnapshot : String(F("No raw NMEA captured yet.")));
+  html += F("</pre><p id='gps-raw-status' class='console-status'>Connecting to live GPS raw view...</p>");
   appendCardEnd(html);
 
   appendTonedCardStart(html, "Weather", "Current conditions refresh health and the data used by the current-weather and daily-weather displays.", diagnosticTone(DiagnosticService::Weather));
@@ -3410,6 +3816,11 @@ void appendDiagnosticsContent(String &html)
   appendKeyValueRow(html, "Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::Weather).lastFailure));
   appendKeyValueRow(html, "Last Code", diagnosticCodeLabel(DiagnosticService::Weather));
   appendKeyValueRow(html, "Next Weather Scroll", formatUntil(now, lastshown.currentweather, static_cast<uint32_t>(current_weather_interval.value()) * 3600U));
+  html += F("<div class='console-toolbar'>");
+  html += F("<button type='button' data-display-test='current_weather'>Test Current Weather</button>");
+  html += F("<button type='button' data-display-test='daily_weather'>Test Daily Forecast</button>");
+  html += F("<button type='button' data-display-test='temp_icon'>Test Temp + Icon</button>");
+  html += F("</div>");
   appendCardEnd(html);
 
   appendTonedCardStart(html, "Air Quality", "AQI forecast refresh health and the pollutant summary used by the AQI display block.", diagnosticTone(DiagnosticService::AirQuality));
@@ -3423,6 +3834,9 @@ void appendDiagnosticsContent(String &html)
   appendKeyValueRow(html, "Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::AirQuality).lastFailure));
   appendKeyValueRow(html, "Last Code", diagnosticCodeLabel(DiagnosticService::AirQuality));
   appendKeyValueRow(html, "Next AQI Scroll", formatUntil(now, lastshown.aqi, static_cast<uint32_t>(aqi_interval.value()) * 60U));
+  html += F("<div class='console-toolbar'>");
+  html += F("<button type='button' data-display-test='aqi'>Test AQI Scroll</button>");
+  html += F("</div>");
   appendCardEnd(html);
 
   appendTonedCardStart(html, "Alerts", "weather.gov polling health and the currently selected watch or warning text.", diagnosticTone(DiagnosticService::Alerts));
@@ -3440,6 +3854,9 @@ void appendDiagnosticsContent(String &html)
   appendKeyValueRow(html, "Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::Alerts).lastSuccess));
   appendKeyValueRow(html, "Last Failure", formatAgo(now, serviceDiagnostic(DiagnosticService::Alerts).lastFailure));
   appendKeyValueRow(html, "Last Code", diagnosticCodeLabel(DiagnosticService::Alerts));
+  html += F("<div class='console-toolbar'>");
+  html += F("<button type='button' data-display-test='alerts'>Test Alert Scroll</button>");
+  html += F("</div>");
   appendCardEnd(html);
 
   appendTonedCardStart(html, "IP Geolocation", "Public-IP-based timezone and coarse coordinate fallback state.", diagnosticTone(DiagnosticService::IpGeo));
@@ -3477,6 +3894,7 @@ void appendDiagnosticsPage(String &html)
   appendLiveShellEnd(html);
   html += F("<script>");
   html += FPSTR(kLiveRefreshScript);
+  html += FPSTR(kDiagnosticsPageScript);
   html += F("</script></body></html>");
 }
 
@@ -3639,7 +4057,12 @@ class ClockHtmlFormatProvider : public iotwebconf::HtmlFormatProvider
 public:
   String getHead() override
   {
-    return F("<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1, user-scalable=no'><title>LED Smart Clock Configuration</title>");
+    String html;
+    html.reserve(192);
+    html += F("<!DOCTYPE html><html lang='en' data-web-theme='");
+    html += (web_dark_mode.isChecked() ? F("dark") : F("light"));
+    html += F("'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1, user-scalable=no'><title>LED Smart Clock Configuration</title>");
+    return html;
   }
 
   String getStyle() override
@@ -3659,7 +4082,9 @@ public:
 
   String getHeadExtension() override
   {
-    return F("<meta name='theme-color' content='#173748'>");
+    return web_dark_mode.isChecked()
+               ? String(F("<meta name='theme-color' content='#101d28'>"))
+               : String(F("<meta name='theme-color' content='#173748'>"));
   }
 
   String getBodyInner() override
@@ -3739,12 +4164,13 @@ bool applyOnboardingDraft(const OnboardingDraft &draft, String &error)
 
   const String wifiSsid = draft.wifiSsid;
   const String adminPassword = draft.adminPassword;
+  const bool enableWebProtection = draft.enableWebPassword;
   if (wifiSsid.length() == 0)
   {
     error = F("Wi-Fi SSID is required before onboarding can finish.");
     return false;
   }
-  if (adminPassword.length() < 8)
+  if (enableWebProtection && adminPassword.length() < 8)
   {
     error = F("Choose a password that is at least 8 characters long.");
     return false;
@@ -3752,13 +4178,19 @@ bool applyOnboardingDraft(const OnboardingDraft &draft, String &error)
 
   if (!copyParameterValue(*iotWebConf.getWifiSsidParameter(), wifiSsid, "Wi-Fi SSID", error) ||
       !copyParameterValue(*iotWebConf.getWifiPasswordParameter(), draft.wifiPassword, "Wi-Fi password", error) ||
-      !copyParameterValue(*iotWebConf.getApPasswordParameter(), adminPassword, "Clock password", error) ||
       !copyParameterValue(weatherapi, draft.weatherApiKey, "OpenWeather API key", error) ||
       !copyParameterValue(ipgeoapi, draft.ipGeoApiKey, "IPGeolocation API key", error))
   {
     return false;
   }
 
+  web_password_protection.value() = enableWebProtection;
+  if (!copyParameterValue(*iotWebConf.getApPasswordParameter(),
+                          enableWebProtection ? adminPassword : String(wifiInitialApPassword),
+                          "Clock password", error))
+  {
+    return false;
+  }
   enable_fixed_tz.value() = draft.useFixedTimezone;
   fixed_offset.value() = draft.fixedOffset;
   normalizeLoadedConfigValues();
@@ -3774,7 +4206,7 @@ void handleLoginPage()
 
   if (!isProtectedPortalState())
   {
-    redirectTo(String(kOnboardingPath));
+    redirectTo(isSetupPortalState() ? String(kOnboardingPath) : String("/"));
     return;
   }
 
@@ -3801,7 +4233,7 @@ void handleLoginPost()
 
   if (!isProtectedPortalState())
   {
-    redirectTo(String(kOnboardingPath));
+    redirectTo(isSetupPortalState() ? String(kOnboardingPath) : String("/"));
     return;
   }
 
@@ -4168,6 +4600,151 @@ void handleConfigImportUpload()
 }
 
 /** Renders the live web console page backed by the RAM log buffer. */
+void handleGpsRaw()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!authorizeAdminRequest())
+    return;
+
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("Pragma", "no-cache");
+  server.send(200, "text/plain; charset=UTF-8", getGpsRawNmeaSnapshot());
+}
+
+/** Executes one GPS troubleshooting action requested from the diagnostics page. */
+void handleGpsAction()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!authorizeAdminRequest())
+    return;
+
+  String action = server.hasArg("action") ? server.arg("action") : String();
+  action.trim();
+  action.toLowerCase();
+
+  String message;
+  if (action == "restart_uart")
+  {
+    restartGpsUart("diagnostics page");
+    message = String(F("GPS UART restarted at ")) + gpsActiveBaud() + F(" baud.");
+  }
+  else if (action == "reset_parser")
+  {
+    resetGpsParser("diagnostics page", true);
+    message = String(F("GPS parser reset and UART restarted at ")) + gpsActiveBaud() + F(" baud.");
+  }
+  else if (action == "clear_raw")
+  {
+    clearGpsRawNmea();
+    ESP_LOGI(TAG, "Cleared retained raw GPS NMEA troubleshooting buffer.");
+    message = F("Cleared retained raw GPS NMEA buffer.");
+  }
+  else
+  {
+    server.send(400, "application/json; charset=UTF-8", F("{\"ok\":false,\"error\":\"Unknown GPS action.\"}"));
+    return;
+  }
+
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json; charset=UTF-8",
+              String(F("{\"ok\":true,\"message\":\"")) + message + F("\"}"));
+}
+
+/** Queues one one-shot display test without changing its normal scheduler timestamps. */
+bool queueDisplayTestAction(const String &action, String &message, String &error)
+{
+  const String normalized = action;
+
+  if (normalized == "current_weather")
+  {
+    if (!checkweather.complete)
+    {
+      error = F("Current weather test unavailable. No weather data has been loaded yet.");
+      return false;
+    }
+    showready.testcurrentweather = true;
+    message = F("Queued current weather scroller test.");
+    return true;
+  }
+
+  if (normalized == "daily_weather")
+  {
+    if (!checkweather.complete)
+    {
+      error = F("Daily weather test unavailable. No weather data has been loaded yet.");
+      return false;
+    }
+    showready.testdayweather = true;
+    message = F("Queued daily weather scroller test.");
+    return true;
+  }
+
+  if (normalized == "temp_icon")
+  {
+    if (!checkweather.complete)
+    {
+      error = F("Temperature and icon test unavailable. No weather data has been loaded yet.");
+      return false;
+    }
+    showready.testcurrenttemp = true;
+    message = F("Queued temperature and icon display test.");
+    return true;
+  }
+
+  if (normalized == "aqi")
+  {
+    if (!checkaqi.complete)
+    {
+      error = F("AQI test unavailable. No air quality data has been loaded yet.");
+      return false;
+    }
+    showready.testaqi = true;
+    message = F("Queued AQI scroller test.");
+    return true;
+  }
+
+  if (normalized == "alerts")
+  {
+    showready.testalerts = true;
+    message = alerts.active ? String(F("Queued alert scroller test."))
+                            : String(F("Queued alert scroller test using a sample alert."));
+    return true;
+  }
+
+  error = F("Unknown display test.");
+  return false;
+}
+
+/** Executes one display test requested from the diagnostics page. */
+void handleDisplayTestAction()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!authorizeAdminRequest())
+    return;
+
+  String action = server.hasArg("action") ? server.arg("action") : String();
+  action.trim();
+  action.toLowerCase();
+
+  String message;
+  String error;
+  if (!queueDisplayTestAction(action, message, error))
+  {
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(400, "application/json; charset=UTF-8",
+                String(F("{\"ok\":false,\"error\":\"")) + error + F("\"}"));
+    return;
+  }
+
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json; charset=UTF-8",
+              String(F("{\"ok\":true,\"message\":\"")) + message + F("\"}"));
+}
+
+/** Renders the live web console page backed by the RAM log buffer. */
 void handleConsolePage()
 {
   if (iotWebConf.handleCaptivePortal())
@@ -4260,6 +4837,21 @@ void handleConsoleCommand()
   server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json; charset=UTF-8", F("{\"ok\":true}"));
 }
+
+/** Clears the retained RAM console buffer from the web console page. */
+void handleConsoleClear()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!authorizeConsoleRequest())
+    return;
+
+  clearConsoleLog();
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json; charset=UTF-8",
+              String(F("{\"ok\":true,\"cursor\":")) + getConsoleLogCursor() +
+                  F(",\"message\":\"Console buffer cleared.\"}"));
+}
 } // namespace
 
 void configureWebUi()
@@ -4300,9 +4892,13 @@ void registerWebRoutes()
     }
     server.send(200, "text/html; charset=UTF-8", html);
   });
+  server.on(kDisplayTestPath, HTTP_POST, handleDisplayTestAction);
+  server.on(kGpsRawPath, HTTP_GET, handleGpsRaw);
+  server.on(kGpsActionPath, HTTP_POST, handleGpsAction);
   server.on(kConsolePath, handleConsolePage);
   server.on(kConsoleLogPath, HTTP_GET, handleConsoleLog);
   server.on(kConsoleDownloadPath, HTTP_GET, handleConsoleDownload);
+  server.on(kConsoleClearPath, HTTP_POST, handleConsoleClear);
   server.on(kConsoleCommandPath, HTTP_POST, handleConsoleCommand);
   server.on(kConfigExportPath, HTTP_GET, handleConfigExport);
   server.on(kConfigImportPath, HTTP_GET, handleConfigImport);
@@ -4373,13 +4969,17 @@ void handleReboot()
 bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
 {
   ESP_LOGD(TAG, "Validating web form...");
-  if (webRequestWrapper != nullptr && webRequestWrapper->hasArg("iwcApPassword"))
+  if (webRequestWrapper != nullptr)
   {
-    String submittedPassword = webRequestWrapper->arg("iwcApPassword");
-    if (submittedPassword.length() < 8)
+    const bool protectionEnabled = webRequestWrapper->hasArg("web_password_protection");
+    if (protectionEnabled && webRequestWrapper->hasArg("iwcApPassword"))
     {
-      iotWebConf.getApPasswordParameter()->errorMessage = "Use at least 8 characters for the clock web/setup password.";
-      return false;
+      String submittedPassword = webRequestWrapper->arg("iwcApPassword");
+      if (submittedPassword.length() < 8)
+      {
+        iotWebConf.getApPasswordParameter()->errorMessage = "Use at least 8 characters when web password protection is enabled.";
+        return false;
+      }
     }
   }
   return true;

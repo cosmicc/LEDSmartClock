@@ -7,12 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: Git tag to package and upload
+        description: Git tag to package, upload, and publish
         required: true
         type: string
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   build-and-upload:
@@ -66,9 +68,33 @@ jobs:
             update.bin \
             web-installer
 
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
       - name: Upload firmware.zip to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.vars.outputs.tag_name }}
           files: firmware.zip
           overwrite_files: true
+
+      - name: Upload hosted installer artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist/web-installer
+
+  deploy-pages:
+    needs: build-and-upload
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    permissions:
+      pages: write
+      id-token: write
+
+    steps:
+      - name: Deploy hosted installer
+        id: deployment
+        uses: actions/deploy-pages@v4

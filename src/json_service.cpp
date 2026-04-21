@@ -486,7 +486,7 @@ bool fillWeatherFromJson(const String &payload)
   filter["daily"][0]["moon_phase"] = true;
   filter["daily"][0]["weather"][0]["description"] = true;
   filter["daily"][0]["weather"][0]["icon"] = true;
-  StaticJsonDocument<8192> doc;
+  DynamicJsonDocument doc(8192);
   DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
   if (error)
   {
@@ -584,14 +584,39 @@ bool fillGeocodeFromJson(const String &payload)
 bool fillAqiFromJson(const String &payload)
 {
   bool ready = false;
-  StaticJsonDocument<30720> doc;
-  DeserializationError error = deserializeJson(doc, payload);
+  StaticJsonDocument<768> filter;
+  filter["list"][1]["main"]["aqi"] = true;
+  filter["list"][1]["components"]["co"] = true;
+  filter["list"][1]["components"]["no"] = true;
+  filter["list"][1]["components"]["no2"] = true;
+  filter["list"][1]["components"]["o3"] = true;
+  filter["list"][1]["components"]["so2"] = true;
+  filter["list"][1]["components"]["pm2_5"] = true;
+  filter["list"][1]["components"]["pm10"] = true;
+  filter["list"][1]["components"]["nh3"] = true;
+  filter["list"][7]["main"]["aqi"] = true;
+  filter["list"][7]["components"]["co"] = true;
+  filter["list"][7]["components"]["no"] = true;
+  filter["list"][7]["components"]["no2"] = true;
+  filter["list"][7]["components"]["o3"] = true;
+  filter["list"][7]["components"]["so2"] = true;
+  filter["list"][7]["components"]["pm2_5"] = true;
+  filter["list"][7]["components"]["pm10"] = true;
+  filter["list"][7]["components"]["nh3"] = true;
+
+  DynamicJsonDocument doc(4096);
+  DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
   if (error)
   {
     ESP_LOGE(TAG, "AQI deserializeJson() failed: %s", error.c_str());
     return false;
   }
   JsonObject obj = doc.as<JsonObject>();
+  if (obj["list"][1].isNull() || obj["list"][7].isNull())
+  {
+    ESP_LOGE(TAG, "AQI payload did not contain the expected forecast entries.");
+    return false;
+  }
   ESP_LOGV(TAG, "AQI forecast payload parsed successfully.");
   aqi.current.aqi = obj["list"][1]["main"]["aqi"];
   aqi.current.co = obj["list"][1]["components"]["co"];

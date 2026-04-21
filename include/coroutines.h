@@ -318,7 +318,7 @@ COROUTINE(showDate)
   COROUTINE_AWAIT((showready.date || isNextShowReady(lastshown.date, date_interval.value(), T1H)) && show_date.isChecked() && iotWebConf.getState() != 1 && displaytoken.isReady(1));
   displaytoken.setToken(1);
   lastshown.date = systemClock.getNow();
-  getSystemZonedDateString(scrolltext.message);
+  getSystemZonedDateString(scrolltext.message, sizeof(scrolltext.message));
   startScroll(hex2rgb(date_color.value()), false);
   COROUTINE_AWAIT(!scrolltext.active);
   showready.date = false;

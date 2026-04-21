@@ -2,8 +2,6 @@
 
 LED SmartClock is an ESP32-based wall clock built around an 8x32 WS2812B LED matrix. It combines large-format time display with GPS, NTP, weather, air quality, and alert data, then exposes everything through a web dashboard, diagnostics page, live console, configuration portal, backup and restore, and OTA updates.
 
-Current firmware release: `2.6.1`
-
 ## What It Does
 
 - Displays a large 12-hour or 24-hour clock on an 8x32 matrix.
@@ -81,49 +79,40 @@ Important:
 
 ## First-Time Installation
 
-The easiest first install is the browser-based web installer:
+The recommended first install is the browser-based web installer.
+
+### Web Installer
+
+Open:
 
 - `https://cosmicc.github.io/LEDSmartClock/`
-- Uses the release `firmware.bin` image for a full blank-device install
-- Requires Chrome or Edge on desktop with Web Serial support
-- After the clock is installed, later OTA updates use `update.bin`
 
-If browser flashing is unavailable, use one of the USB paths below.
+What you need:
 
-### Build From Source
+- A desktop browser with Web Serial support: Google Chrome or Microsoft Edge
+- A USB data cable
+- An ESP32 connected directly over USB
 
-1. Install PlatformIO.
-2. Clone this repository.
-3. Review [platformio.ini](platformio.ini) and confirm the selected board matches your hardware.
-4. Build the firmware:
+How to use it:
 
-```bash
-platformio run
-```
+1. Open the web installer page.
+2. Plug the ESP32 into your computer with a data-capable USB cable.
+3. Close any serial monitor, terminal, or other app that might already be using the ESP32 USB port.
+4. Click `Install`.
+5. When the browser asks for a device, select your ESP32 serial port and confirm.
+6. Wait for the install to finish and the board to reboot.
+7. On a fresh install, join the `LEDSMARTCLOCK` setup access point and complete onboarding in the browser.
 
-5. Flash over USB:
+Notes:
 
-```bash
-platformio run -t upload --upload-port /dev/ttyUSB0
-```
-
-If your board is on a different device, check:
-
-```bash
-ls /dev/ttyUSB* /dev/ttyACM*
-```
-
-If automatic reset does not work:
-
-1. Hold `BOOT`.
-2. Tap `EN` or `RESET`.
-3. Release `BOOT` when upload starts.
+- The web installer flashes the release `firmware.bin` image for a full first-time install.
+- After the clock is installed, later browser-based firmware updates use `update.bin` on the clock's own OTA page.
+- If automatic reset does not work, hold `BOOT`, tap `EN` or `RESET`, then release `BOOT` when the install begins.
+- If browser flashing is unavailable, use the USB release-flash method below.
 
 ### Manual USB Flash
 
-If browser flashing or OTA is unavailable, you can flash directly with `esptool.py`.
-
-#### From A Release
+If browser flashing is unavailable, you can flash the release image directly with `esptool.py`.
 
 If you downloaded `firmware.zip` from GitHub Releases, flash the merged first-install image like this:
 
@@ -138,31 +127,7 @@ esptool.py \
   0x0 firmware.bin
 ```
 
-That single `firmware.bin` already includes the bootloader, partition table, OTA data, and application image for a fresh install.
-
-#### From A Local Build
-
-From the local build output directory:
-
-```bash
-cd .pio/build/esp32dev
-esptool.py \
-  --chip esp32 \
-  --port /dev/ttyUSB0 \
-  --baud 460800 \
-  --before default_reset \
-  --after hard_reset \
-  write_flash \
-  --flash_mode dio \
-  --flash_freq 80m \
-  --flash_size 4MB \
-  0x1000 bootloader.bin \
-  0x11000 partitions.bin \
-  0x18000 ota_data_initial.bin \
-  0x20000 update.bin
-```
-
-This is the safest recovery method from a local build because it writes the full image set used by the project.
+That single `firmware.bin` is the full first-install image from the release package.
 
 ### Prebuilt Release Artifacts
 
@@ -177,7 +142,6 @@ Notes:
 - `firmware.bin` is the merged first-install image used by the web installer and by manual USB flashing at offset `0x0`.
 - `update.bin` is the OTA application image used by the clock web UI after the device is already installed.
 - `installer.txt` is a short explainer that tells users which file is for first-time installs and which file is for OTA updates.
-- A local PlatformIO build remains the most complete recovery path because it also includes `bootloader.bin`, `partitions.bin`, and `ota_data_initial.bin`.
 
 ## First Boot And Setup
 
@@ -215,9 +179,8 @@ OTA behavior:
 
 Limitations:
 
-- OTA does not replace `bootloader.bin`.
-- OTA does not replace `partitions.bin`.
-- If a release changes bootloader or partition layout, update over USB instead of OTA.
+- OTA updates only replace the application image.
+- If a release ever requires a full reinstall, use the web installer or the USB release-flash method instead of OTA.
 
 ## Configuration Storage And Backups
 
@@ -260,16 +223,6 @@ Useful paths and tools:
 - `Diagnostics` for service health, GPS state, and raw NMEA
 - `Console` for live runtime log output and debug commands
 - `Backup & Restore` before risky changes or firmware updates
-
-Useful build commands:
-
-```bash
-platformio run
-```
-
-```bash
-platformio run -t upload
-```
 
 ## Repository Layout
 

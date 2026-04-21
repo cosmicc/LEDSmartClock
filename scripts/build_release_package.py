@@ -51,8 +51,6 @@ def build_release_package(build_dir: Path, release_dir: Path, site_dir: Path, ta
         firmware_output_path,
     )
 
-    shutil.copyfile(firmware_output_path, site_dir / "firmware.bin")
-    shutil.copyfile(update_output_path, site_dir / "update.bin")
     installer_dir = REPO_ROOT / "web-installer"
     shutil.copyfile(installer_dir / "styles.css", site_dir / "styles.css")
     (site_dir / ".nojekyll").write_text("", encoding="utf-8")

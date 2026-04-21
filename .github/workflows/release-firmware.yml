@@ -53,7 +53,7 @@ jobs:
       - name: Build firmware
         run: pio run -d source -e esp32dev
 
-      - name: Package release binaries and bundled web installer
+      - name: Package release binaries and local web installer
         run: |
           rm -rf dist firmware.zip
           python tools/scripts/build_release_package.py \
@@ -68,6 +68,30 @@ jobs:
             update.bin \
             web-installer
 
+      - name: Prepare hosted installer artifact
+        run: |
+          rm -rf dist-pages
+          mkdir -p dist-pages/web-installer
+          cp dist/firmware.bin dist-pages/firmware.bin
+          cp dist/update.bin dist-pages/update.bin
+          cp dist/web-installer/index.html dist-pages/web-installer/index.html
+          cp dist/web-installer/manifest.json dist-pages/web-installer/manifest.json
+          cp dist/web-installer/styles.css dist-pages/web-installer/styles.css
+          cat > dist-pages/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta http-equiv="refresh" content="0; url=./web-installer/">
+              <title>LED SmartClock Web Installer</title>
+            </head>
+            <body>
+              <p>Redirecting to <a href="./web-installer/">the LED SmartClock web installer</a>...</p>
+            </body>
+          </html>
+          EOF
+          touch dist-pages/.nojekyll
+
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
@@ -81,7 +105,7 @@ jobs:
       - name: Upload hosted installer artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: dist/web-installer
+          path: dist-pages
 
   deploy-pages:
     needs: build-and-upload

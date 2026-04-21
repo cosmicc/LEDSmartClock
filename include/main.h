@@ -251,7 +251,7 @@ String getSystemZonedTimestamp();
 /** Formats an arbitrary timestamp using the active timezone. */
 String getCustomZonedTimestamp(acetime_t now);
 /** Formats the current date for scrolling text output. */
-void getSystemZonedDateString(char *str);
+void getSystemZonedDateString(char *str, size_t length);
 /** Formats the current date/time for the web status page. */
 String getSystemZonedDateTimeString();
 /** Returns true when the requested location source contains a valid city. */

@@ -303,13 +303,32 @@ extern "C" void app_main()
   current.brightness = runtimeState.userBrightness;
   Wire.begin(TSL2561_SDA, TSL2561_SCL);
   Tsl.begin();
+  constexpr uint32_t kLightSensorStartupTimeoutMs = 5000UL;
+  const uint32_t lightSensorWaitStart = millis();
   while (!Tsl.available())
   {
     systemClock.loop();
+    esp_task_wdt_reset();
     ESP_EARLY_LOGD(TAG, "Waiting for Light Sensor...");
+    if ((millis() - lightSensorWaitStart) >= kLightSensorStartupTimeoutMs)
+    {
+      ESP_EARLY_LOGW(TAG,
+                     "Light sensor did not respond within %lu ms. Continuing with fixed brightness.",
+                     static_cast<unsigned long>(kLightSensorStartupTimeoutMs));
+      break;
+    }
   }
-  Tsl.on();
-  Tsl.setSensitivity(true, Tsl2561::EXP_14);
+  if (Tsl.available())
+  {
+    Tsl.on();
+    Tsl.setSensitivity(true, Tsl2561::EXP_14);
+  }
+  else
+  {
+    current.rawlux = LUXMIN;
+    current.lux = LUXMIN;
+    current.brightavg = current.brightness;
+  }
   ESP_EARLY_LOGD(TAG, "Initializing GPS Module...");
   startGpsUart("startup", false);
   gps.uartRestartCount = 0;
@@ -1046,6 +1065,11 @@ void updateCoords()
     return lat == 0.0 && lon == 0.0;
   };
 
+  auto absoluteDelta = [](double left, double right) {
+    double delta = left - right;
+    return delta < 0.0 ? -delta : delta;
+  };
+
   if (enable_fixed_loc.isChecked())
   {
     current.lat = strtod(fixedLat.value(), NULL);
@@ -1089,7 +1113,7 @@ void updateCoords()
   // Calculate if major location shift has taken place
   double olat = strtod(savedlat.value(), NULL);
   double olon = strtod(savedlon.value(), NULL);
-  if (abs(current.lat - olat) > 0.02 || abs(current.lon - olon) > 0.02)
+  if (absoluteDelta(current.lat, olat) > 0.02 || absoluteDelta(current.lon, olon) > 0.02)
   {
     // Log warning and save new coordinates
     ESP_LOGW(TAG, "Major location shift, saving values");
@@ -1308,7 +1332,7 @@ void display_temperature()
 
   if (weather.current.feelsLike < tl)
   {
-    if (imperial_setting && weather.current.feelsLike + abs(weather.current.feelsLike) == 0)
+    if (imperial_setting && weather.current.feelsLike == 0)
       current.temphue = NIGHTHUE + tl;
     else
       current.temphue = NIGHTHUE + (abs(weather.current.feelsLike) / 2);
@@ -1317,7 +1341,7 @@ void display_temperature()
   int xpos = 0;
   int digits = (temp == 0) ? 1 : (log10(abs(temp)) + 1);
   bool isneg = false;
-  if (temp + abs(temp) == 0)
+  if (temp < 0)
   {
     isneg = true;
     digits++;
@@ -1407,12 +1431,15 @@ String getCustomZonedTimestamp(acetime_t now)
   return (String)str;
 }
 
-void getSystemZonedDateString(char *str)
+void getSystemZonedDateString(char *str, size_t length)
 {
+  if (str == nullptr || length == 0)
+    return;
+
   // Get zoned date time object
   ZonedDateTime ldt = getSystemZonedTime();
   // Format date string
-  sprintf(str, "%s, %s %d%s %d",
+  snprintf(str, length, "%s, %s %d%s %d",
           DateStrings().dayOfWeekLongString(ldt.dayOfWeek()),
           DateStrings().monthLongString(ldt.month()),
           ldt.day(), ordinal_suffix(ldt.day()), ldt.year());

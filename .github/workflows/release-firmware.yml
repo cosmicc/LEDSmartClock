@@ -44,17 +44,20 @@ jobs:
       - name: Build firmware
         run: pio run -e esp32dev
 
-      - name: Package release binaries
+      - name: Package release binaries and bundled web installer
         run: |
           rm -rf dist firmware.zip
           python scripts/build_release_package.py \
             --build-dir .pio/build/esp32dev \
             --release-dir dist \
+            --site-dir dist/web-installer \
             --tag "${{ steps.vars.outputs.tag_name }}" \
             --repository "${{ github.repository }}"
-          zip -j firmware.zip \
-            dist/firmware.bin \
-            dist/update.bin
+          cd dist
+          zip -r ../firmware.zip \
+            firmware.bin \
+            update.bin \
+            web-installer
 
       - name: Upload firmware.zip to release
         uses: softprops/action-gh-release@v2

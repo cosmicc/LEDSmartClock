@@ -6,12 +6,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-INSTALLER_NOTES = """LED SmartClock Release Files
-
-firmware.bin - Full first-install firmware image to be used with the web installer or a full USB flash at offset 0x0.
-update.bin - OTA application image used for firmware updates from the clock web interface after the clock is already installed.
-"""
-
 
 def merge_images(parts: list[tuple[int, Path]], output_path: Path) -> None:
     highest_end = 0
@@ -58,7 +52,6 @@ def build_release_package(build_dir: Path, release_dir: Path, site_dir: Path, ta
         ],
         firmware_output_path,
     )
-    (release_dir / "installer.txt").write_text(INSTALLER_NOTES, encoding="utf-8")
 
     shutil.copyfile(firmware_output_path, versioned_site_dir / "firmware.bin")
     shutil.copyfile(update_output_path, versioned_site_dir / "update.bin")
@@ -76,7 +69,7 @@ def build_release_package(build_dir: Path, release_dir: Path, site_dir: Path, ta
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create release and web-installer artifacts for LED SmartClock.")
+    parser = argparse.ArgumentParser(description="Create release and bundled web-installer artifacts for LED SmartClock.")
     parser.add_argument("--build-dir", required=True, type=Path)
     parser.add_argument("--release-dir", required=True, type=Path)
     parser.add_argument("--site-dir", required=True, type=Path)

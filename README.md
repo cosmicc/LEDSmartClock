@@ -109,7 +109,7 @@ How to use it:
 Notes:
 
 - The web installer flashes the release `firmware.bin` image for a full first-time install.
-- The local installer inside `firmware.zip` includes its own `manifest.json`, `styles.css`, and release-specific firmware paths.
+- The local installer inside `firmware.zip` includes its own `manifest.json`, `styles.css`, and local copies of `firmware.bin` and `update.bin` inside the `web-installer` folder.
 - After the clock is installed, later browser-based firmware updates use `update.bin` on the clock's own OTA page.
 - If automatic reset does not work, hold `BOOT`, tap `EN` or `RESET`, then release `BOOT` when the install begins.
 - If browser flashing is unavailable, use the USB release-flash method below.
@@ -143,8 +143,8 @@ GitHub releases include a `firmware.zip` package containing:
   - `index.html`
   - `manifest.json`
   - `styles.css`
-  - `<release-tag>/firmware.bin`
-  - `<release-tag>/update.bin`
+  - `firmware.bin`
+  - `update.bin`
 
 Notes:
 

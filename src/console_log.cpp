@@ -1,6 +1,7 @@
 #include "main.h"
 
 #include <cstdarg>
+#include <cstdlib>
 
 namespace
 {
@@ -47,6 +48,12 @@ void appendConsoleBytesLocked(const char *data, size_t length)
 /** Copies a console window into a String caller buffer. */
 bool copyConsoleWindow(uint32_t since, String &out, uint32_t &cursor, bool &truncated)
 {
+  char *snapshot = static_cast<char *>(malloc(kConsoleLogCapacity + 1U));
+  if (snapshot == nullptr)
+    return false;
+
+  size_t available = 0;
+
   portENTER_CRITICAL(&sConsoleLogMux);
 
   cursor = sConsoleLogCursor;
@@ -59,20 +66,22 @@ bool copyConsoleWindow(uint32_t since, String &out, uint32_t &cursor, bool &trun
   if (since > sConsoleLogCursor)
     since = sConsoleLogCursor;
 
-  const size_t available = static_cast<size_t>(sConsoleLogCursor - since);
+  available = static_cast<size_t>(sConsoleLogCursor - since);
   const size_t oldestIndex = (sConsoleLogHead + kConsoleLogCapacity - sConsoleLogLength) % kConsoleLogCapacity;
   const size_t logicalOffset = static_cast<size_t>(since - earliestCursor);
   size_t readIndex = (oldestIndex + logicalOffset) % kConsoleLogCapacity;
 
-  out = "";
-  out.reserve(available + 1U);
   for (size_t copied = 0; copied < available; ++copied)
   {
-    out += sConsoleLogBuffer[readIndex];
+    snapshot[copied] = sConsoleLogBuffer[readIndex];
     readIndex = (readIndex + 1U) % kConsoleLogCapacity;
   }
+  snapshot[available] = '\0';
 
   portEXIT_CRITICAL(&sConsoleLogMux);
+
+  out = snapshot;
+  free(snapshot);
   return true;
 }
 

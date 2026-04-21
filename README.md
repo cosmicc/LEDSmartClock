@@ -83,9 +83,12 @@ The recommended first install is the browser-based web installer.
 
 ### Web Installer
 
-Open:
+You have two supported ways to open the installer:
 
-- `https://cosmicc.github.io/LEDSmartClock/`
+- Hosted installer: `https://cosmicc.github.io/LEDSmartClock/`
+- Local installer included inside the release `firmware.zip`: extract the zip, then open `web-installer/index.html`
+
+Do not use the GitHub repository root page as the installer page. Use the hosted installer URL above or the extracted `web-installer/index.html` file from the release package.
 
 What you need:
 
@@ -95,7 +98,7 @@ What you need:
 
 How to use it:
 
-1. Open the web installer page.
+1. Open the hosted installer page, or extract `firmware.zip` and open `web-installer/index.html` locally.
 2. Plug the ESP32 into your computer with a data-capable USB cable.
 3. Close any serial monitor, terminal, or other app that might already be using the ESP32 USB port.
 4. Click `Install`.
@@ -106,6 +109,7 @@ How to use it:
 Notes:
 
 - The web installer flashes the release `firmware.bin` image for a full first-time install.
+- The local installer inside `firmware.zip` includes its own `manifest.json`, `styles.css`, and release-specific firmware paths.
 - After the clock is installed, later browser-based firmware updates use `update.bin` on the clock's own OTA page.
 - If automatic reset does not work, hold `BOOT`, tap `EN` or `RESET`, then release `BOOT` when the install begins.
 - If browser flashing is unavailable, use the USB release-flash method below.
@@ -135,13 +139,18 @@ GitHub releases include a `firmware.zip` package containing:
 
 - `firmware.bin`
 - `update.bin`
-- `installer.txt`
+- `web-installer/`
+  - `index.html`
+  - `manifest.json`
+  - `styles.css`
+  - `<release-tag>/firmware.bin`
+  - `<release-tag>/update.bin`
 
 Notes:
 
 - `firmware.bin` is the merged first-install image used by the web installer and by manual USB flashing at offset `0x0`.
 - `update.bin` is the OTA application image used by the clock web UI after the device is already installed.
-- `installer.txt` is a short explainer that tells users which file is for first-time installs and which file is for OTA updates.
+- `web-installer/index.html` can be opened locally after extracting the zip and provides the same first-install flow without needing to browse the repository.
 
 ## First Boot And Setup
 

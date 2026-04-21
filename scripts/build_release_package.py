@@ -32,8 +32,6 @@ def render_template(template_path: Path, replacements: dict[str, str], output_pa
 def build_release_package(build_dir: Path, release_dir: Path, site_dir: Path, tag: str, repository: str) -> None:
     release_dir.mkdir(parents=True, exist_ok=True)
     site_dir.mkdir(parents=True, exist_ok=True)
-    versioned_site_dir = site_dir / tag
-    versioned_site_dir.mkdir(parents=True, exist_ok=True)
 
     app_image_path = build_dir / "update.bin"
     if not app_image_path.exists():
@@ -53,8 +51,8 @@ def build_release_package(build_dir: Path, release_dir: Path, site_dir: Path, ta
         firmware_output_path,
     )
 
-    shutil.copyfile(firmware_output_path, versioned_site_dir / "firmware.bin")
-    shutil.copyfile(update_output_path, versioned_site_dir / "update.bin")
+    shutil.copyfile(firmware_output_path, site_dir / "firmware.bin")
+    shutil.copyfile(update_output_path, site_dir / "update.bin")
     installer_dir = REPO_ROOT / "web-installer"
     shutil.copyfile(installer_dir / "styles.css", site_dir / "styles.css")
     (site_dir / ".nojekyll").write_text("", encoding="utf-8")

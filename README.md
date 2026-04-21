@@ -1,62 +1,70 @@
 # LED SmartClock
 
-LED SmartClock is an ESP32-based wall clock built around an 8x32 WS2812B LED matrix. It combines a large-format clock display with GPS, NTP, weather, air-quality, and alert data, then exposes everything through a web dashboard, a configuration portal, and OTA firmware updates.
+LED SmartClock is an ESP32-based wall clock built around an 8x32 WS2812B LED matrix. It combines large-format time display with GPS, NTP, weather, air quality, and alert data, then exposes everything through a web dashboard, diagnostics page, live console, configuration portal, backup and restore, and OTA updates.
 
-Version `2.5.2` is the current v2 release. It includes the rewritten web interface, OTA flow, display scheduler cleanup, DHCP-aware NTP selection, configuration backup or restore, hardened weather-alert fallback handling, DST-aware timezone handling, key-based config storage, and expanded GPS diagnostics.
+Current firmware release: `2.6.1`
 
 ## What It Does
 
-- Displays a large 12-hour or 24-hour clock on an 8x32 LED matrix.
-- Keeps time from GPS, NTP, and the onboard DS3231 RTC.
-- Resolves timezone automatically from IP geolocation with DST-aware timezone rules, or uses a fixed manual offset.
-- Resolves location from GPS, reverse geocoding, or fixed coordinates.
-- Shows rotating data blocks for date, current temperature, current weather, daily forecast, AQI, and weather alerts.
-- Adjusts brightness automatically from ambient light, with user bias controls.
-- Exposes a status dashboard and a full configuration portal over Wi-Fi.
-- Supports OTA updates from the web interface using `firmware.bin`.
-- Exports and imports configuration backups as JSON so settings can move across firmware versions.
+- Displays a large 12-hour or 24-hour clock on an 8x32 matrix.
+- Keeps time from GPS, NTP, and the DS3231 RTC.
+- Handles DST automatically when a real timezone is known, or uses a fixed manual offset when desired.
+- Resolves location from GPS, reverse geocoding, IP geolocation fallback, or fixed coordinates.
+- Shows rotating display blocks for date, current temperature, current weather, daily forecast, AQI, and weather alerts.
+- Adjusts brightness automatically from ambient light, with user controls.
+- Supports first-boot onboarding, optional web password protection, dark mode, and Basic or Advanced config views.
+- Supports configuration backup and restore with version-tolerant JSON imports.
+- Supports OTA updates from the browser using `firmware.bin`.
 
 ## Web Interface
 
-The firmware serves two main pages:
+The firmware exposes these main web pages:
 
-- `Status page`
-  - Current time source, timezone source, uptime, location, weather, AQI, and alert state.
+- `Dashboard`
+  - Current time source, timezone, location, weather, AQI, alert state, uptime, and service health summary.
   - Reboot action.
-  - Link to the firmware update page.
-- `Configuration page`
-  - Grouped settings for connectivity, display, clock behavior, weather, AQI, sun events, and location.
+- `Diagnostics`
+  - Per-service health for Wi-Fi, timekeeping, NTP, GPS, weather, AQI, alerts, IP geolocation, and reverse geocoding.
+  - GPS raw NMEA view and GPS recovery actions.
+  - One-shot display-test buttons for weather, AQI, alerts, and temp/icon output.
+- `Console`
+  - Live in-memory debug log tail.
+  - Downloadable console log.
+  - Web-triggered debug commands.
+  - Clear-console action.
+- `Configuration`
+  - Grouped settings for connectivity, display, clock behavior, weather, alerts, status indicators, sun events, location, and GPS.
+  - Basic and Advanced modes.
+  - Optional dark mode.
   - Cancel and reboot actions.
-  - Firmware update entry point.
-
-The OTA update page now matches the rest of the UI and shows upload progress while the browser transfers the image.
-
-The maintenance flow now also includes a themed `Backup & Restore` page:
-
-- `Backup & Restore page`
-  - Downloads a JSON snapshot of the current config.
-  - Restores recognized settings from an older or newer backup by stable field IDs.
-  - Reboots automatically after a successful restore so Wi-Fi, API, and runtime state restart cleanly.
+- `Firmware Update`
+  - OTA upload page with progress, result feedback, and instructions.
+- `Backup & Restore`
+  - JSON export and import of saved settings.
 
 ## Required Services
 
 Some features depend on external services:
 
 - `OpenWeather`
-  - Used for current weather, forecast, AQI, and reverse geocoding.
-  - Requires an API key with access to `One Call 3.0`.
+  - Current weather
+  - Daily forecast
+  - AQI
+  - Reverse geocoding
+  - Requires an API key with access to `One Call 3.0`
 - `ipgeolocation.io`
-  - Used for automatic timezone and coarse location fallback.
-  - Requires an API key.
+  - Automatic timezone
+  - Coarse location fallback
+  - Requires an API key
 - `weather.gov`
-  - Used for alert data.
-  - No API key required.
+  - Weather alerts
+  - No API key required
 
-Without API keys, the clock still works as a clock, but weather, AQI, reverse geocoding, and automatic timezone/location features will be limited.
+Without API keys, the clock still works as a clock, but weather, AQI, reverse geocoding, and automatic timezone or location features will be limited.
 
 ## Hardware
 
-The project currently assumes these core parts:
+The current project assumes these core parts:
 
 - ESP32 development board
 - 8x32 WS2812B LED matrix
@@ -67,15 +75,13 @@ The project currently assumes these core parts:
 
 Important:
 
-- The original hardware notes referenced an `ESP32-S3` board.
-- The current PlatformIO project is configured for `esp32dev` in [platformio.ini](platformio.ini).
-- Confirm the board target for your hardware before flashing or changing pin assignments.
+- The PlatformIO target is currently `esp32dev`.
+- Earlier project notes referenced `ESP32-S3` hardware.
+- Confirm your actual board target and pinout before flashing.
 
 ## First-Time Installation
 
 For a first install, use USB flashing.
-
-The safest path is to build and flash from source with PlatformIO so the bootloader, partitions, and firmware stay aligned with the current project configuration.
 
 ### Build From Source
 
@@ -88,29 +94,29 @@ The safest path is to build and flash from source with PlatformIO so the bootloa
 platformio run
 ```
 
-5. Flash over USB using PlatformIO:
+5. Flash over USB:
 
 ```bash
 platformio run -t upload --upload-port /dev/ttyUSB0
 ```
 
-If your board is on a different serial device, check:
+If your board is on a different device, check:
 
 ```bash
 ls /dev/ttyUSB* /dev/ttyACM*
 ```
 
-If automatic reset does not work, manually enter the ESP32 bootloader:
+If automatic reset does not work:
 
 1. Hold `BOOT`.
 2. Tap `EN` or `RESET`.
-3. Release `BOOT` when the upload starts.
+3. Release `BOOT` when upload starts.
 
 ### Manual USB Recovery Flash
 
-If the web UI is unavailable and you want to flash directly over USB/serial, you can write the images with `esptool.py`.
+If the web UI is unavailable, you can flash directly with `esptool.py`.
 
-From the build output directory:
+From the local build output directory:
 
 ```bash
 cd .pio/build/esp32dev
@@ -130,98 +136,113 @@ esptool.py \
   0x20000 firmware.bin
 ```
 
-This is the safest manual recovery method when flashing from a local build because it writes the full image set used by the project.
+This is the safest recovery method from a local build because it writes the full image set used by the project.
 
-### Prebuilt Release Notes
+### Prebuilt Release Artifacts
 
-If you use release artifacts instead of building locally:
+GitHub releases are intended to include a `firmware.zip` package containing:
 
-- `firmware.zip` is the release package intended for downloads from GitHub Releases.
-- `firmware.zip` contains exactly:
-  - `firmware.bin`
-  - `bootloader.bin`
-  - `partitions.bin`
-- `firmware.bin` is suitable for OTA updates after the clock is already installed.
-- First-time USB flashing may also require `bootloader.bin` and `partitions.bin`, depending on your flashing workflow.
-- If you are not sure, prefer a full PlatformIO flash from source for the first install.
-- If you are recovering from a bad OTA and only have the release package, flash the extracted filenames you have over USB. A local build remains the most complete recovery path because it also includes `ota_data_initial.bin`.
+- `firmware.bin`
+- `bootloader.bin`
+- `partitions.bin`
+
+Notes:
+
+- `firmware.bin` is the file used for OTA updates.
+- First-time USB flashing may also require `bootloader.bin` and `partitions.bin`.
+- A local PlatformIO build remains the most complete recovery path because it also includes `ota_data_initial.bin`.
 
 ## First Boot And Setup
 
-On first boot, or whenever the device is forced back into AP mode, the clock exposes a Wi-Fi access point:
+On first boot, or whenever the device is forced back into AP mode, the clock exposes:
 
 - SSID: `LEDSMARTCLOCK`
 - Password: `ledsmartclock`
 
-Initial setup flow:
+The onboarding flow walks through:
 
-1. Connect to the `LEDSMARTCLOCK` access point.
-2. If you already have a config backup, open `Backup & Restore` and import it first.
-3. Otherwise open the configuration portal.
-4. Set the following first:
-   - `AP Password`
-   - `Wi-Fi SSID`
-   - `Wi-Fi Password`
-   - `OpenWeather API key`
-   - `ipgeolocation.io API key`
-5. Save the configuration.
-6. Let the clock connect to your normal Wi-Fi network.
-7. Open the status page on the device IP address to verify time sync, location, weather, AQI, and NTP source selection.
+1. Wi-Fi credentials
+2. Optional web password protection
+3. API keys
+4. Timezone behavior
+5. Final self-test
 
-If GPS is unavailable, the clock can still work with fixed coordinates and a manual timezone offset.
+Useful setup notes:
+
+- If you already have a config backup, restore it before entering everything by hand.
+- Web password protection is optional.
+- If GPS is unavailable, the clock can still operate with fixed coordinates and a fixed manual timezone offset.
+- If you forget the web password, return the device to setup mode and reconfigure it there.
 
 ## OTA Updates
 
 After the first USB install, updates can be applied from the browser.
 
-OTA behavior in the current firmware:
+OTA behavior:
 
 - Upload `firmware.bin` only.
 - Typical firmware size is about `2 MB`.
-- The update page now shows upload progress and final success or failure feedback.
-- The update page reminds you to export a config backup before flashing.
+- The firmware page shows upload progress and final success or failure status.
+- The page reminds you to export a config backup before flashing.
 - The device reboots automatically after a successful OTA update.
-- GitHub Releases are intended to include a `firmware.zip` package containing the three flash images with no subdirectories.
 
 Limitations:
 
 - OTA does not replace `bootloader.bin`.
 - OTA does not replace `partitions.bin`.
-- If a future release changes the bootloader or partition layout, update over USB instead of OTA.
+- If a release changes bootloader or partition layout, update over USB instead of OTA.
 
-## Configuration Backup And Migration
+## Configuration Storage And Backups
 
-The firmware can export the full live configuration as a JSON backup and restore it later.
+The firmware persists settings in a key-based non-volatile store instead of relying on positional EEPROM-style layout.
 
-- Export includes Wi-Fi credentials, AP password, API keys, display settings, location overrides, and saved fallback state.
-- Restore matches settings by stable JSON field IDs instead of raw storage position.
-- Unknown fields are ignored so older backups can still seed newer firmware, and newer backups can partially restore onto older firmware.
+That means:
+
+- Adding new settings does not shift old settings into the wrong slots.
+- Reordering config-page sections does not corrupt saved settings.
+- Backup and restore use stable setting IDs instead of raw storage offsets.
+
+Backup behavior:
+
+- Export includes Wi-Fi credentials, web and AP passwords, API keys, display settings, location overrides, and saved fallback state.
+- Restore matches recognized settings by stable JSON field IDs.
+- Unknown fields are ignored.
 - Invalid values for recognized settings are rejected individually instead of failing the whole import.
 - Successful imports reboot the clock automatically.
 
-Because these backups contain secrets, store them privately.
-
-## Configuration Notes
-
-The firmware now persists settings in a key-based store instead of relying on IotWebConf's old positional EEPROM layout.
-
-- Firmware version: `2.6.1`
-- Adding new settings no longer shifts old settings into the wrong slots.
-- Reordering the web configuration page does not corrupt saved config.
-- Backup and restore use the same stable setting IDs as normal persistence.
-
-This means normal firmware updates no longer depend on a manually bumped storage version just to keep existing settings safe.
+Because backups contain secrets, store them privately.
 
 ## Status Indicators
 
-The display includes configurable status LEDs that summarize runtime state:
+The matrix includes configurable corner indicators for:
 
-- System status
-- Air quality status
-- UV / upper-corner status
-- Alert indicators for active watches and warnings
+- Bottom-left system or time status
+- Top-left AQI status
+- Top-right UV status
 
-The status page in the web UI is the best source of detail when diagnosing why a service is not updating.
+These can be turned off entirely from the configuration page.
+
+The display also uses side indicators for active watches and warnings.
+
+## Debugging
+
+If serial debug output is enabled in configuration, runtime diagnostics are emitted over USB serial.
+
+Useful paths and tools:
+
+- `Diagnostics` for service health, GPS state, and raw NMEA
+- `Console` for live runtime log output and debug commands
+- `Backup & Restore` before risky changes or firmware updates
+
+Useful build commands:
+
+```bash
+platformio run
+```
+
+```bash
+platformio run -t upload
+```
 
 ## Repository Layout
 
@@ -232,51 +253,26 @@ The status page in the web UI is the best source of detail when diagnosing why a
 - `docs/feature-changelog.md`
   - Completed work and planned feature changes for the v2 firmware line
 
-## Development Notes
-
-- `main` is the current release branch.
-- `rewrite-foundation` contains the main version 2 rewrite work that has now been merged into `main`.
-- `legacy` and `pre-coroutine` are older archive branches.
-
-Useful development commands:
-
-```bash
-platformio run
-```
-
-```bash
-platformio run -t upload
-```
-
-If serial debug output is enabled in the configuration, runtime diagnostics are emitted over USB serial.
-
 ## Known Caveats
 
-- The current PlatformIO target is `esp32dev`, while earlier project notes referenced `ESP32-S3` hardware. Verify your board choice before flashing.
+- The current PlatformIO target is `esp32dev`, while older project notes referenced `ESP32-S3` hardware.
 - OTA updates only cover `firmware.bin`.
-- Weather and geolocation features depend on valid external API keys and network access.
+- Weather and geolocation features depend on valid API keys and network access.
+- Some GPS problems are hardware, wiring, antenna, or sky-visibility issues rather than firmware issues.
 
 ## Roadmap
 
-Current feature work and pending upgrades are tracked in [docs/feature-changelog.md](docs/feature-changelog.md).
-
-The current top roadmap items are:
-
-1. Completed: a dedicated diagnostics page for GPS, NTP, weather, AQI, alerts, Wi-Fi, and API health.
-2. Completed: a downloadable in-memory log buffer and live web console so debugging does not depend on a live serial cable.
-3. Completed: a dashboard service-health summary with concise status badges and recent-state reporting.
-4. Next: add manual timezone selection by real zone name, such as `America/New_York`.
-5. Completed: GPS recovery tools including parser reset, raw NMEA inspection, diagnostics actions, and configurable baud selection.
+Current feature work and planned upgrades are tracked in [docs/feature-changelog.md](docs/feature-changelog.md).
 
 ## Contributing
 
-Bug reports, hardware notes, cleanup patches, and UI improvements are welcome. If you open an issue or pull request, include:
+Bug reports, hardware notes, cleanup patches, and UI improvements are welcome. Include:
 
 - The hardware variant you are using
 - Whether GPS is connected
 - Whether API keys are configured
 - Whether the problem occurs in AP mode, normal Wi-Fi mode, or both
-- Any relevant serial debug output
+- Relevant serial or web-console output
 
 ## Credits
 

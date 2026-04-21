@@ -310,20 +310,6 @@ acetime_t GPSClock::getNow() const
   if (isResponseReady())
     return readResponse();
 
-  if (!mWaitingForNtpSync)
-    return kInvalidSeconds;
-
-  const uint32_t waitStart = millis();
-  while ((millis() - waitStart) < mRequestTimeout)
-  {
-    while (Serial1.available())
-      processGpsSerialByte(Serial1.read());
-    if (isResponseReady())
-      return readResponse();
-    delay(1);
-  }
-
-  const_cast<GPSClock *>(this)->mWaitingForNtpSync = false;
   if (isRtcBackedTimeActive() || isCachedNtpTimeActive())
     return readResponse();
 
@@ -344,9 +330,12 @@ void GPSClock::sendRequest() const
     return;
   }
 
-  if (abs(Now() - runtimeState.lastNtpCheck) < NTPCHECKTIME * 60)
+  const acetime_t now = Now();
+  if (now != kInvalidSeconds && runtimeState.lastNtpCheck != 0)
   {
-    return;
+    const acetime_t secondsSinceLastCheck = now - runtimeState.lastNtpCheck;
+    if (secondsSinceLastCheck >= 0 && secondsSinceLastCheck < static_cast<acetime_t>(NTPCHECKTIME * 60))
+      return;
   }
 
   const_cast<GPSClock *>(this)->refreshNtpServer();
@@ -421,14 +410,18 @@ acetime_t GPSClock::readResponse() const
     {
       setTimeSource("gps");
       resetLastNtpCheck(gpsSeconds);
-      ESP_LOGI(TAG, "GPSClock: readResponse(): GPS time %s | skew: %dsec | age: %dms",
-               formatDebugTimestamp(gpsSeconds).c_str(), abs(Now()) - abs(gpsSeconds), GPS.time.age());
+      const acetime_t currentNow = Now();
+      const acetime_t gpsSkew = currentNow >= gpsSeconds ? (currentNow - gpsSeconds) : (gpsSeconds - currentNow);
+      ESP_LOGI(TAG, "GPSClock: readResponse(): GPS time %s | skew: %ldsec | age: %dms",
+               formatDebugTimestamp(gpsSeconds).c_str(), static_cast<long>(gpsSkew), GPS.time.age());
       return gpsSeconds;
     }
     else
     {
-      ESP_LOGW(TAG, "GPSClock: readResponse(): stale GPS time skipped: %s | skew: %dsec | age: %dms",
-               formatDebugTimestamp(gpsSeconds).c_str(), abs(Now()) - abs(gpsSeconds), GPS.time.age());
+      const acetime_t currentNow = Now();
+      const acetime_t gpsSkew = currentNow >= gpsSeconds ? (currentNow - gpsSeconds) : (gpsSeconds - currentNow);
+      ESP_LOGW(TAG, "GPSClock: readResponse(): stale GPS time skipped: %s | skew: %ldsec | age: %dms",
+               formatDebugTimestamp(gpsSeconds).c_str(), static_cast<long>(gpsSkew), GPS.time.age());
       return kInvalidSeconds;
     }
   }
@@ -451,8 +444,10 @@ acetime_t GPSClock::readResponse() const
     if (freshSntpSync)
     {
       resetLastNtpCheck(epochSeconds);
-      ESP_LOGI(TAG, "GPSClock: readResponse(): fresh SNTP sync %s | skew: %dsec",
-               formatDebugTimestamp(epochSeconds).c_str(), abs(Now()) - abs(epochSeconds));
+      const acetime_t currentNow = Now();
+      const acetime_t ntpSkew = currentNow >= epochSeconds ? (currentNow - epochSeconds) : (epochSeconds - currentNow);
+      ESP_LOGI(TAG, "GPSClock: readResponse(): fresh SNTP sync %s | skew: %ldsec",
+               formatDebugTimestamp(epochSeconds).c_str(), static_cast<long>(ntpSkew));
       noteDiagnosticSuccess(DiagnosticService::Ntp, true, "Fresh sync",
                             String(runtimeState.ntpServer) + F(" (") + runtimeState.ntpServerSource + F(")"),
                             0, 0);

@@ -10,7 +10,19 @@
 
 #define VERSION_MAJOR 2
 #define VERSION_MINOR 6
-#define VERSION_PATCH 4
+#define VERSION_PATCH 5
 
 #define VERSION_SEMVER STRINGIFY(VERSION_MAJOR) "." STRINGIFY(VERSION_MINOR) "." STRINGIFY(VERSION_PATCH)
 #define VERSION "LED SmartClock v" VERSION_SEMVER
+
+#ifndef BUILD_GIT_COMMIT
+#define BUILD_GIT_COMMIT "unknown"
+#endif
+
+#ifndef BUILD_TARGET_BOARD
+#define BUILD_TARGET_BOARD "unknown"
+#endif
+
+#ifndef BUILD_DATE_UTC
+#define BUILD_DATE_UTC __DATE__ " " __TIME__
+#endif

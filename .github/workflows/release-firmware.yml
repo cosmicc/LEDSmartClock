@@ -61,11 +61,15 @@ jobs:
             --release-dir dist \
             --site-dir dist/web-installer \
             --tag "${{ steps.vars.outputs.tag_name }}" \
-            --repository "${{ github.repository }}"
+            --repository "${{ github.repository }}" \
+            --git-commit "$(git -C source rev-parse --short HEAD)" \
+            --board-target "esp32dev" \
+            --build-date-utc "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           cd dist
           zip -r ../firmware.zip \
             firmware.bin \
             update.bin \
+            release-metadata.json \
             web-installer
 
       - name: Prepare hosted installer artifact
@@ -74,6 +78,7 @@ jobs:
           mkdir -p dist-pages/web-installer
           cp dist/firmware.bin dist-pages/firmware.bin
           cp dist/update.bin dist-pages/update.bin
+          cp dist/release-metadata.json dist-pages/release-metadata.json
           cp dist/web-installer/index.html dist-pages/web-installer/index.html
           cp dist/web-installer/manifest.json dist-pages/web-installer/manifest.json
           cp dist/web-installer/styles.css dist-pages/web-installer/styles.css

@@ -2762,6 +2762,9 @@ String timeSourceLabel()
 /** Formats the active timezone source so manual fallbacks are visible on the dashboard. */
 String timezoneSourceLabel()
 {
+  if (runtimeState.timezoneSource[0] != '\0')
+    return safeText(String(runtimeState.timezoneSource), "Unknown");
+
   if (enable_fixed_tz.isChecked())
     return F("Manual override");
   if (ipgeo.timezone[0] != '\0' || ipgeo.tzoffset != 127)
@@ -3986,6 +3989,9 @@ void appendStatusContent(String &html)
   const size_t attentionCount = countAttentionDiagnostics();
   const size_t pendingCount = countPendingDiagnostics();
   const size_t disabledCount = countDisabledDiagnostics();
+  acetime_t activeSunrise = 0;
+  acetime_t activeSunset = 0;
+  const bool hasActiveSunEvents = getActiveSunEvents(now, activeSunrise, activeSunset);
 
   html += F("<header class='hero'>");
   html += F("<p class='eyebrow'>LED Smart Clock Status</p>");
@@ -4047,6 +4053,9 @@ void appendStatusContent(String &html)
 
   appendCardStart(html, "System", "Core firmware identity, connectivity, and synchronization.");
   appendKeyValueRow(html, "Firmware Version", htmlEscape(String(VERSION_SEMVER)));
+  appendKeyValueRow(html, "Git Commit", htmlEscape(String(BUILD_GIT_COMMIT)));
+  appendKeyValueRow(html, "Board Target", htmlEscape(String(BUILD_TARGET_BOARD)));
+  appendKeyValueRow(html, "Build Date (UTC)", htmlEscape(String(BUILD_DATE_UTC)));
   appendKeyValueRow(html, "Connection State", htmlEscape(currentConnectionStateLabel()));
   appendKeyValueRow(html, "Current Address", activeAddressLabel());
   appendKeyValueRow(html, "Uptime", htmlEscape(elapsedTime(static_cast<uint32_t>(now - runtimeState.bootTime))));
@@ -4087,6 +4096,9 @@ void appendStatusContent(String &html)
   appendKeyValueRow(html, "Humidity", htmlEscape(String(weather.current.humidity) + F("%")));
   appendKeyValueRow(html, "Wind", htmlEscape(String(weather.current.windSpeed) + F(" / ") + String(weather.current.windGust) + F(" ")) + speedUnitLabel());
   appendKeyValueRow(html, "Daily Range", formatTemperature(weather.day.tempMax) + F(" high / ") + formatTemperature(weather.day.tempMin) + F(" low"));
+  appendKeyValueRow(html, "Sun Events Source", safeText(String(runtimeState.solarTimesSource), "Unavailable"));
+  appendKeyValueRow(html, "Sunrise", hasActiveSunEvents ? htmlEscape(getCustomZonedTimestamp(activeSunrise)) : String(F("Pending")));
+  appendKeyValueRow(html, "Sunset", hasActiveSunEvents ? htmlEscape(getCustomZonedTimestamp(activeSunset)) : String(F("Pending")));
   appendKeyValueRow(html, "Forecast Success", formatAgo(now, checkweather.lastsuccess));
   appendKeyValueRow(html, "Next Weather Scroll", formatUntil(now, lastshown.currentweather, static_cast<uint32_t>(current_weather_interval.value()) * 3600U));
   appendKeyValueRow(html, "Next Daily Scroll", formatUntil(now, lastshown.dayweather, static_cast<uint32_t>(daily_weather_interval.value()) * 3600U));

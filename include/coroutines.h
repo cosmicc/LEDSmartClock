@@ -851,19 +851,24 @@ COROUTINE(coroutineManager)
     ESP_LOGD(TAG, "Check IPGeolocation Coroutine Suspended");
   }
   const acetime_t nowEpoch = systemClock.getNow();
-  if (show_sunrise.isChecked() &&
-      crossedEpochBoundary(runtimeState.lastSolarCheck, nowEpoch, weather.day.sunrise) &&
-      runtimeState.sunriseNotifiedEpoch != weather.day.sunrise)
+  acetime_t sunriseEpoch = 0;
+  acetime_t sunsetEpoch = 0;
+  if (getActiveSunEvents(nowEpoch, sunriseEpoch, sunsetEpoch))
   {
-    showready.sunrise = true;
-    runtimeState.sunriseNotifiedEpoch = weather.day.sunrise;
-  }
-  if (show_sunset.isChecked() &&
-      crossedEpochBoundary(runtimeState.lastSolarCheck, nowEpoch, weather.day.sunset) &&
-      runtimeState.sunsetNotifiedEpoch != weather.day.sunset)
-  {
-    showready.sunset = true;
-    runtimeState.sunsetNotifiedEpoch = weather.day.sunset;
+    if (show_sunrise.isChecked() &&
+        crossedEpochBoundary(runtimeState.lastSolarCheck, nowEpoch, sunriseEpoch) &&
+        runtimeState.sunriseNotifiedEpoch != sunriseEpoch)
+    {
+      showready.sunrise = true;
+      runtimeState.sunriseNotifiedEpoch = sunriseEpoch;
+    }
+    if (show_sunset.isChecked() &&
+        crossedEpochBoundary(runtimeState.lastSolarCheck, nowEpoch, sunsetEpoch) &&
+        runtimeState.sunsetNotifiedEpoch != sunsetEpoch)
+    {
+      showready.sunset = true;
+      runtimeState.sunsetNotifiedEpoch = sunsetEpoch;
+    }
   }
   runtimeState.lastSolarCheck = nowEpoch;
   if (checkweather.retries == HTTP_MAX_RETRIES && !checkWeather.isSuspended())
@@ -1117,6 +1122,8 @@ COROUTINE_LOOP()
                  static_cast<unsigned long>(GPS.location.age()));
         noteDiagnosticSuccess(DiagnosticService::Gps, true, "Fix acquired",
                               String(gps.sats) + F(" sats, ") + String(gps.lat, 5) + F(", ") + String(gps.lon, 5));
+        if (!enable_fixed_tz.isChecked())
+          processTimezone();
     }
     else if (!hasFix && gps.fix)
     {

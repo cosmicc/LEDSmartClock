@@ -124,6 +124,14 @@ struct RuntimeState
   uint8_t userBrightness = 0;
   /** Prevents early network jobs from running while the first-time portal is active. */
   bool firstTimeFailsafe = false;
+  /** Human-readable label describing how the active timezone was selected. */
+  char timezoneSource[32] = "Configured fallback";
+  /** Epoch time for the currently selected sunrise event source. */
+  ace_time::acetime_t activeSunriseEpoch = 0;
+  /** Epoch time for the currently selected sunset event source. */
+  ace_time::acetime_t activeSunsetEpoch = 0;
+  /** Human-readable label describing where sunrise/sunset values came from. */
+  char solarTimesSource[24] = "Unavailable";
   /** Previous epoch sample used for sunrise/sunset edge detection. */
   ace_time::acetime_t lastSolarCheck = 0;
   /** Sunrise epoch already announced, used to prevent duplicate messages. */

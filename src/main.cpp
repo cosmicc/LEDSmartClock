@@ -9,6 +9,7 @@
 #include "bitmaps.h"
 #include "config_backup.h"
 #include "coroutines.h"
+#include <cmath>
 
 namespace
 {
@@ -117,6 +118,211 @@ bool applyNamedTimezone(const char *zoneName, const char *source)
   current.timezone = resolved;
   refreshCachedTimezoneOffset(systemClock.getNow());
   ESP_LOGD(TAG, "Using %s timezone: %s (%s)", source, zoneName, getSystemTimezoneOffsetString().c_str());
+  return true;
+}
+
+/** Returns true when a coordinate pair is usable for location-based calculations. */
+bool hasValidCoordinatePair(double lat, double lon)
+{
+  return !(lat == 0.0 && lon == 0.0) && lat >= -90.0 && lat <= 90.0 && lon >= -180.0 && lon <= 180.0;
+}
+
+/** Derives a whole-hour timezone offset from longitude when named zones are unavailable. */
+bool deriveTimezoneOffsetFromLongitude(double longitude, int16_t &offsetHours)
+{
+  if (longitude < -180.0 || longitude > 180.0)
+    return false;
+
+  int rounded = static_cast<int>((longitude / 15.0) + (longitude >= 0.0 ? 0.5 : -0.5));
+  rounded = constrain(rounded, -12, 14);
+  offsetHours = static_cast<int16_t>(rounded);
+  return true;
+}
+
+/** Converts degrees to radians for solar-angle calculations. */
+double degreesToRadians(double degrees)
+{
+  constexpr double kPi = 3.14159265358979323846;
+  return degrees * (kPi / 180.0);
+}
+
+/** Converts radians to degrees for solar-angle calculations. */
+double radiansToDegrees(double radians)
+{
+  constexpr double kPi = 3.14159265358979323846;
+  return radians * (180.0 / kPi);
+}
+
+/** Normalizes an angle to the [0, 360) degree range. */
+double normalizeDegrees(double degrees)
+{
+  while (degrees < 0.0)
+    degrees += 360.0;
+  while (degrees >= 360.0)
+    degrees -= 360.0;
+  return degrees;
+}
+
+/** Normalizes an hour value to the [0, 24) range. */
+double normalizeHours(double hours)
+{
+  while (hours < 0.0)
+    hours += 24.0;
+  while (hours >= 24.0)
+    hours -= 24.0;
+  return hours;
+}
+
+/** Returns true when the supplied Gregorian year is a leap year. */
+bool isLeapYear(int16_t year)
+{
+  return ((year % 4) == 0 && (year % 100) != 0) || ((year % 400) == 0);
+}
+
+/** Converts a calendar date into a 1-based day-of-year index. */
+uint16_t dayOfYearFromDate(int16_t year, uint8_t month, uint8_t day)
+{
+  static const uint16_t kDaysBeforeMonth[] = {
+      0,   31,  59,  90,  120, 151,
+      181, 212, 243, 273, 304, 334};
+
+  if (month < 1 || month > 12 || day < 1 || day > 31)
+    return 0;
+
+  uint16_t dayOfYear = kDaysBeforeMonth[month - 1] + day;
+  if (month > 2 && isLeapYear(year))
+    ++dayOfYear;
+  return dayOfYear;
+}
+
+/** Calculates one UTC solar event hour using the NOAA sunrise/sunset approximation. */
+bool computeSolarUtcHour(uint16_t dayOfYear, double latitudeDeg, double longitudeDeg, bool sunrise, double &utcHour)
+{
+  if (dayOfYear == 0)
+    return false;
+
+  const double lngHour = longitudeDeg / 15.0;
+  const double approximateTime = static_cast<double>(dayOfYear) +
+                                 ((sunrise ? 6.0 : 18.0) - lngHour) / 24.0;
+  const double meanAnomaly = (0.9856 * approximateTime) - 3.289;
+  double trueLongitude = meanAnomaly +
+                         (1.916 * sin(degreesToRadians(meanAnomaly))) +
+                         (0.020 * sin(2.0 * degreesToRadians(meanAnomaly))) +
+                         282.634;
+  trueLongitude = normalizeDegrees(trueLongitude);
+
+  double rightAscension = radiansToDegrees(atan(0.91764 * tan(degreesToRadians(trueLongitude))));
+  rightAscension = normalizeDegrees(rightAscension);
+
+  const double longitudeQuadrant = floor(trueLongitude / 90.0) * 90.0;
+  const double rightAscensionQuadrant = floor(rightAscension / 90.0) * 90.0;
+  rightAscension = (rightAscension + (longitudeQuadrant - rightAscensionQuadrant)) / 15.0;
+
+  const double sinDeclination = 0.39782 * sin(degreesToRadians(trueLongitude));
+  const double cosDeclination = cos(asin(sinDeclination));
+  const double cosLocalHour = (cos(degreesToRadians(90.833)) -
+                               (sinDeclination * sin(degreesToRadians(latitudeDeg)))) /
+                              (cosDeclination * cos(degreesToRadians(latitudeDeg)));
+
+  // Polar day/night where the sun never rises/sets for this date.
+  if (cosLocalHour > 1.0 || cosLocalHour < -1.0)
+    return false;
+
+  double localHourAngle = sunrise
+                              ? (360.0 - radiansToDegrees(acos(cosLocalHour)))
+                              : radiansToDegrees(acos(cosLocalHour));
+  localHourAngle /= 15.0;
+
+  const double localMeanTime = localHourAngle + rightAscension - (0.06571 * approximateTime) - 6.622;
+  utcHour = normalizeHours(localMeanTime - lngHour);
+  return true;
+}
+
+/** Calculates cached sunrise and sunset epochs from location/timezone when API data is unavailable. */
+bool computeFallbackSunEvents(acetime_t nowEpoch, acetime_t &sunriseEpoch, acetime_t &sunsetEpoch, bool &usingGpsFix)
+{
+  const bool gpsCoordsAvailable = gps.fix && hasValidCoordinatePair(gps.lat, gps.lon);
+  const double latitude = gpsCoordsAvailable ? gps.lat : current.lat;
+  const double longitude = gpsCoordsAvailable ? gps.lon : current.lon;
+  usingGpsFix = gpsCoordsAvailable;
+
+  if (!hasValidCoordinatePair(latitude, longitude))
+    return false;
+
+  const ZonedDateTime localNow = ZonedDateTime::forEpochSeconds(nowEpoch, current.timezone);
+  const int16_t year = localNow.year();
+  const uint8_t month = localNow.month();
+  const uint8_t day = localNow.day();
+  const uint16_t dayOfYear = dayOfYearFromDate(year, month, day);
+  if (dayOfYear == 0)
+    return false;
+
+  static int16_t cachedYear = INT16_MIN;
+  static uint16_t cachedDayOfYear = 0;
+  static int32_t cachedLatE5 = INT32_MIN;
+  static int32_t cachedLonE5 = INT32_MIN;
+  static int16_t cachedOffsetMinutes = INT16_MIN;
+  static acetime_t cachedSunrise = 0;
+  static acetime_t cachedSunset = 0;
+  static bool cachedValid = false;
+
+  const int32_t latE5 = static_cast<int32_t>(latitude * 100000.0);
+  const int32_t lonE5 = static_cast<int32_t>(longitude * 100000.0);
+  const int16_t offsetMinutes = getTimezoneOffsetAt(nowEpoch).toMinutes();
+
+  if (cachedValid &&
+      cachedYear == year &&
+      cachedDayOfYear == dayOfYear &&
+      cachedLatE5 == latE5 &&
+      cachedLonE5 == lonE5 &&
+      cachedOffsetMinutes == offsetMinutes)
+  {
+    sunriseEpoch = cachedSunrise;
+    sunsetEpoch = cachedSunset;
+    return true;
+  }
+
+  double sunriseUtcHour = 0.0;
+  double sunsetUtcHour = 0.0;
+  if (!computeSolarUtcHour(dayOfYear, latitude, longitude, true, sunriseUtcHour) ||
+      !computeSolarUtcHour(dayOfYear, latitude, longitude, false, sunsetUtcHour))
+  {
+    cachedValid = false;
+    return false;
+  }
+
+  auto localEpochForHour = [&](double utcHour) -> acetime_t {
+    double localHour = utcHour + (static_cast<double>(offsetMinutes) / 60.0);
+    int16_t dayAdjustment = 0;
+    while (localHour < 0.0)
+    {
+      localHour += 24.0;
+      --dayAdjustment;
+    }
+    while (localHour >= 24.0)
+    {
+      localHour -= 24.0;
+      ++dayAdjustment;
+    }
+
+    const LocalDateTime localMidnight = LocalDateTime::forComponents(year, month, day, 0, 0, 0);
+    const acetime_t midnightEpochUtc = localMidnight.toEpochSeconds();
+    const acetime_t localMidnightEpoch = midnightEpochUtc - static_cast<acetime_t>(offsetMinutes) * 60;
+    const acetime_t secondsIntoDay = static_cast<acetime_t>(lround(localHour * 3600.0));
+    return localMidnightEpoch + static_cast<acetime_t>(dayAdjustment) * 86400 + secondsIntoDay;
+  };
+
+  sunriseEpoch = localEpochForHour(sunriseUtcHour);
+  sunsetEpoch = localEpochForHour(sunsetUtcHour);
+
+  cachedYear = year;
+  cachedDayOfYear = dayOfYear;
+  cachedLatE5 = latE5;
+  cachedLonE5 = lonE5;
+  cachedOffsetMinutes = offsetMinutes;
+  cachedSunrise = sunriseEpoch;
+  cachedSunset = sunsetEpoch;
+  cachedValid = true;
   return true;
 }
 
@@ -938,12 +1144,17 @@ void processTimezone()
   int16_t savedoffset = savedtzoffset.value();
   int16_t fixedoffset = fixed_offset.value();
   const char *savedZoneName = savedtimezone.value();
+  const acetime_t nowEpoch = systemClock.getNow();
 
   auto applyTimezoneOffset = [&](int16_t offset, const char *source) {
     current.tzoffset = offset;
     current.timezone = TimeZone::forHours(offset);
     ESP_LOGD(TAG, "Using %s fixed timezone offset: %s", source,
              formatTimeOffset(TimeOffset::forHours(offset)).c_str());
+  };
+
+  auto setTimezoneSource = [&](const char *source) {
+    strlcpy(runtimeState.timezoneSource, source, sizeof(runtimeState.timezoneSource));
   };
 
   auto persistTimezoneSelection = [&](int16_t offset, const char *zoneName, const char *source) {
@@ -976,32 +1187,104 @@ void processTimezone()
   {
     applyTimezoneOffset(fixedoffset, "fixed");
     persistTimezoneSelection(fixedoffset, nullptr, "Fixed");
+    setTimezoneSource("Fixed override");
     noteDiagnosticPending(DiagnosticService::Timekeeping, true, "Fixed timezone",
                           String(F("Using a manual GMT offset of ")) + getSystemTimezoneOffsetString() + F(" with no automatic DST rules."));
   }
   else if (applyNamedTimezone(ipgeo.timezone, "ip geolocation"))
   {
-    persistTimezoneSelection(getTimezoneOffsetAt(systemClock.getNow()).toMinutes() / 60, ipgeo.timezone, "IP Geo");
+    persistTimezoneSelection(getTimezoneOffsetAt(nowEpoch).toMinutes() / 60, ipgeo.timezone, "IP Geo");
+    setTimezoneSource("IP geolocation name");
   }
   else if (applyNamedTimezone(savedZoneName, "saved"))
   {
-    persistTimezoneSelection(getTimezoneOffsetAt(systemClock.getNow()).toMinutes() / 60, savedZoneName, "Saved");
-  }
-  else if (ipgeo.tzoffset != 127)
-  {
-    applyTimezoneOffset(ipgeo.tzoffset, "ip geolocation");
-    persistTimezoneSelection(ipgeo.tzoffset, nullptr, "IP Geo");
-  }
-  else if (savedoffset != 0 || fixedoffset == 0)
-  {
-    applyTimezoneOffset(savedoffset, "saved");
+    persistTimezoneSelection(getTimezoneOffsetAt(nowEpoch).toMinutes() / 60, savedZoneName, "Saved");
+    setTimezoneSource("Saved timezone name");
   }
   else
   {
-    applyTimezoneOffset(fixedoffset, "configured fallback");
-    persistTimezoneSelection(fixedoffset, nullptr, "Configured fallback");
+    int16_t gpsDerivedOffset = 0;
+    if (gps.fix && hasValidCoordinatePair(gps.lat, gps.lon) &&
+        deriveTimezoneOffsetFromLongitude(gps.lon, gpsDerivedOffset))
+    {
+      applyTimezoneOffset(gpsDerivedOffset, "gps longitude");
+      persistTimezoneSelection(gpsDerivedOffset, nullptr, "GPS");
+      setTimezoneSource("GPS longitude fallback");
+      noteDiagnosticPending(DiagnosticService::Timekeeping, true, "GPS-derived timezone",
+                            String(F("Using GPS longitude ")) + String(gps.lon, 5) +
+                                F(" for timezone offset fallback: GMT") + getSystemTimezoneOffsetString() +
+                                F(" (DST rules unavailable without a named timezone)."));
+    }
+    else if (ipgeo.tzoffset != 127)
+    {
+      applyTimezoneOffset(ipgeo.tzoffset, "ip geolocation");
+      persistTimezoneSelection(ipgeo.tzoffset, nullptr, "IP Geo");
+      setTimezoneSource("IP geolocation offset");
+    }
+    else if (savedoffset != 0 || fixedoffset == 0)
+    {
+      applyTimezoneOffset(savedoffset, "saved");
+      setTimezoneSource("Saved offset");
+    }
+    else
+    {
+      applyTimezoneOffset(fixedoffset, "configured fallback");
+      persistTimezoneSelection(fixedoffset, nullptr, "Configured fallback");
+      setTimezoneSource("Configured fallback");
+    }
   }
   ESP_LOGV(TAG, "Process timezone complete: %lu ms", (millis() - timer));
+}
+
+bool getActiveSunEvents(acetime_t nowEpoch, acetime_t &sunriseEpoch, acetime_t &sunsetEpoch)
+{
+  const bool hasWeatherSunrise = weather.day.sunrise > 0;
+  const bool hasWeatherSunset = weather.day.sunset > 0;
+  bool usingGpsFix = false;
+  acetime_t fallbackSunrise = 0;
+  acetime_t fallbackSunset = 0;
+  const bool hasFallbackSunEvents = computeFallbackSunEvents(nowEpoch, fallbackSunrise, fallbackSunset, usingGpsFix);
+
+  if (hasWeatherSunrise && hasWeatherSunset)
+  {
+    sunriseEpoch = weather.day.sunrise;
+    sunsetEpoch = weather.day.sunset;
+    runtimeState.activeSunriseEpoch = sunriseEpoch;
+    runtimeState.activeSunsetEpoch = sunsetEpoch;
+    strlcpy(runtimeState.solarTimesSource, "Weather API", sizeof(runtimeState.solarTimesSource));
+    return true;
+  }
+
+  if ((hasWeatherSunrise || hasWeatherSunset) && hasFallbackSunEvents)
+  {
+    sunriseEpoch = hasWeatherSunrise ? weather.day.sunrise : fallbackSunrise;
+    sunsetEpoch = hasWeatherSunset ? weather.day.sunset : fallbackSunset;
+    runtimeState.activeSunriseEpoch = sunriseEpoch;
+    runtimeState.activeSunsetEpoch = sunsetEpoch;
+    strlcpy(runtimeState.solarTimesSource,
+            usingGpsFix ? "Weather+GPS fallback" : "Weather+Coord fallback",
+            sizeof(runtimeState.solarTimesSource));
+    return true;
+  }
+
+  if (hasFallbackSunEvents)
+  {
+    sunriseEpoch = fallbackSunrise;
+    sunsetEpoch = fallbackSunset;
+    runtimeState.activeSunriseEpoch = fallbackSunrise;
+    runtimeState.activeSunsetEpoch = fallbackSunset;
+    strlcpy(runtimeState.solarTimesSource,
+            usingGpsFix ? "GPS fallback" : "Coordinate fallback",
+            sizeof(runtimeState.solarTimesSource));
+    return true;
+  }
+
+  sunriseEpoch = 0;
+  sunsetEpoch = 0;
+  runtimeState.activeSunriseEpoch = 0;
+  runtimeState.activeSunsetEpoch = 0;
+  strlcpy(runtimeState.solarTimesSource, "Unavailable", sizeof(runtimeState.solarTimesSource));
+  return false;
 }
 
 void updateLocation()
@@ -1123,6 +1406,8 @@ void updateCoords()
     dtostrf(current.lon, 9, 5, savedlon.value());
     persistConfigurationState("coordinate update");
     checkgeocode.ready = true;
+    if (!enable_fixed_tz.isChecked() && gps.fix && hasValidCoordinatePair(gps.lat, gps.lon))
+      processTimezone();
   }
   else if (isCoordsValid() && !isLocationValid("geocode") && !isLocationValid("current"))
   {

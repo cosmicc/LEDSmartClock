@@ -139,6 +139,7 @@ GitHub releases include a `firmware.zip` package containing:
 
 - `firmware.bin`
 - `update.bin`
+- `release-metadata.json`
 - `web-installer/`
   - `index.html`
   - `manifest.json`
@@ -148,6 +149,7 @@ Notes:
 
 - `firmware.bin` is the merged first-install image used by the web installer and by manual USB flashing at offset `0x0`.
 - `update.bin` is the OTA application image used by the clock web UI after the device is already installed.
+- `release-metadata.json` includes release version, git commit, board target, and package build date.
 - `web-installer/index.html` can be opened locally after extracting the zip and provides the same first-install flow without needing to browse the repository.
 - The `web-installer` folder does not contain duplicate firmware binaries.
 

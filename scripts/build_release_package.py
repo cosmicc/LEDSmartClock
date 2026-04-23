@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -29,7 +31,37 @@ def render_template(template_path: Path, replacements: dict[str, str], output_pa
     output_path.write_text(content, encoding="utf-8")
 
 
-def build_release_package(build_dir: Path, release_dir: Path, site_dir: Path, tag: str, repository: str) -> None:
+def write_release_metadata(
+    release_dir: Path,
+    site_dir: Path,
+    tag: str,
+    git_commit: str,
+    board_target: str,
+    build_date_utc: str,
+) -> None:
+    semver = tag[1:] if tag.startswith("v") else tag
+    metadata = {
+        "tag": tag,
+        "version": semver,
+        "git_commit": git_commit,
+        "board_target": board_target,
+        "build_date_utc": build_date_utc,
+    }
+    metadata_json = json.dumps(metadata, indent=2, sort_keys=True) + "\n"
+    (release_dir / "release-metadata.json").write_text(metadata_json, encoding="utf-8")
+    (site_dir / "release-metadata.json").write_text(metadata_json, encoding="utf-8")
+
+
+def build_release_package(
+    build_dir: Path,
+    release_dir: Path,
+    site_dir: Path,
+    tag: str,
+    repository: str,
+    git_commit: str,
+    board_target: str,
+    build_date_utc: str,
+) -> None:
     release_dir.mkdir(parents=True, exist_ok=True)
     site_dir.mkdir(parents=True, exist_ok=True)
 
@@ -62,6 +94,7 @@ def build_release_package(build_dir: Path, release_dir: Path, site_dir: Path, ta
     }
     render_template(installer_dir / "index.html", replacements, site_dir / "index.html")
     render_template(installer_dir / "manifest.template.json", replacements, site_dir / "manifest.json")
+    write_release_metadata(release_dir, site_dir, tag, git_commit, board_target, build_date_utc)
 
 
 def main() -> None:
@@ -71,9 +104,24 @@ def main() -> None:
     parser.add_argument("--site-dir", required=True, type=Path)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--repository", required=True)
+    parser.add_argument("--git-commit", default="unknown")
+    parser.add_argument("--board-target", default="unknown")
+    parser.add_argument(
+        "--build-date-utc",
+        default=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
     args = parser.parse_args()
 
-    build_release_package(args.build_dir, args.release_dir, args.site_dir, args.tag, args.repository)
+    build_release_package(
+        args.build_dir,
+        args.release_dir,
+        args.site_dir,
+        args.tag,
+        args.repository,
+        args.git_commit,
+        args.board_target,
+        args.build_date_utc,
+    )
 
 
 if __name__ == "__main__":

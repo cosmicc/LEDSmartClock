@@ -28,23 +28,34 @@ const uint16_t DARKORANGE = RGB16(150, 75, 0);
 
 int hexcolorToInt(char upper, char lower)
 {
-  int uVal = (int)upper;
-  int lVal = (int)lower;
-  uVal = uVal > 64 ? uVal - 55 : uVal - 48;
-  uVal = uVal << 4;
-  lVal = lVal > 64 ? lVal - 55 : lVal - 48;
-  return uVal + lVal;
+  auto hexDigitValue = [](char input) -> int {
+    const unsigned char normalized = static_cast<unsigned char>(toupper(static_cast<unsigned char>(input)));
+    if (normalized >= '0' && normalized <= '9')
+      return normalized - '0';
+    if (normalized >= 'A' && normalized <= 'F')
+      return normalized - 'A' + 10;
+    return -1;
+  };
+
+  const int upperValue = hexDigitValue(upper);
+  const int lowerValue = hexDigitValue(lower);
+  if (upperValue < 0 || lowerValue < 0)
+    return 0;
+
+  return (upperValue << 4) | lowerValue;
 }
 
-uint16_t hex2rgb(char *str)
+uint16_t hex2rgb(const char *str)
 {
-  String hexvalue = (String)str;
-  hexvalue.toUpperCase();
-  char c[7];
-  hexvalue.toCharArray(c, 8);
-  int red = hexcolorToInt(c[1], c[2]);
-  int green = hexcolorToInt(c[3], c[4]);
-  int blue = hexcolorToInt(c[5], c[6]);
+  if (str == nullptr || str[0] != '#' || str[1] == '\0' || str[2] == '\0' || str[3] == '\0' ||
+      str[4] == '\0' || str[5] == '\0' || str[6] == '\0' || str[7] != '\0')
+  {
+    return BLACK;
+  }
+
+  const int red = hexcolorToInt(str[1], str[2]);
+  const int green = hexcolorToInt(str[3], str[4]);
+  const int blue = hexcolorToInt(str[5], str[6]);
   return RGB16(red, green, blue);
 }
 

@@ -48,11 +48,9 @@ void appendConsoleBytesLocked(const char *data, size_t length)
 /** Copies a console window into a String caller buffer. */
 bool copyConsoleWindow(uint32_t since, String &out, uint32_t &cursor, bool &truncated)
 {
-  char *snapshot = static_cast<char *>(malloc(kConsoleLogCapacity + 1U));
-  if (snapshot == nullptr)
-    return false;
-
   size_t available = 0;
+  size_t readIndex = 0;
+  bool copied = false;
 
   portENTER_CRITICAL(&sConsoleLogMux);
 
@@ -69,19 +67,25 @@ bool copyConsoleWindow(uint32_t since, String &out, uint32_t &cursor, bool &trun
   available = static_cast<size_t>(sConsoleLogCursor - since);
   const size_t oldestIndex = (sConsoleLogHead + kConsoleLogCapacity - sConsoleLogLength) % kConsoleLogCapacity;
   const size_t logicalOffset = static_cast<size_t>(since - earliestCursor);
-  size_t readIndex = (oldestIndex + logicalOffset) % kConsoleLogCapacity;
+  readIndex = (oldestIndex + logicalOffset) % kConsoleLogCapacity;
 
-  for (size_t copied = 0; copied < available; ++copied)
+  out.remove(0);
+  if (out.reserve(available + 1U))
   {
-    snapshot[copied] = sConsoleLogBuffer[readIndex];
-    readIndex = (readIndex + 1U) % kConsoleLogCapacity;
+    const size_t firstChunk = min(available, kConsoleLogCapacity - readIndex);
+    copied = out.concat(sConsoleLogBuffer + readIndex, firstChunk);
+    if (copied && available > firstChunk)
+      copied = out.concat(sConsoleLogBuffer, available - firstChunk);
   }
-  snapshot[available] = '\0';
 
   portEXIT_CRITICAL(&sConsoleLogMux);
 
-  out = snapshot;
-  free(snapshot);
+  if (!copied && available > 0)
+  {
+    out.remove(0);
+    return false;
+  }
+
   return true;
 }
 

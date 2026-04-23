@@ -31,7 +31,7 @@ extern const uint16_t DARKORANGE;
 int hexcolorToInt(char upper, char lower);
 
 /** Converts an HTML-style `#RRGGBB` string into a 16-bit display color. */
-uint16_t hex2rgb(char *str);
+uint16_t hex2rgb(const char *str);
 
 /** Converts a hue value into a full-saturation RGB color. */
 uint16_t hsv2rgb(uint8_t hsvr);

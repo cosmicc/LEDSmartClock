@@ -2,6 +2,9 @@
 
 namespace
 {
+constexpr int32_t kHttpConnectTimeoutMs = 5000;
+constexpr uint16_t kHttpReadTimeoutMs = 5000;
+
 char *mutableApiUrl(ApiEndpoint endpoint)
 {
   switch (endpoint)
@@ -62,6 +65,8 @@ bool beginApiRequest(ApiEndpoint endpoint)
   }
 
   networkService.busy = true;
+  networkService.client.setConnectTimeout(kHttpConnectTimeoutMs);
+  networkService.client.setTimeout(kHttpReadTimeoutMs);
   ESP_LOGD(TAG, "Sending %s request: %s", endpointName(endpoint), url);
   return networkService.client.begin(url);
 }
@@ -74,11 +79,7 @@ void endApiRequest()
 
 void rebuildApiUrls()
 {
-  char units[32];
-  if (imperial.isChecked())
-    strcpy(units, "imperial");
-  else
-    strcpy(units, "metric");
+  const char *units = imperial.isChecked() ? "imperial" : "metric";
 
   snprintf(networkService.urls.weather, sizeof(networkService.urls.weather), "%s?units=%s&exclude=minutely,alerts&appid=%s&lat=%f&lon=%f&lang=en",
            OPENWEATHER_ONECALL_ENDPOINT, units, weatherapi.value(), current.lat, current.lon);

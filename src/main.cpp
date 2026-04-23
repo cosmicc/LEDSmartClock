@@ -310,6 +310,7 @@ extern "C" void app_main()
     systemClock.loop();
     esp_task_wdt_reset();
     ESP_EARLY_LOGD(TAG, "Waiting for Light Sensor...");
+    delay(10);
     if ((millis() - lightSensorWaitStart) >= kLightSensorStartupTimeoutMs)
     {
       ESP_EARLY_LOGW(TAG,
@@ -1014,9 +1015,9 @@ void updateLocation()
       showready.loc = true;
     }
     // Set current location fields
-    strcpy(current.city, geocode.city);
-    strcpy(current.state, geocode.state);
-    strcpy(current.country, geocode.country);
+    strlcpy(current.city, geocode.city, sizeof(current.city));
+    strlcpy(current.state, geocode.state, sizeof(current.state));
+    strlcpy(current.country, geocode.country, sizeof(current.country));
     ESP_LOGI(TAG, "Using Geocode location: %s, %s, %s", current.city, current.state, current.country);
     noteDiagnosticSuccess(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "Resolved",
                           String(current.city) + F(", ") + current.state + F(", ") + current.country,
@@ -1025,9 +1026,9 @@ void updateLocation()
   else if (isLocationValid("saved"))
   {
     // Set current location fields to saved location
-    strcpy(current.city, savedcity.value());
-    strcpy(current.state, savedstate.value());
-    strcpy(current.country, savedcountry.value());
+    strlcpy(current.city, savedcity.value(), sizeof(current.city));
+    strlcpy(current.state, savedstate.value(), sizeof(current.state));
+    strlcpy(current.country, savedcountry.value(), sizeof(current.country));
     ESP_LOGD(TAG, "Using saved location: %s, %s, %s", current.city, current.state, current.country);
     noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "Saved fallback",
                           String(current.city) + F(", ") + current.state + F(", ") + current.country,
@@ -1052,9 +1053,9 @@ void updateLocation()
   {
     ESP_LOGI(TAG, "Location not saved, saving new location: %s, %s, %s", current.city, current.state, current.country);
     // Convert city/state/country to char array and save to savedcity/state/country
-    strcpy(savedcity.value(), current.city);
-    strcpy(savedstate.value(), current.state);
-    strcpy(savedcountry.value(), current.country);
+    strlcpy(savedcity.value(), current.city, sizeof(current.city));
+    strlcpy(savedstate.value(), current.state, sizeof(current.state));
+    strlcpy(savedcountry.value(), current.country, sizeof(current.country));
     persistConfigurationState("location update");
   }
 }
@@ -1074,7 +1075,7 @@ void updateCoords()
   {
     current.lat = strtod(fixedLat.value(), NULL);
     current.lon = strtod(fixedLon.value(), NULL);
-    strcpy(current.locsource, "User Defined");
+    strlcpy(current.locsource, "User Defined", sizeof(current.locsource));
     noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "Fixed coordinates",
                           String(F("Services are using fixed coordinates ")) + String(current.lat, 5) + F(", ") + String(current.lon, 5),
                           checkgeocode.retries);
@@ -1084,7 +1085,7 @@ void updateCoords()
     // Set coordinates to saved location
     current.lat = strtod(savedlat.value(), NULL);
     current.lon = strtod(savedlon.value(), NULL);
-    strcpy(current.locsource, "Previous Saved");
+    strlcpy(current.locsource, "Previous Saved", sizeof(current.locsource));
     noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "Saved coordinates",
                           String(F("Services are using saved coordinates ")) + String(current.lat, 5) + F(", ") + String(current.lon, 5),
                           checkgeocode.retries);
@@ -1094,7 +1095,7 @@ void updateCoords()
     // Set coordinates to ip geolocation
     current.lat = ipgeo.lat;
     current.lon = ipgeo.lon;
-    strcpy(current.locsource, "IP Geolocation");
+    strlcpy(current.locsource, "IP Geolocation", sizeof(current.locsource));
     ESP_LOGI(TAG, "Using IPGeo location information: Lat: %lf Lon: %lf", (ipgeo.lat), (ipgeo.lon));
     noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "IP coordinates",
                           String(F("Services are using IP-derived coordinates ")) + String(current.lat, 5) + F(", ") + String(current.lon, 5),
@@ -1105,7 +1106,7 @@ void updateCoords()
     // Set coordinates to gps location
     current.lat = gps.lat;
     current.lon = gps.lon;
-    strcpy(current.locsource, "GPS");
+    strlcpy(current.locsource, "GPS", sizeof(current.locsource));
     noteDiagnosticPending(DiagnosticService::Geocode, isApiValid(weatherapi.value()), "GPS coordinates",
                           String(F("Services are using live GPS coordinates ")) + String(current.lat, 5) + F(", ") + String(current.lon, 5),
                           checkgeocode.retries);
@@ -1457,13 +1458,15 @@ String getSystemZonedDateTimeString()
     if (hour == 0)
       hour = 12;
 
-    sprintf(buf, "%d:%02d%s %s, %s %u%s %04d", hour, ldt.minute(), ap, DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()),
-            ldt.day(), ordinal_suffix(ldt.day()), ldt.year());
+    snprintf(buf, sizeof(buf), "%d:%02d%s %s, %s %u%s %04d", hour, ldt.minute(), ap,
+             DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()),
+             ldt.day(), ordinal_suffix(ldt.day()), ldt.year());
   }
   else
   {
-    sprintf(buf, "%02d:%02d %s, %s %d%s %04d", ldt.hour(), ldt.minute(), DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()),
-            ldt.day(), ordinal_suffix(ldt.day()), ldt.year());
+    snprintf(buf, sizeof(buf), "%02d:%02d %s, %s %d%s %04d", ldt.hour(), ldt.minute(),
+             DateStrings().dayOfWeekLongString(ldt.dayOfWeek()), DateStrings().monthLongString(ldt.month()),
+             ldt.day(), ordinal_suffix(ldt.day()), ldt.year());
   }
 
   return String(buf);

@@ -124,6 +124,12 @@ struct RuntimeState
   uint8_t userBrightness = 0;
   /** Prevents early network jobs from running while the first-time portal is active. */
   bool firstTimeFailsafe = false;
+  /** Previous epoch sample used for sunrise/sunset edge detection. */
+  ace_time::acetime_t lastSolarCheck = 0;
+  /** Sunrise epoch already announced, used to prevent duplicate messages. */
+  ace_time::acetime_t sunriseNotifiedEpoch = 0;
+  /** Sunset epoch already announced, used to prevent duplicate messages. */
+  ace_time::acetime_t sunsetNotifiedEpoch = 0;
   /** Set when the web UI or serial console has requested a controlled reboot. */
   bool rebootRequested = false;
   /** Millisecond timestamp used to delay restart until the HTTP response is sent. */

@@ -35,6 +35,15 @@ static uint32_t aqiRefreshIntervalMinutes()
   return refreshMinutes;
 }
 
+/** Returns true when runtime crosses a target epoch between scheduler passes. */
+static bool crossedEpochBoundary(acetime_t previous, acetime_t current, acetime_t boundary)
+{
+  if (boundary <= 0 || previous <= 0 || current < previous)
+    return false;
+
+  return previous < boundary && current >= boundary;
+}
+
 COROUTINE(IotWebConf) 
 {
   COROUTINE_LOOP() 
@@ -156,7 +165,7 @@ COROUTINE(checkAirquality)
                               String(F("OpenWeather AQI request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
                               httpCode, checkaqi.retries);
         showready.apierror = true;
-        strcpy(showready.apierrorname, "openweather.org");
+        strlcpy(showready.apierrorname, "openweather.org", sizeof(showready.apierrorname));
       }
       else
       {
@@ -226,7 +235,7 @@ COROUTINE(checkWeather)
                               String(F("OpenWeather weather request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
                               httpCode, checkweather.retries);
         showready.apierror = true;
-        strcpy(showready.apierrorname, "openweather.org");
+        strlcpy(showready.apierrorname, "openweather.org", sizeof(showready.apierrorname));
       }
       else
       {
@@ -441,9 +450,6 @@ COROUTINE(showAlerts)
   COROUTINE_LOOP() 
   {
     COROUTINE_AWAIT((showready.alerts || showready.testalerts) && displaytoken.isReady(3));
-    const bool testMode = showready.testalerts;
-    bool useWatchTone = false;
-    const char *alertMessage = nullptr;
     if (alerts.active)
     {
       const AlertEntry *selectedEntry = displayAlert();
@@ -453,18 +459,15 @@ COROUTINE(showAlerts)
       }
       else
       {
-        useWatchTone = selectedEntry->watch;
-        alertMessage = hasVisibleText(selectedEntry->displayText)
-                           ? selectedEntry->displayText
-                           : selectedEntry->event;
-
         displaytoken.setToken(3);
-        startFlash(alertcolors[useWatchTone], 3);
+        strlcpy(scrolltext.message,
+                hasVisibleText(selectedEntry->displayText) ? selectedEntry->displayText : selectedEntry->event,
+                sizeof(scrolltext.message));
+        startFlash(alertcolors[selectedEntry->watch ? 1 : 0], 3);
         COROUTINE_AWAIT(!alertflash.active);
-        strlcpy(scrolltext.message, alertMessage, sizeof(scrolltext.message));
-        startScroll(alertcolors[useWatchTone], false);
+        startScroll(alertflash.color, false);
         COROUTINE_AWAIT(!scrolltext.active);
-        if (!testMode)
+        if (!showready.testalerts)
         {
           lastshown.alerts = systemClock.getNow();
           advanceAlertRotation();
@@ -472,14 +475,14 @@ COROUTINE(showAlerts)
         displaytoken.resetToken(3);
       }
     }
-    else if (testMode)
+    else if (showready.testalerts)
     {
       constexpr char kSampleAlertMessage[] = "Test Alert Tornado Warning Seek shelter now";
       displaytoken.setToken(3);
+      strlcpy(scrolltext.message, kSampleAlertMessage, sizeof(scrolltext.message));
       startFlash(alertcolors[0], 3);
       COROUTINE_AWAIT(!alertflash.active);
-      strlcpy(scrolltext.message, kSampleAlertMessage, sizeof(scrolltext.message));
-      startScroll(alertcolors[0], false);
+      startScroll(alertflash.color, false);
       COROUTINE_AWAIT(!scrolltext.active);
       displaytoken.resetToken(3);
     }
@@ -540,7 +543,7 @@ COROUTINE(checkGeocode)
         noteDiagnosticFailure(DiagnosticService::Geocode, true, "HTTP error",
                               String(F("OpenWeather geocode request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
                               httpCode, checkgeocode.retries);
-        strcpy(showready.apierrorname, "openweather.org");
+        strlcpy(showready.apierrorname, "openweather.org", sizeof(showready.apierrorname));
         showready.apierror = true;
       }
       else
@@ -612,7 +615,7 @@ COROUTINE(checkIpgeo)
           noteDiagnosticFailure(DiagnosticService::IpGeo, true, "Invalid API key",
                                 String(F("ipgeolocation.io request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
                                 httpCode, checkipgeo.retries);
-          strcpy(showready.apierrorname, "ipgeolocation.io");
+          strlcpy(showready.apierrorname, "ipgeolocation.io", sizeof(showready.apierrorname));
           showready.apierror = true;
         }
         else
@@ -726,8 +729,7 @@ COROUTINE(coroutineManager)
     ESP_LOGW(TAG, "Restarting clock due to user request.");
     ESP.restart();
   }
-  if (iotWebConf.getState() == 1)
-      runtimeState.firstTimeFailsafe = true;
+  runtimeState.firstTimeFailsafe = (iotWebConf.getState() == 1);
   if (!showClock.isSuspended() && !displaytoken.isReady(0))
   {
       showClock.suspend();
@@ -848,14 +850,22 @@ COROUTINE(coroutineManager)
     checkIpgeo.suspend();    
     ESP_LOGD(TAG, "Check IPGeolocation Coroutine Suspended");
   }
-  if (compareTimes(ZonedDateTime::forEpochSeconds(systemClock.getNow(), current.timezone), ZonedDateTime::forEpochSeconds(weather.day.sunrise, current.timezone)) && show_sunrise.isChecked())
+  const acetime_t nowEpoch = systemClock.getNow();
+  if (show_sunrise.isChecked() &&
+      crossedEpochBoundary(runtimeState.lastSolarCheck, nowEpoch, weather.day.sunrise) &&
+      runtimeState.sunriseNotifiedEpoch != weather.day.sunrise)
   {
     showready.sunrise = true;
+    runtimeState.sunriseNotifiedEpoch = weather.day.sunrise;
   }
-  else if (compareTimes(ZonedDateTime::forEpochSeconds(systemClock.getNow(), current.timezone), ZonedDateTime::forEpochSeconds(weather.day.sunset, current.timezone)) && show_sunset.isChecked())
+  if (show_sunset.isChecked() &&
+      crossedEpochBoundary(runtimeState.lastSolarCheck, nowEpoch, weather.day.sunset) &&
+      runtimeState.sunsetNotifiedEpoch != weather.day.sunset)
   {
     showready.sunset = true;
+    runtimeState.sunsetNotifiedEpoch = weather.day.sunset;
   }
+  runtimeState.lastSolarCheck = nowEpoch;
   if (checkweather.retries == HTTP_MAX_RETRIES && !checkWeather.isSuspended())
   {
     ESP_LOGE(TAG, "Check weather retry limit [%d] exceeded, disabling service for protection", HTTP_MAX_RETRIES);
@@ -909,7 +919,7 @@ COROUTINE_LOOP() {
 COROUTINE(AlertFlash) {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(alertflash.active && showClock.isSuspended() && showClock.isSuspended());
+    COROUTINE_AWAIT(alertflash.active && showClock.isSuspended());
     if (enable_alertflash.isChecked()) 
     {
       displaytoken.setToken(6);

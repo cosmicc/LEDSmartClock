@@ -2032,8 +2032,8 @@ document.addEventListener('DOMContentLoaded', function () {
   var status = document.getElementById('console-status');
   var form = document.getElementById('console-command-form');
   var input = document.getElementById('console-command');
-  var accessToken = page && page.dataset.consoleToken ? page.dataset.consoleToken : '';
-  var cursor = Number(output && output.dataset.cursor ? output.dataset.cursor : '0');
+  var accessToken = page ? (page.getAttribute('data-console-token') || '') : '';
+  var cursor = Number(output ? (output.getAttribute('data-cursor') || '0') : '0');
   var pollTimer = null;
   var pollInFlight = false;
 
@@ -2048,6 +2048,65 @@ document.addEventListener('DOMContentLoaded', function () {
     if (status) {
       status.textContent = text;
     }
+  }
+
+  function forEachNode(nodeList, callback) {
+    if (!nodeList || !callback) {
+      return;
+    }
+    for (var index = 0; index < nodeList.length; ++index) {
+      callback(nodeList[index], index);
+    }
+  }
+
+  function parseJson(text) {
+    if (!text) {
+      return {};
+    }
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function sendRequest(method, url, body, contentType, onSuccess, onError) {
+    var xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+    xhr.timeout = 15000;
+    if (contentType) {
+      xhr.setRequestHeader('Content-Type', contentType);
+    }
+    xhr.setRequestHeader('Cache-Control', 'no-store');
+    xhr.setRequestHeader('Pragma', 'no-cache');
+
+    xhr.onload = function () {
+      var responseText = xhr.responseText || '';
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (onSuccess) {
+          onSuccess(responseText, xhr);
+        }
+        return;
+      }
+
+      if (onError) {
+        onError('HTTP ' + xhr.status + (responseText ? ': ' + responseText : ''), xhr);
+      }
+    };
+
+    xhr.onerror = function () {
+      if (onError) {
+        onError('Network error', xhr);
+      }
+    };
+
+    xhr.ontimeout = function () {
+      if (onError) {
+        onError('Request timed out', xhr);
+      }
+    };
+
+    xhr.send(body || null);
   }
 
   function stripAnsi(text) {
@@ -2081,49 +2140,63 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     pollInFlight = true;
-    fetch(withToken('/console/log?since=' + encodeURIComponent(String(cursor))), {
-      cache: 'no-store',
-      credentials: 'same-origin'
-    })
-      .then(function (response) {
-        if (!response.ok) {
-          return response.text().then(function (body) {
-            throw new Error('HTTP ' + response.status + (body ? ': ' + body : ''));
-          });
+    sendRequest(
+      'GET',
+      withToken('/console/log?since=' + encodeURIComponent(String(cursor))),
+      null,
+      null,
+      function (text, xhr) {
+        var cursorHeader = xhr.getResponseHeader('X-Console-Cursor');
+        if (!cursorHeader) {
+          setStatus('Console polling failed: unexpected response from /console/log.');
+          pollInFlight = false;
+          schedulePoll(1500);
+          return;
         }
-        var nextCursor = Number(response.headers.get('X-Console-Cursor') || cursor);
-        var truncated = response.headers.get('X-Console-Truncated') === '1';
-        return response.text().then(function (text) {
-          if (truncated) {
-            output.textContent = '';
-            appendOutput('[console buffer wrapped; showing newest available output]\n');
-          }
-          if (text) {
-            appendOutput(text);
-          }
-          cursor = nextCursor;
-          setStatus('Live console connected. Cursor ' + cursor + '.');
-        });
-      })
-      .catch(function (error) {
-        setStatus('Console polling failed: ' + error.message);
-      })
-      .finally(function () {
+
+        var nextCursor = Number(cursorHeader || cursor);
+        var truncated = xhr.getResponseHeader('X-Console-Truncated') === '1';
+        if (truncated) {
+          output.textContent = '';
+          appendOutput('[console buffer wrapped; showing newest available output]\n');
+        }
+        if (text) {
+          appendOutput(text);
+        }
+        cursor = nextCursor;
+        setStatus('Live console connected. Cursor ' + cursor + '.');
         pollInFlight = false;
         schedulePoll(1500);
-      });
+      },
+      function (errorMessage) {
+        setStatus('Console polling failed: ' + errorMessage);
+        pollInFlight = false;
+        schedulePoll(1500);
+      }
+    );
   }
 
-  document.querySelectorAll('[data-console-command]').forEach(function (button) {
+  forEachNode(document.querySelectorAll('[data-console-command]'), function (button) {
     button.addEventListener('click', function () {
       if (!input) {
         return;
       }
-      input.value = button.dataset.consoleCommand || '';
+      input.value = button.getAttribute('data-console-command') || '';
       if (form.requestSubmit) {
         form.requestSubmit();
       } else {
-        form.dispatchEvent(new Event('submit', { cancelable: true }));
+        var submitEvent = null;
+        if (typeof Event === 'function') {
+          submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+        } else if (document.createEvent) {
+          submitEvent = document.createEvent('Event');
+          submitEvent.initEvent('submit', true, true);
+        }
+        if (submitEvent) {
+          form.dispatchEvent(submitEvent);
+        } else {
+          form.submit();
+        }
       }
     });
   });
@@ -2140,74 +2213,58 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
       }
 
-      fetch(withToken('/console/command'), {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
-        },
-        body: 'cmd=' + encodeURIComponent(command) + '&token=' + encodeURIComponent(accessToken)
-      }).then(function (response) {
-        return response.text().then(function (body) {
-          var payload = {};
-          try {
-            payload = body ? JSON.parse(body) : {};
-          } catch (error) {
-            payload = {};
-          }
-
-          if (!response.ok || payload.ok === false) {
-            var message = payload.error || ('HTTP ' + response.status);
-            throw new Error(message);
+      sendRequest(
+        'POST',
+        withToken('/console/command'),
+        'cmd=' + encodeURIComponent(command) + '&token=' + encodeURIComponent(accessToken),
+        'application/x-www-form-urlencoded;charset=UTF-8',
+        function (body) {
+          var payload = parseJson(body);
+          if (payload.ok !== true) {
+            setStatus('Command failed: ' + (payload.error || 'unexpected response from /console/command.'));
+            return;
           }
 
           input.value = '';
           setStatus('Sent command "' + command + '". Waiting for console output...');
           fetchConsole();
-        });
-      }).catch(function (error) {
-        setStatus('Command failed: ' + error.message);
-      });
+        },
+        function (errorMessage) {
+          setStatus('Command failed: ' + errorMessage);
+        }
+      );
     });
   }
 
-  document.querySelectorAll('[data-console-clear]').forEach(function (button) {
+  forEachNode(document.querySelectorAll('[data-console-clear]'), function (button) {
     button.addEventListener('click', function () {
       if (!window.confirm('Clear the retained web console buffer? This only removes the in-memory log tail.')) {
         return;
       }
 
-      fetch(withToken('/console/clear'), {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
-        },
-        body: 'token=' + encodeURIComponent(accessToken)
-      }).then(function (response) {
-        return response.text().then(function (body) {
-          var payload = {};
-          try {
-            payload = body ? JSON.parse(body) : {};
-          } catch (error) {
-            payload = {};
-          }
-
-          if (!response.ok || payload.ok === false) {
-            var message = payload.error || ('HTTP ' + response.status);
-            throw new Error(message);
+      sendRequest(
+        'POST',
+        withToken('/console/clear'),
+        'token=' + encodeURIComponent(accessToken),
+        'application/x-www-form-urlencoded;charset=UTF-8',
+        function (body) {
+          var payload = parseJson(body);
+          if (payload.ok !== true) {
+            setStatus('Clear failed: ' + (payload.error || 'unexpected response from /console/clear.'));
+            return;
           }
 
           cursor = Number(payload.cursor || 0);
           if (output) {
             output.textContent = '';
-            output.dataset.cursor = String(cursor);
+            output.setAttribute('data-cursor', String(cursor));
           }
           setStatus(payload.message || 'Console buffer cleared.');
-        });
-      }).catch(function (error) {
-        setStatus('Clear failed: ' + error.message);
-      });
+        },
+        function (errorMessage) {
+          setStatus('Clear failed: ' + errorMessage);
+        }
+      );
     });
   });
 

@@ -6,6 +6,7 @@ constexpr size_t kAlertFilterCapacity = 4096U;
 constexpr size_t kAlertDocumentCapacity = 16384U;
 constexpr size_t kAlertDisplayTarget = 220U;
 constexpr size_t kAlertSentenceTarget = 140U;
+constexpr size_t kAqiDocumentCapacity = 24U * 1024U;
 
 /**
  * Copies a JSON string field into a fixed-size destination, defaulting to an
@@ -585,26 +586,17 @@ bool fillAqiFromJson(const String &payload)
 {
   bool ready = false;
   StaticJsonDocument<768> filter;
-  filter["list"][1]["main"]["aqi"] = true;
-  filter["list"][1]["components"]["co"] = true;
-  filter["list"][1]["components"]["no"] = true;
-  filter["list"][1]["components"]["no2"] = true;
-  filter["list"][1]["components"]["o3"] = true;
-  filter["list"][1]["components"]["so2"] = true;
-  filter["list"][1]["components"]["pm2_5"] = true;
-  filter["list"][1]["components"]["pm10"] = true;
-  filter["list"][1]["components"]["nh3"] = true;
-  filter["list"][7]["main"]["aqi"] = true;
-  filter["list"][7]["components"]["co"] = true;
-  filter["list"][7]["components"]["no"] = true;
-  filter["list"][7]["components"]["no2"] = true;
-  filter["list"][7]["components"]["o3"] = true;
-  filter["list"][7]["components"]["so2"] = true;
-  filter["list"][7]["components"]["pm2_5"] = true;
-  filter["list"][7]["components"]["pm10"] = true;
-  filter["list"][7]["components"]["nh3"] = true;
+  filter["list"][0]["main"]["aqi"] = true;
+  filter["list"][0]["components"]["co"] = true;
+  filter["list"][0]["components"]["no"] = true;
+  filter["list"][0]["components"]["no2"] = true;
+  filter["list"][0]["components"]["o3"] = true;
+  filter["list"][0]["components"]["so2"] = true;
+  filter["list"][0]["components"]["pm2_5"] = true;
+  filter["list"][0]["components"]["pm10"] = true;
+  filter["list"][0]["components"]["nh3"] = true;
 
-  DynamicJsonDocument doc(4096);
+  DynamicJsonDocument doc(kAqiDocumentCapacity);
   DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
   if (error)
   {
@@ -612,9 +604,11 @@ bool fillAqiFromJson(const String &payload)
     return false;
   }
   JsonObject obj = doc.as<JsonObject>();
-  if (obj["list"][1].isNull() || obj["list"][7].isNull())
+  JsonArray list = obj["list"].as<JsonArray>();
+  if (list.size() <= 7 || list[1].isNull() || list[7].isNull())
   {
-    ESP_LOGE(TAG, "AQI payload did not contain the expected forecast entries.");
+    ESP_LOGE(TAG, "AQI payload did not contain the expected forecast entries. Entries parsed: %u",
+             static_cast<unsigned>(list.size()));
     return false;
   }
   ESP_LOGV(TAG, "AQI forecast payload parsed successfully.");

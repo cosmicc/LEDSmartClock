@@ -2072,6 +2072,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function sendRequest(method, url, body, contentType, onSuccess, onError) {
     var xhr = new XMLHttpRequest();
+    if (method === 'GET') {
+      url += (url.indexOf('?') === -1 ? '?' : '&') + '_=' + encodeURIComponent(String(new Date().getTime()));
+    }
     xhr.open(method, url, true);
     xhr.timeout = 15000;
     if (contentType) {
@@ -2217,7 +2220,7 @@ document.addEventListener('DOMContentLoaded', function () {
         'POST',
         withToken('/console/command'),
         'cmd=' + encodeURIComponent(command) + '&token=' + encodeURIComponent(accessToken),
-        'application/x-www-form-urlencoded;charset=UTF-8',
+        'application/x-www-form-urlencoded',
         function (body) {
           var payload = parseJson(body);
           if (payload.ok !== true) {
@@ -2246,7 +2249,7 @@ document.addEventListener('DOMContentLoaded', function () {
         'POST',
         withToken('/console/clear'),
         'token=' + encodeURIComponent(accessToken),
-        'application/x-www-form-urlencoded;charset=UTF-8',
+        'application/x-www-form-urlencoded',
         function (body) {
           var payload = parseJson(body);
           if (payload.ok !== true) {
@@ -3686,10 +3689,8 @@ void appendConfigBackupPage(String &html, const char *noticeToneClass, const Str
 /** Renders the live web console backed by the in-memory console log buffer. */
 void appendConsolePage(String &html, const String &accessToken)
 {
-  String snapshot;
-  uint32_t cursor = 0;
-  bool truncated = false;
-  readConsoleLogSnapshot(snapshot, cursor, truncated);
+  const uint32_t cursor = getConsoleLogCursor();
+  const size_t retainedBytes = getConsoleLogRetainedLength();
 
   appendDocumentHead(html, "LED Smart Clock Console", false);
   html += F("<div class='shell'><header class='hero'>");
@@ -3709,13 +3710,10 @@ void appendConsolePage(String &html, const String &accessToken)
   appendStatusChip(html, "Cursor", htmlEscape(String(cursor)));
   appendStatusChip(html, "Serial Debug", serialdebug.isChecked() ? F("Enabled") : F("Disabled"));
   html += F("</div><div class='metric-grid'>");
-  appendMetricCard(html, "Buffered Output", htmlEscape(String(snapshot.length()) + F(" bytes")), "tone-neutral");
+  appendMetricCard(html, "Buffered Output", htmlEscape(String(retainedBytes) + F(" bytes")), "tone-neutral");
   appendMetricCard(html, "Live Polling", F("Every 1.5 seconds"), "tone-good");
   appendMetricCard(html, "Command Path", F("/console/command"), "tone-neutral");
   html += F("</div></header>");
-
-  if (truncated)
-    appendNotice(html, "notice-warn", F("The RAM console buffer already wrapped. The console below starts at the newest retained output."));
 
   html += F("<main id='console-page' class='content-grid console-page-grid' data-console-token='");
   html += htmlEscape(accessToken);
@@ -3733,11 +3731,7 @@ void appendConsolePage(String &html, const String &accessToken)
   html += F("<button type='button' class='button-link danger' data-console-clear='true'>Clear Console Buffer</button>");
   html += F("<span class='status-chip'><strong>Incremental Feed</strong><span><code>/console/log</code></span></span>");
   html += F("<span class='status-chip'><strong>Buffer Scope</strong><span>Recent runtime output retained in RAM only</span></span>");
-  html += F("</div><pre id='console-output' class='console-view' data-cursor='");
-  html += cursor;
-  html += F("'>");
-  html += htmlEscape(snapshot);
-  html += F("</pre><p id='console-status' class='console-status'>Connecting to live console feed...</p></section>");
+  html += F("</div><pre id='console-output' class='console-view' data-cursor='0'></pre><p id='console-status' class='console-status'>Connecting to live console feed...</p></section>");
 
   html += F("<section id='console-commands' class='card card-span'><div class='card-header'><h2>Send Debug Commands</h2><p class='card-subtitle'>Commands map to the existing serial shortcuts. The first non-space character is used, so enter values such as h, d, g, or s.</p></div><dl class='kv-list'>");
   appendKeyValueRow(html, "Common Commands", F("<code>h</code> help, <code>d</code> dump debug, <code>g</code> GPS status, <code>n</code> raw NMEA, <code>p</code> GPS reset, <code>s</code> coroutine states, <code>l</code> debug logging"));
@@ -3769,12 +3763,11 @@ void appendConsolePage(String &html, const String &accessToken)
 /** Serves the shared stylesheet used by the dashboard, config portal, and console pages. */
 void handleThemeCss()
 {
-  String css;
-  css.reserve(22000);
-  css += FPSTR(kWebThemeCss);
-  css += FPSTR(kPortalConsoleCss);
-  server.sendHeader("Cache-Control", "no-store");
-  server.send(200, "text/css; charset=UTF-8", css);
+  const size_t cssLength = strlen_P(kWebThemeCss) + strlen_P(kPortalConsoleCss);
+  server.sendHeader("Cache-Control", "public, max-age=86400");
+  server.setContentLength(cssLength);
+  server.send_P(200, PSTR("text/css; charset=UTF-8"), kWebThemeCss);
+  server.sendContent_P(kPortalConsoleCss);
 }
 
 /** Renders the live diagnostics shell contents that can be refreshed in place. */
@@ -4868,6 +4861,8 @@ void handleConsolePage()
   String html;
   html.reserve(18000);
   appendConsolePage(html, accessToken);
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("Pragma", "no-cache");
   server.send(200, "text/html; charset=UTF-8", html);
 }
 

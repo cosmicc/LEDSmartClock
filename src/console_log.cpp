@@ -188,6 +188,14 @@ uint32_t getConsoleLogCursor()
   return cursor;
 }
 
+size_t getConsoleLogRetainedLength()
+{
+  portENTER_CRITICAL(&sConsoleLogMux);
+  const size_t length = sConsoleLogLength;
+  portEXIT_CRITICAL(&sConsoleLogMux);
+  return length;
+}
+
 bool readConsoleLogSnapshot(String &out, uint32_t &cursor, bool &truncated)
 {
   return copyConsoleWindow(0, out, cursor, truncated);

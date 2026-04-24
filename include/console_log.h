@@ -39,6 +39,9 @@ void appendConsoleBytes(const char *data, size_t length, bool mirrorToSerial);
 /** Returns the current end cursor of the RAM console buffer. */
 uint32_t getConsoleLogCursor();
 
+/** Returns the number of retained RAM console bytes currently available. */
+size_t getConsoleLogRetainedLength();
+
 /** Reads a tail snapshot of the RAM console buffer. */
 bool readConsoleLogSnapshot(String &out, uint32_t &cursor, bool &truncated);
 

@@ -187,10 +187,6 @@ void configureSntpRuntime()
   esp_sntp_set_time_sync_notification_cb([](struct timeval *tv) {
     sLastSntpUnixTime = (tv == nullptr) ? 0 : tv->tv_sec;
     ++sSntpSyncCount;
-    const acetime_t epochSeconds =
-        (sLastSntpUnixTime <= 0) ? Clock::kInvalidSeconds : convert1970Epoch(static_cast<acetime_t>(sLastSntpUnixTime));
-    ESP_LOGI(TAG, "GPSClock: SNTP sync callback received time %s using %s (%s).",
-             formatDebugTimestamp(epochSeconds).c_str(), runtimeState.ntpServer, runtimeState.ntpServerSource);
   });
   esp_sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
   esp_sntp_set_sync_interval(getSntpSyncIntervalMillis());

@@ -543,6 +543,13 @@ bool saveStoredConfiguration(String &error)
     return false;
   }
 
+  String existing = preferences.getString(kConfigStoreKey, "");
+  if (existing == json)
+  {
+    preferences.end();
+    return true;
+  }
+
   size_t bytesWritten = preferences.putString(kConfigStoreKey, json);
   preferences.end();
 

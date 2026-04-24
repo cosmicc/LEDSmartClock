@@ -2650,6 +2650,34 @@ public:
   void stop() override { server.client().stop(); }
 };
 
+constexpr size_t kLargePageHeapMarginBytes = 32U * 1024U;
+
+/** Reserves a large HTML response only when enough heap remains for the rest of the firmware. */
+bool reserveHtmlPage(String &html, size_t reserveBytes, const char *pageName)
+{
+  const uint32_t freeHeap = ESP.getFreeHeap();
+  if (freeHeap < reserveBytes + kLargePageHeapMarginBytes)
+  {
+    ESP_LOGW(TAG, "Refusing to render %s page: free heap %lu, requested reserve %u",
+             pageName == nullptr ? "web" : pageName,
+             static_cast<unsigned long>(freeHeap),
+             static_cast<unsigned>(reserveBytes));
+    server.send(503, "text/plain; charset=UTF-8", F("The clock is low on memory. Try again after current background work finishes."));
+    return false;
+  }
+
+  if (!html.reserve(reserveBytes))
+  {
+    ESP_LOGE(TAG, "Failed to reserve %u bytes for %s page",
+             static_cast<unsigned>(reserveBytes),
+             pageName == nullptr ? "web" : pageName);
+    server.send(503, "text/plain; charset=UTF-8", F("The clock could not allocate memory for this page."));
+    return false;
+  }
+
+  return true;
+}
+
 /** HTML-escapes text sourced from runtime or remote API data. */
 String htmlEscape(const String &value)
 {
@@ -2972,13 +3000,13 @@ String currentAqiDescription()
 {
   if (aqi.current.description.length() > 0)
     return htmlEscape(aqi.current.description);
-  return htmlEscape(String(air_quality[aqi.current.aqi]));
+  return htmlEscape(String(air_quality[safeAqiIndex(aqi.current.aqi)]));
 }
 
 /** Selects a tone class that visually summarizes the current AQI bucket. */
 const char *aqiTone()
 {
-  switch (aqi.current.aqi)
+  switch (safeAqiIndex(aqi.current.aqi))
   {
     case 1:
       return "tone-good";
@@ -3374,7 +3402,7 @@ void appendSelfTestItem(String &html, const char *title, const char *toneClass, 
 void appendOnboardingSelfTest(String &html)
 {
   const bool rtcReady = systemClock.isInit();
-  const bool lightReady = Tsl.available();
+  const bool lightReady = isLightSensorHealthy();
   const bool gpsReady = gps.moduleDetected || GPS.charsProcessed() > 0;
   const bool networkReady = iotWebConf.getState() == iotwebconf::OnLine;
 
@@ -3902,7 +3930,7 @@ void appendDiagnosticsContent(String &html)
   appendTonedCardStart(html, "Air Quality", "AQI forecast refresh health and the pollutant summary used by the AQI display block.", diagnosticTone(DiagnosticService::AirQuality));
   appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::AirQuality));
   appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::AirQuality));
-  appendKeyValueRow(html, "Current AQI", htmlEscape(String(air_quality[aqi.current.aqi])));
+  appendKeyValueRow(html, "Current AQI", htmlEscape(String(air_quality[safeAqiIndex(aqi.current.aqi)])));
   appendKeyValueRow(html, "Description", currentAqiDescription());
   appendKeyValueRow(html, "Enabled", show_aqi.isChecked() ? F("Yes") : F("No"));
   appendKeyValueRow(html, "Retries", htmlEscape(String(serviceDiagnostic(DiagnosticService::AirQuality).retries)));
@@ -4013,7 +4041,7 @@ void appendStatusContent(String &html)
                        ? "tone-good"
                        : "tone-neutral");
   appendMetricCard(html, "Brightness", brightnessPercentLabel(), "tone-neutral");
-  appendMetricCard(html, "Air Quality", htmlEscape(String(air_quality[aqi.current.aqi])), aqiTone());
+  appendMetricCard(html, "Air Quality", htmlEscape(String(air_quality[safeAqiIndex(aqi.current.aqi)])), aqiTone());
   appendMetricCard(html, "Weather Alerts", alerts.active ? htmlEscape(String(alerts.count) + F(" active")) : String(F("Clear")), alertTone());
   html += F("</div></header>");
 
@@ -4098,7 +4126,7 @@ void appendStatusContent(String &html)
   appendCardEnd(html);
 
   appendCardStart(html, "Air Quality", "Current AQI bucket, pollutant summary, and rotation timing.");
-  appendKeyValueRow(html, "Current AQI", htmlEscape(String(air_quality[aqi.current.aqi])));
+  appendKeyValueRow(html, "Current AQI", htmlEscape(String(air_quality[safeAqiIndex(aqi.current.aqi)])));
   appendKeyValueRow(html, "AQI Description", dashboardClampValue(currentAqiDescription()));
   appendKeyValueRow(html, "PM2.5 / PM10", htmlEscape(String(aqi.current.pm25, 1) + F(" / ") + String(aqi.current.pm10, 1)));
   appendKeyValueRow(html, "Ozone / Nitrogen Dioxide", htmlEscape(String(aqi.current.o3, 1) + F(" / ") + String(aqi.current.no2, 1)));
@@ -4304,7 +4332,8 @@ void handleLoginPage()
   }
 
   String html;
-  html.reserve(7000);
+  if (!reserveHtmlPage(html, 7000, "login"))
+    return;
   appendLoginPage(html,
                   server.hasArg("logged_out") ? "notice-good" : nullptr,
                   server.hasArg("logged_out") ? String(F("You have been signed out of the clock web interface.")) : String(),
@@ -4325,7 +4354,8 @@ void handleLoginPost()
   }
 
   String html;
-  html.reserve(7000);
+  if (!reserveHtmlPage(html, 7000, "login-post"))
+    return;
   const String submittedPassword = server.hasArg("password") ? server.arg("password") : String();
   const String nextPath = requestedNextPath();
   if (submittedPassword == String(iotWebConf.getApPasswordParameter()->valueBuffer) &&
@@ -4345,7 +4375,8 @@ void handleLogout()
 {
   clearWebSessionCookie();
   String html;
-  html.reserve(7000);
+  if (!reserveHtmlPage(html, 7000, "logout"))
+    return;
   appendLoginPage(html, "notice-good", F("You have been signed out of the clock web interface."), String("/"));
   server.send(200, "text/html; charset=UTF-8", html);
 }
@@ -4365,7 +4396,8 @@ void handleOnboarding()
   }
 
   String html;
-  html.reserve(18000);
+  if (!reserveHtmlPage(html, 18000, "onboarding"))
+    return;
   const bool showSelfTest = server.hasArg("saved") && server.arg("saved") == "1";
   appendSetupPage(html, nullptr,
                   showSelfTest ? "notice-good" : nullptr,
@@ -4393,14 +4425,16 @@ void handleOnboardingPost()
   if (!applyOnboardingDraft(draft, error))
   {
     String html;
-    html.reserve(18000);
+    if (!reserveHtmlPage(html, 18000, "onboarding-error"))
+      return;
     appendSetupPage(html, &draft, "notice-bad", error, false);
     server.send(400, "text/html; charset=UTF-8", html);
     return;
   }
 
   String html;
-  html.reserve(18000);
+  if (!reserveHtmlPage(html, 18000, "onboarding-save"))
+    return;
   appendSetupPage(html, &draft, "notice-good",
                   F("Onboarding values were saved successfully. Use the self-test below, then disconnect from the setup AP so the clock can finish joining your normal Wi-Fi network."),
                   true);
@@ -4451,7 +4485,8 @@ void handleFirmwareUpdate()
 
   resetFirmwareUploadState();
   String html;
-  html.reserve(9000);
+  if (!reserveHtmlPage(html, 9000, "firmware-update"))
+    return;
   appendFirmwareUpdatePage(html, "notice-warn", F("Upload the compiled application image only. A successful OTA update will reboot the clock automatically."), true);
   server.send(200, "text/html; charset=UTF-8", html);
 }
@@ -4465,7 +4500,11 @@ void handleFirmwareUpdatePost()
     return;
 
   String html;
-  html.reserve(9000);
+  if (!reserveHtmlPage(html, 9000, "firmware-update-result"))
+  {
+    resetFirmwareUploadState();
+    return;
+  }
 
   if (!firmwareUploadStarted || !firmwareUploadAuthenticated || firmwareUploadError.length() > 0)
   {
@@ -4579,7 +4618,8 @@ void handleConfigExport()
   if (!exportConfigurationBackup(json, error))
   {
     String html;
-    html.reserve(9000);
+    if (!reserveHtmlPage(html, 9000, "config-export-error"))
+      return;
     appendConfigBackupPage(html, "notice-bad", htmlEscape(error), true);
     server.send(500, "text/html; charset=UTF-8", html);
     return;
@@ -4601,7 +4641,8 @@ void handleConfigImport()
 
   resetConfigImportState();
   String html;
-  html.reserve(9000);
+  if (!reserveHtmlPage(html, 9000, "config-import"))
+    return;
   appendConfigBackupPage(html, "notice-warn", F("Download a fresh backup before firmware work, then use this page to restore a previous setup when you want to seed a new build or recover from a reset."), true);
   server.send(200, "text/html; charset=UTF-8", html);
 }
@@ -4615,7 +4656,11 @@ void handleConfigImportPost()
     return;
 
   String html;
-  html.reserve(9000);
+  if (!reserveHtmlPage(html, 9000, "config-import-result"))
+  {
+    resetConfigImportState();
+    return;
+  }
 
   if (!configImportStarted || !configImportAuthenticated || configImportError.length() > 0)
   {
@@ -4859,7 +4904,8 @@ void handleConsolePage()
 
   String accessToken = issueConsoleAccessToken();
   String html;
-  html.reserve(18000);
+  if (!reserveHtmlPage(html, 18000, "console"))
+    return;
   appendConsolePage(html, accessToken);
   server.sendHeader("Cache-Control", "no-store");
   server.sendHeader("Pragma", "no-cache");
@@ -4984,7 +5030,8 @@ void registerWebRoutes()
       return;
 
     String html;
-    html.reserve(22000);
+    if (!reserveHtmlPage(html, 22000, "diagnostics"))
+      return;
     if (isLiveRefreshRequest())
     {
       appendLiveShellStart(html, "/diagnostics?partial=1");
@@ -5033,7 +5080,8 @@ void handleRoot()
     return;
 
   String html;
-  html.reserve(14000);
+  if (!reserveHtmlPage(html, 14000, "dashboard"))
+    return;
 
   if (isSetupPortalState())
     appendSetupPage(html);

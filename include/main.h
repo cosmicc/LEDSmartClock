@@ -226,6 +226,18 @@ void wifiConnected();
 void configSaved();
 /** Applies the current in-memory configuration to runtime services and schedulers. */
 void applyRuntimeConfiguration();
+/** Flushes any deferred runtime-state configuration save once the cooldown has elapsed. */
+void flushDeferredConfigurationState();
+/** Initializes the shared I2C bus with the project timeout settings. */
+void initializeI2cBus(const char *reason = nullptr);
+/** Initializes the TSL2561 light sensor, returning false when fixed brightness should be used. */
+bool initializeLightSensor(uint32_t timeoutMs);
+/** Returns the last known health state of the TSL2561 without probing the bus. */
+bool isLightSensorHealthy();
+/** Attempts a deferred I2C/light-sensor recovery when the retry delay has elapsed. */
+void recoverLightSensorIfNeeded();
+/** Reads one raw luminosity sample with failure accounting and recovery scheduling. */
+bool readLightSensorLuminosity(uint16_t &rawLux);
 /** Draws the status LEDs around the display edge. */
 void display_showStatus();
 /** Draws a single large clock digit bitmap at the selected display position. */

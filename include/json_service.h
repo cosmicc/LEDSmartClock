@@ -29,6 +29,12 @@ bool fillGeocodeFromJson(const String &payload);
 bool fillAqiFromJson(const String &payload);
 
 /**
+ * Returns a lookup-table-safe AQI bucket. OpenWeather buckets are 1..5; 0 is
+ * used locally for unknown or invalid data.
+ */
+uint8_t safeAqiIndex(int value);
+
+/**
  * Recomputes the human-readable AQI description based on parsed pollutant
  * values.
  */

@@ -4,6 +4,38 @@ namespace
 {
 constexpr int32_t kHttpConnectTimeoutMs = 5000;
 constexpr uint16_t kHttpReadTimeoutMs = 5000;
+constexpr uint32_t kHttpBodyIdleTimeoutMs = 3000;
+constexpr uint32_t kHttpBodyTotalTimeoutMs = 15000;
+constexpr size_t kHttpBodyChunkBytes = 256;
+constexpr size_t kHttpInitialReserveBytes = 1024;
+constexpr size_t kHttpWeatherMaxBytes = 64U * 1024U;
+constexpr size_t kHttpAlertsMaxBytes = 64U * 1024U;
+constexpr size_t kHttpAqiMaxBytes = 48U * 1024U;
+constexpr size_t kHttpSmallResponseMaxBytes = 16U * 1024U;
+
+size_t boundedMin(size_t left, size_t right)
+{
+  return left < right ? left : right;
+}
+
+size_t defaultResponseLimit(ApiEndpoint endpoint)
+{
+  switch (endpoint)
+  {
+  case ApiEndpoint::Weather:
+    return kHttpWeatherMaxBytes;
+  case ApiEndpoint::Alerts:
+    return kHttpAlertsMaxBytes;
+  case ApiEndpoint::AirQuality:
+    return kHttpAqiMaxBytes;
+  case ApiEndpoint::Geocode:
+  case ApiEndpoint::IpGeo:
+    return kHttpSmallResponseMaxBytes;
+  case ApiEndpoint::Reserved:
+  default:
+    return kHttpSmallResponseMaxBytes;
+  }
+}
 
 char *mutableApiUrl(ApiEndpoint endpoint)
 {
@@ -75,6 +107,118 @@ void endApiRequest()
 {
   networkService.client.end();
   networkService.busy = false;
+}
+
+bool readHttpResponseBody(ApiEndpoint endpoint, String &payload, size_t maxBytes)
+{
+  payload = "";
+  const size_t limit = maxBytes == 0 ? defaultResponseLimit(endpoint) : maxBytes;
+  const int contentLength = networkService.client.getSize();
+
+  if (contentLength == 0)
+    return true;
+
+  if (contentLength > 0 && static_cast<size_t>(contentLength) > limit)
+  {
+    ESP_LOGE(TAG, "%s response body length %d exceeds the %u byte safety limit",
+             endpointName(endpoint), contentLength, static_cast<unsigned>(limit));
+    return false;
+  }
+
+  WiFiClient *stream = networkService.client.getStreamPtr();
+  if (stream == nullptr)
+  {
+    ESP_LOGE(TAG, "Unable to read %s response body because the HTTP stream is not connected",
+             endpointName(endpoint));
+    return false;
+  }
+
+  const size_t reserveBytes = contentLength > 0
+                                  ? boundedMin(static_cast<size_t>(contentLength), limit)
+                                  : boundedMin(kHttpInitialReserveBytes, limit);
+  if (reserveBytes > 0 && !payload.reserve(reserveBytes))
+  {
+    ESP_LOGW(TAG, "Unable to reserve %u bytes for %s response; reading incrementally",
+             static_cast<unsigned>(reserveBytes), endpointName(endpoint));
+  }
+
+  uint8_t buffer[kHttpBodyChunkBytes];
+  int remaining = contentLength;
+  const uint32_t started = millis();
+  uint32_t lastProgress = started;
+
+  while (networkService.client.connected() || stream->available() > 0)
+  {
+    if ((millis() - started) >= kHttpBodyTotalTimeoutMs)
+    {
+      ESP_LOGE(TAG, "Timed out reading %s response body after %lu ms",
+               endpointName(endpoint), static_cast<unsigned long>(kHttpBodyTotalTimeoutMs));
+      return false;
+    }
+
+    const int available = stream->available();
+    if (available > 0)
+    {
+      size_t toRead = boundedMin(static_cast<size_t>(available), sizeof(buffer));
+      if (remaining > 0)
+        toRead = boundedMin(toRead, static_cast<size_t>(remaining));
+
+      if (payload.length() + toRead > limit)
+      {
+        ESP_LOGE(TAG, "%s response body exceeded the %u byte safety limit while reading",
+                 endpointName(endpoint), static_cast<unsigned>(limit));
+        return false;
+      }
+
+      const int bytesRead = stream->readBytes(buffer, toRead);
+      if (bytesRead <= 0)
+      {
+        if ((millis() - lastProgress) >= kHttpBodyIdleTimeoutMs)
+        {
+          ESP_LOGE(TAG, "Timed out waiting for %s response body data", endpointName(endpoint));
+          return false;
+        }
+        delay(1);
+        esp_task_wdt_reset();
+        continue;
+      }
+
+      if (!payload.concat(buffer, static_cast<unsigned int>(bytesRead)))
+      {
+        ESP_LOGE(TAG, "Out of memory while appending %s response body", endpointName(endpoint));
+        return false;
+      }
+
+      if (remaining > 0)
+        remaining -= bytesRead;
+      if (remaining == 0)
+        return true;
+
+      lastProgress = millis();
+      esp_task_wdt_reset();
+      delay(0);
+      continue;
+    }
+
+    if (remaining == 0)
+      return true;
+    if ((millis() - lastProgress) >= kHttpBodyIdleTimeoutMs)
+    {
+      ESP_LOGE(TAG, "Timed out waiting for %s response body data", endpointName(endpoint));
+      return false;
+    }
+    esp_task_wdt_reset();
+    delay(1);
+  }
+
+  if (remaining > 0)
+  {
+    ESP_LOGE(TAG, "%s response body ended with %d byte(s) unread",
+             endpointName(endpoint), remaining);
+    return false;
+  }
+
+  return true;
 }
 
 void rebuildApiUrls()

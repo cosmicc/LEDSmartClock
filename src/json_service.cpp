@@ -7,6 +7,9 @@ constexpr size_t kAlertDocumentCapacity = 16384U;
 constexpr size_t kAlertDisplayTarget = 220U;
 constexpr size_t kAlertSentenceTarget = 140U;
 constexpr size_t kAqiDocumentCapacity = 24U * 1024U;
+constexpr uint8_t kAqiUnknown = 0U;
+constexpr uint8_t kAqiMin = 1U;
+constexpr uint8_t kAqiMax = 5U;
 
 /**
  * Copies a JSON string field into a fixed-size destination, defaulting to an
@@ -364,6 +367,27 @@ void loadAlertEntry(JsonVariantConst feature, AlertEntry &entry)
            entry.urgencyRank,
            entry.certaintyRank);
 }
+
+bool readAqiBucket(JsonVariantConst value, const char *label, uint8_t &bucket)
+{
+  if (!value.is<int>())
+  {
+    ESP_LOGE(TAG, "AQI payload is missing the %s AQI bucket", label);
+    bucket = kAqiUnknown;
+    return false;
+  }
+
+  const int parsed = value.as<int>();
+  if (parsed < kAqiMin || parsed > kAqiMax)
+  {
+    ESP_LOGE(TAG, "AQI payload has invalid %s AQI bucket: %d", label, parsed);
+    bucket = kAqiUnknown;
+    return false;
+  }
+
+  bucket = static_cast<uint8_t>(parsed);
+  return true;
+}
 } // namespace
 
 bool fillAlertsFromJson(const String &payload)
@@ -612,7 +636,15 @@ bool fillAqiFromJson(const String &payload)
     return false;
   }
   ESP_LOGV(TAG, "AQI forecast payload parsed successfully.");
-  aqi.current.aqi = obj["list"][1]["main"]["aqi"];
+  uint8_t currentBucket = kAqiUnknown;
+  uint8_t dayBucket = kAqiUnknown;
+  if (!readAqiBucket(list[1]["main"]["aqi"], "current", currentBucket) ||
+      !readAqiBucket(list[7]["main"]["aqi"], "daily", dayBucket))
+  {
+    return false;
+  }
+
+  aqi.current.aqi = currentBucket;
   aqi.current.co = obj["list"][1]["components"]["co"];
   aqi.current.no = obj["list"][1]["components"]["no"];
   aqi.current.no2 = obj["list"][1]["components"]["no2"];
@@ -624,7 +656,7 @@ bool fillAqiFromJson(const String &payload)
   ready = true;
   ESP_LOGD(TAG, "New current air quality data received");
   processAqiDescription();
-  aqi.day.aqi = obj["list"][7]["main"]["aqi"];
+  aqi.day.aqi = dayBucket;
   aqi.day.co = obj["list"][7]["components"]["co"];
   aqi.day.no = obj["list"][7]["components"]["no"];
   aqi.day.no2 = obj["list"][7]["components"]["no2"];
@@ -636,6 +668,11 @@ bool fillAqiFromJson(const String &payload)
   ready = true;
   ESP_LOGD(TAG, "New daily air quality data received");
   return ready;
+}
+
+uint8_t safeAqiIndex(int value)
+{
+  return value >= kAqiMin && value <= kAqiMax ? static_cast<uint8_t>(value) : kAqiUnknown;
 }
 
 void processAqiDescription()

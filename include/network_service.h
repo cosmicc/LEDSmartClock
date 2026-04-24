@@ -29,6 +29,13 @@ bool beginApiRequest(ApiEndpoint endpoint);
 void endApiRequest();
 
 /**
+ * Reads the current HTTP response body through the shared client with bounded
+ * heap growth, watchdog resets, and idle/total timeouts. When maxBytes is 0,
+ * the endpoint's default response limit is used.
+ */
+bool readHttpResponseBody(ApiEndpoint endpoint, String &payload, size_t maxBytes = 0);
+
+/**
  * Rebuilds all API URLs using the current configuration and coordinates.
  */
 void rebuildApiUrls();

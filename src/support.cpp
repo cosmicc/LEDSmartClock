@@ -492,7 +492,7 @@ void buildCurrentWeatherScrollText(char *buffer, size_t length)
            gust,
            weatherSpeedUnitLabel(),
            weather.current.cloudcover,
-           air_quality[aqi.current.aqi],
+           air_quality[safeAqiIndex(aqi.current.aqi)],
            uv_index(weather.current.uvi).c_str());
 }
 
@@ -527,7 +527,7 @@ void buildDailyWeatherScrollText(char *buffer, size_t length)
            gust,
            weatherSpeedUnitLabel(),
            weather.day.cloudcover,
-           air_quality[aqi.day.aqi],
+           air_quality[safeAqiIndex(aqi.day.aqi)],
            uv_index(weather.day.uvi).c_str());
 }
 

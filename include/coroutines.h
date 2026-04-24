@@ -138,16 +138,19 @@ COROUTINE(checkAirquality)
       IotWebConf.resume();
       if (httpCode == 200)
       {
-        reqdata = networkService.client.getString();
-        ESP_LOGD(TAG, "AQI http response code: [%d] %s, payload length: [%d]", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.length());
-        if (fillAqiFromJson(reqdata))
+        if (!readHttpResponseBody(ApiEndpoint::AirQuality, reqdata))
+          noteDiagnosticFailure(DiagnosticService::AirQuality, true, "Read failed",
+                                F("OpenWeather returned AQI data, but the response body timed out or exceeded the safety limit."),
+                                httpCode, checkaqi.retries);
+        else if (fillAqiFromJson(reqdata))
         {
+          ESP_LOGD(TAG, "AQI http response code: [%d] %s, payload length: [%d]", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.length());
           checkaqi.retries = 0;
           checkaqi.complete = true;
           checkaqi.lastsuccess = systemClock.getNow();
           ESP_LOGI(TAG, "New air quality data received");
           noteDiagnosticSuccess(DiagnosticService::AirQuality, true, "Fresh data",
-                                String(air_quality[aqi.current.aqi]) + F(" AQI, ") + aqi.current.description,
+                                String(air_quality[safeAqiIndex(aqi.current.aqi)]) + F(" AQI, ") + aqi.current.description,
                                 checkaqi.retries, httpCode);
           if (checkaqi.firsttime)
             checkaqi.firsttime = false;
@@ -159,7 +162,7 @@ COROUTINE(checkAirquality)
       }
       else if (httpCode == 401 || httpCode == 403 || httpCode == 404 || httpCode == 429)
       {
-        reqdata = networkService.client.getString();
+        readHttpResponseBody(ApiEndpoint::AirQuality, reqdata, 1024);
         ESP_LOGE(TAG, "OpenWeather AQI request failed: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.c_str());
         noteDiagnosticFailure(DiagnosticService::AirQuality, true, "HTTP error",
                               String(F("OpenWeather AQI request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
@@ -169,7 +172,7 @@ COROUTINE(checkAirquality)
       }
       else
       {
-        reqdata = networkService.client.getString();
+        readHttpResponseBody(ApiEndpoint::AirQuality, reqdata, 1024);
         ESP_LOGE(TAG, "CHECKAQI ERROR: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.c_str());
         noteDiagnosticFailure(DiagnosticService::AirQuality, true, "Request failed",
                               String(F("AQI request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
@@ -207,10 +210,13 @@ COROUTINE(checkWeather)
       IotWebConf.resume();
       if (httpCode == 200)
       {
-        reqdata = networkService.client.getString();
-        ESP_LOGD(TAG, "Weather http response code: [%d] %s, payload length: [%d]", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.length());
-        if (fillWeatherFromJson(reqdata))
+        if (!readHttpResponseBody(ApiEndpoint::Weather, reqdata))
+          noteDiagnosticFailure(DiagnosticService::Weather, true, "Read failed",
+                                F("OpenWeather returned weather data, but the response body timed out or exceeded the safety limit."),
+                                httpCode, checkweather.retries);
+        else if (fillWeatherFromJson(reqdata))
         {
+          ESP_LOGD(TAG, "Weather http response code: [%d] %s, payload length: [%d]", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.length());
           checkweather.retries = 0;
           checkweather.complete = true;
           if (checkweather.firsttime)
@@ -229,7 +235,7 @@ COROUTINE(checkWeather)
       }
       else if (httpCode == 401 || httpCode == 403 || httpCode == 404 || httpCode == 429)
       {
-        reqdata = networkService.client.getString();
+        readHttpResponseBody(ApiEndpoint::Weather, reqdata, 1024);
         ESP_LOGE(TAG, "OpenWeather weather request failed: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.c_str());
         noteDiagnosticFailure(DiagnosticService::Weather, true, "HTTP error",
                               String(F("OpenWeather weather request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
@@ -239,7 +245,7 @@ COROUTINE(checkWeather)
       }
       else
       {
-        reqdata = networkService.client.getString();
+        readHttpResponseBody(ApiEndpoint::Weather, reqdata, 1024);
         ESP_LOGE(TAG, "CheckWeather ERROR: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.c_str());
         noteDiagnosticFailure(DiagnosticService::Weather, true, "Request failed",
                               String(F("Weather request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
@@ -278,11 +284,14 @@ COROUTINE(checkAlerts)
       IotWebConf.resume();
       if (httpCode == 200)
       {
-        reqdata = networkService.client.getString();
-        ESP_LOGD(TAG, "Alerts http response code: [%d] %s, payload length: [%d]", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.length());
-        checkalerts.retries = 0;
-        if (fillAlertsFromJson(reqdata))
+        if (!readHttpResponseBody(ApiEndpoint::Alerts, reqdata))
+          noteDiagnosticFailure(DiagnosticService::Alerts, true, "Read failed",
+                                F("weather.gov returned alerts data, but the response body timed out or exceeded the safety limit."),
+                                httpCode, checkalerts.retries);
+        else if (fillAlertsFromJson(reqdata))
         {
+          ESP_LOGD(TAG, "Alerts http response code: [%d] %s, payload length: [%d]", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.length());
+          checkalerts.retries = 0;
           checkalerts.lastsuccess = systemClock.getNow();
           showready.alerts = true;
           noteDiagnosticSuccess(DiagnosticService::Alerts, true,
@@ -299,7 +308,7 @@ COROUTINE(checkAlerts)
       }
       else
       {
-        reqdata = networkService.client.getString();
+        readHttpResponseBody(ApiEndpoint::Alerts, reqdata, 1024);
         ESP_LOGE(TAG, "Alerts ERROR: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), reqdata.c_str());
         noteDiagnosticFailure(DiagnosticService::Alerts, true, "Request failed",
                               String(F("weather.gov alert request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
@@ -430,10 +439,10 @@ COROUTINE(showAirquality)
     if (enable_aqi_color.isChecked())
       aqi.current.color = hex2rgb(aqi_color.value());
     else
-      aqi.current.color = (AQIColorLookup[aqi.current.aqi]);
+      aqi.current.color = (AQIColorLookup[safeAqiIndex(aqi.current.aqi)]);
     startFlash(aqi.current.color, 1);
     COROUTINE_AWAIT(!alertflash.active);
-    snprintf(scrolltext.message, 512, "Air Quality: %s, %s", air_quality[aqi.current.aqi], (aqi.current.description).c_str());
+    snprintf(scrolltext.message, 512, "Air Quality: %s, %s", air_quality[safeAqiIndex(aqi.current.aqi)], (aqi.current.description).c_str());
     startScroll(aqi.current.color, false);
     COROUTINE_AWAIT(!scrolltext.active);
     cotimer.millis = millis();
@@ -522,10 +531,13 @@ COROUTINE(checkGeocode)
       checkgeocode.retries++;
       if (httpCode == 200)
       {
-        payload = networkService.client.getString();
-        ESP_LOGD(TAG, "GEOcode http response code: [%d] %s, payload length: [%d]", httpCode, getHttpCodeName(httpCode).c_str(), payload.length());
-        if (fillGeocodeFromJson(payload))
+        if (!readHttpResponseBody(ApiEndpoint::Geocode, payload))
+          noteDiagnosticFailure(DiagnosticService::Geocode, true, "Read failed",
+                                F("OpenWeather returned reverse-geocode data, but the response body timed out or exceeded the safety limit."),
+                                httpCode, checkgeocode.retries);
+        else if (fillGeocodeFromJson(payload))
         {
+          ESP_LOGD(TAG, "GEOcode http response code: [%d] %s, payload length: [%d]", httpCode, getHttpCodeName(httpCode).c_str(), payload.length());
           checkgeocode.lastsuccess = systemClock.getNow();
           checkgeocode.retries = 0;
           checkgeocode.ready = false;
@@ -538,7 +550,7 @@ COROUTINE(checkGeocode)
       }
       else if (httpCode == 401 || httpCode == 403 || httpCode == 404 || httpCode == 429)
       {
-        payload = networkService.client.getString();
+        readHttpResponseBody(ApiEndpoint::Geocode, payload, 1024);
         ESP_LOGE(TAG, "OpenWeather geocode request failed: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), payload.c_str());
         noteDiagnosticFailure(DiagnosticService::Geocode, true, "HTTP error",
                               String(F("OpenWeather geocode request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
@@ -548,7 +560,7 @@ COROUTINE(checkGeocode)
       }
       else
       {
-        payload = networkService.client.getString();
+        readHttpResponseBody(ApiEndpoint::Geocode, payload, 1024);
         ESP_LOGE(TAG, "CheckGeocode ERROR: [%d] %s | body: %s", httpCode, getHttpCodeName(httpCode).c_str(), payload.c_str());
         noteDiagnosticFailure(DiagnosticService::Geocode, true, "Request failed",
                               String(F("Geocode request failed with ")) + httpCode + F(" ") + getHttpCodeName(httpCode),
@@ -587,10 +599,13 @@ COROUTINE(checkIpgeo)
         checkipgeo.retries++;
         if (httpCode == 200)
         {
-          payload = networkService.client.getString();
-          ESP_LOGD(TAG, "IPGeo http response code: [%d] %s, payload length: [%d]", httpCode, getHttpCodeName(httpCode).c_str(), payload.length());
-          if (fillIpgeoFromJson(payload))
+          if (!readHttpResponseBody(ApiEndpoint::IpGeo, payload))
+            noteDiagnosticFailure(DiagnosticService::IpGeo, true, "Read failed",
+                                  F("ipgeolocation.io returned data, but the response body timed out or exceeded the safety limit."),
+                                  httpCode, checkipgeo.retries);
+          else if (fillIpgeoFromJson(payload))
           {
+            ESP_LOGD(TAG, "IPGeo http response code: [%d] %s, payload length: [%d]", httpCode, getHttpCodeName(httpCode).c_str(), payload.length());
             checkipgeo.lastsuccess = systemClock.getNow();
             checkipgeo.complete = true;
             checkipgeo.retries = 0;
@@ -729,6 +744,7 @@ COROUTINE(coroutineManager)
     ESP_LOGW(TAG, "Restarting clock due to user request.");
     ESP.restart();
   }
+  flushDeferredConfigurationState();
   runtimeState.firstTimeFailsafe = (iotWebConf.getState() == 1);
   if (!showClock.isSuspended() && !displaytoken.isReady(0))
   {
@@ -902,8 +918,11 @@ COROUTINE(coroutineManager)
 
 COROUTINE(setBrightness) {
 COROUTINE_LOOP() {
-  COROUTINE_AWAIT(Tsl.available());
-  Tsl.fullLuminosity(current.rawlux);
+  if (!readLightSensorLuminosity(current.rawlux))
+  {
+    COROUTINE_DELAY(LIGHT_CHECK_DELAY);
+    continue;
+  }
   // ensure limited range for lux value  
   current.lux = ((current.rawlux << 6) + (current.rawlux << 5) + (current.rawlux << 2) + LUXMIN * 257) >> 9;
   current.lux = current.lux < LUXMIN ? LUXMIN : current.lux > LUXMAX ? LUXMAX : current.lux;

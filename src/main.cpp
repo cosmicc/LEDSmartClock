@@ -14,11 +14,16 @@
 namespace
 {
 constexpr uint8_t kTimezoneCacheSize = 2;
+constexpr uint32_t kAutoPersistCooldownMs = 10UL * 60UL * 1000UL;
 ExtendedZoneProcessorCache<kTimezoneCacheSize> timezoneProcessorCache;
 ExtendedZoneManager timezoneManager(
     zonedbx::kZoneAndLinkRegistrySize,
     zonedbx::kZoneAndLinkRegistry,
     timezoneProcessorCache);
+
+uint32_t lastAutoPersistMillis = 0;
+bool pendingAutoPersist = false;
+char pendingAutoPersistReason[48]{};
 
 /** Formats the remaining time until the next scheduled display for debug output. */
 String nextShowDebug(acetime_t now, acetime_t lastShown, uint32_t intervalSeconds)
@@ -58,8 +63,20 @@ void seedDisplaySchedules()
   lastshown.aqi = seedLastShown(runtimeState.bootTime, static_cast<uint32_t>(aqi_interval.value()) * T1M);
 }
 
-/** Persists the live configuration into the key-based store and logs failures. */
-bool persistConfigurationState(const char *reason)
+bool isAutoPersistReason(const char *reason)
+{
+  return reason != nullptr &&
+         (strcmp(reason, "timezone update") == 0 ||
+          strcmp(reason, "location update") == 0 ||
+          strcmp(reason, "coordinate update") == 0);
+}
+
+bool autoPersistCooldownElapsed(uint32_t now)
+{
+  return lastAutoPersistMillis == 0 || (now - lastAutoPersistMillis) >= kAutoPersistCooldownMs;
+}
+
+bool writeConfigurationState(const char *reason)
 {
   String error;
   if (!saveStoredConfiguration(error))
@@ -69,6 +86,36 @@ bool persistConfigurationState(const char *reason)
   }
 
   ESP_LOGI(TAG, "Persisted configuration after %s.", reason);
+  return true;
+}
+
+/** Persists the live configuration into the key-based store and logs failures. */
+bool persistConfigurationState(const char *reason)
+{
+  const char *saveReason = reason == nullptr ? "unspecified update" : reason;
+  if (!isAutoPersistReason(saveReason))
+  {
+    const bool saved = writeConfigurationState(saveReason);
+    if (saved)
+      pendingAutoPersist = false;
+    return saved;
+  }
+
+  const uint32_t now = millis();
+  if (autoPersistCooldownElapsed(now))
+  {
+    const bool saved = writeConfigurationState(saveReason);
+    if (saved)
+    {
+      lastAutoPersistMillis = now;
+      pendingAutoPersist = false;
+    }
+    return saved;
+  }
+
+  strlcpy(pendingAutoPersistReason, saveReason, sizeof(pendingAutoPersistReason));
+  pendingAutoPersist = true;
+  ESP_LOGW(TAG, "Deferred configuration persist after %s to reduce flash write churn.", saveReason);
   return true;
 }
 
@@ -430,6 +477,25 @@ void startGpsUart(const char *reason, bool logToSerial)
 }
 } // namespace
 
+void flushDeferredConfigurationState()
+{
+  if (!pendingAutoPersist)
+    return;
+
+  const uint32_t now = millis();
+  if (!autoPersistCooldownElapsed(now))
+    return;
+
+  char reason[64]{};
+  snprintf(reason, sizeof(reason), "deferred %s",
+           pendingAutoPersistReason[0] == '\0' ? "runtime update" : pendingAutoPersistReason);
+
+  if (writeConfigurationState(reason))
+    pendingAutoPersist = false;
+
+  lastAutoPersistMillis = now;
+}
+
 extern "C" void app_main()
 {
   Serial.begin(115200);
@@ -440,8 +506,7 @@ extern "C" void app_main()
   esp_task_wdt_init(WDT_TIMEOUT, true); // enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);               // add current thread to WDT watch
   ESP_EARLY_LOGD(TAG, "Initializing the system clock...");
-  Wire.begin();
-  wireInterface.begin();
+  initializeI2cBus("startup");
   systemClock.setup();
   resetServiceDiagnostics();
   setTimeSource(systemClock.isInit() ? F("rtc") : F("none"));
@@ -507,35 +572,8 @@ extern "C" void app_main()
   ESP_EARLY_LOGD(TAG, "Initializing Light Sensor...");
   runtimeState.userBrightness = calcbright(brightness_level.value());
   current.brightness = runtimeState.userBrightness;
-  Wire.begin(TSL2561_SDA, TSL2561_SCL);
-  Tsl.begin();
   constexpr uint32_t kLightSensorStartupTimeoutMs = 5000UL;
-  const uint32_t lightSensorWaitStart = millis();
-  while (!Tsl.available())
-  {
-    systemClock.loop();
-    esp_task_wdt_reset();
-    ESP_EARLY_LOGD(TAG, "Waiting for Light Sensor...");
-    delay(10);
-    if ((millis() - lightSensorWaitStart) >= kLightSensorStartupTimeoutMs)
-    {
-      ESP_EARLY_LOGW(TAG,
-                     "Light sensor did not respond within %lu ms. Continuing with fixed brightness.",
-                     static_cast<unsigned long>(kLightSensorStartupTimeoutMs));
-      break;
-    }
-  }
-  if (Tsl.available())
-  {
-    Tsl.on();
-    Tsl.setSensitivity(true, Tsl2561::EXP_14);
-  }
-  else
-  {
-    current.rawlux = LUXMIN;
-    current.lux = LUXMIN;
-    current.brightavg = current.brightness;
-  }
+  initializeLightSensor(kLightSensorStartupTimeoutMs);
   ESP_EARLY_LOGD(TAG, "Initializing GPS Module...");
   startGpsUart("startup", false);
   gps.uartRestartCount = 0;
@@ -884,8 +922,8 @@ void print_debugData(ConsoleMirrorPrint &out)
              formatGpsEventAge(gps.lockage).c_str());
   out.printf("Weather Current - Icon:%s | Temp:%d%s | FeelsLike:%d%s | Humidity:%d%% | Clouds:%d%% | Wind:%d/%d%s | UVI:%d(%s) | Desc:%s | ValidApi:%s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", weather.current.icon, weather.current.temp, tempunit, weather.current.feelsLike, tempunit, weather.current.humidity, weather.current.cloudcover, weather.current.windSpeed, weather.current.windGust, speedunit, weather.current.uvi, uv_index(weather.current.uvi).c_str(), weather.current.description, yesno[isApiValid(weatherapi.value())], checkweather.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkweather.lastattempt).c_str(), elapsedTime(now - checkweather.lastsuccess).c_str(), nextShowDebug(now, lastshown.currentweather, static_cast<uint32_t>(current_weather_interval.value()) * T1H).c_str());
   out.printf("Weather Day - Icon:%s | LoTemp:%d%s | HiTemp:%d%s | Humidity:%d%% | Clouds:%d%% | Wind: %d/%d%s | UVI:%d(%s) | MoonPhase:%.2f | Desc: %s | NextShow:%s\n", weather.day.icon, weather.day.tempMin, tempunit, weather.day.tempMax, tempunit, weather.day.humidity, weather.day.cloudcover, weather.day.windSpeed, weather.day.windGust, speedunit, weather.day.uvi, uv_index(weather.day.uvi).c_str(), weather.day.moonPhase, weather.current.description, nextShowDebug(now, lastshown.dayweather, static_cast<uint32_t>(daily_weather_interval.value()) * T1H).c_str());
-  out.printf("AQI Current - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f | Desc: %s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", air_quality[aqi.current.aqi], aqi.current.co, aqi.current.no, aqi.current.no2, aqi.current.o3, aqi.current.so2, aqi.current.pm25, aqi.current.pm10, aqi.current.nh3, (aqi.current.description).c_str(), checkaqi.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkaqi.lastattempt).c_str(), elapsedTime(now - checkaqi.lastsuccess).c_str(), nextShowDebug(now, lastshown.aqi, static_cast<uint32_t>(aqi_interval.value()) * T1M).c_str());
-  out.printf("AQI Day - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f\n", air_quality[aqi.day.aqi], aqi.day.co, aqi.day.no, aqi.day.no2, aqi.day.o3, aqi.day.so2, aqi.day.pm25, aqi.day.pm10, aqi.day.nh3);
+  out.printf("AQI Current - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f | Desc: %s | Retries:%d/%d | LastAttempt:%s | LastSuccess:%s | NextShow:%s\n", air_quality[safeAqiIndex(aqi.current.aqi)], aqi.current.co, aqi.current.no, aqi.current.no2, aqi.current.o3, aqi.current.so2, aqi.current.pm25, aqi.current.pm10, aqi.current.nh3, (aqi.current.description).c_str(), checkaqi.retries, HTTP_MAX_RETRIES, elapsedTime(now - checkaqi.lastattempt).c_str(), elapsedTime(now - checkaqi.lastsuccess).c_str(), nextShowDebug(now, lastshown.aqi, static_cast<uint32_t>(aqi_interval.value()) * T1M).c_str());
+  out.printf("AQI Day - Index:%s | Co:%.2f | No:%.2f | No2:%.2f | Ozone:%.2f | So2:%.2f | Pm2.5:%.2f | Pm10:%.2f | Ammonia:%.2f\n", air_quality[safeAqiIndex(aqi.day.aqi)], aqi.day.co, aqi.day.no, aqi.day.no2, aqi.day.o3, aqi.day.so2, aqi.day.pm25, aqi.day.pm10, aqi.day.nh3);
   out.printf("Alerts - Active:%s | Count:%u | Watch:%u | Warn:%u | Retries:%d | LastAttempt:%s | LastSuccess:%s | LastShown:%s\n",
              yesno[alerts.active],
              alerts.count,
@@ -1292,7 +1330,10 @@ void updateLocation()
   // Update location information
   if (isLocationValid("geocode"))
   {
-    if (!cmpLocs(geocode.city, current.city))
+    const bool locationChanged = !cmpLocs(geocode.city, current.city) ||
+                                 !cmpLocs(geocode.state, current.state) ||
+                                 !cmpLocs(geocode.country, current.country);
+    if (show_loc_change.isChecked() && locationChanged)
     {
       showClock.suspend();
       showready.loc = true;
@@ -1612,21 +1653,29 @@ void display_temperature()
   int th = (imperial_setting) ? 104 : 40;
   uint32_t tc;
   if (enable_temp_color.isChecked())
+  {
     tc = hex2rgb(temp_color.value());
+  }
   else
+  {
     current.temphue = constrain(map(weather.current.feelsLike, tl, th, NIGHTHUE, 0), 0, NIGHTHUE);
 
-  if (weather.current.feelsLike < tl)
-  {
-    if (imperial_setting && weather.current.feelsLike == 0)
-      current.temphue = NIGHTHUE + tl;
-    else
-      current.temphue = NIGHTHUE + (abs(weather.current.feelsLike) / 2);
+    if (weather.current.feelsLike < tl)
+    {
+      if (imperial_setting && weather.current.feelsLike == 0)
+        current.temphue = NIGHTHUE + tl;
+      else
+        current.temphue = NIGHTHUE + (abs(weather.current.feelsLike) / 2);
+    }
+    tc = hsv2rgb(current.temphue);
   }
-  tc = hsv2rgb(current.temphue);
+
   int xpos = 0;
-  int digits = (temp == 0) ? 1 : (log10(abs(temp)) + 1);
   bool isneg = false;
+  int score = temp < 0 ? -temp : temp;
+  int digits = 1;
+  for (int value = score; value >= 10; value /= 10)
+    ++digits;
   if (temp < 0)
   {
     isneg = true;
@@ -1639,7 +1688,6 @@ void display_temperature()
   else if (digits == 1)
     xpos = 9;
   xpos = xpos * (digits);
-  int score = abs(temp);
   if (score == 0)
   {
     matrix->drawBitmap(xpos, 0, num[0], 8, 8, tc);

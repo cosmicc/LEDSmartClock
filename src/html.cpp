@@ -77,6 +77,7 @@ const char kWebThemeCss[] PROGMEM = R"clockcss(
   --line:rgba(27,36,48,0.12);
   --text:#1d2935;
   --muted:#5e6a72;
+  --heading:#173748;
   --hero:#173748;
   --hero-2:#245766;
   --accent:#0f766e;
@@ -120,6 +121,7 @@ html[data-web-theme='dark']{
   --line:rgba(148,177,194,0.18);
   --text:#e8f0f4;
   --muted:#a6bac6;
+  --heading:#f3f8fb;
   --hero:#08151e;
   --hero-2:#123141;
   --accent:#36b2a4;
@@ -504,7 +506,7 @@ a:hover{text-decoration:underline}
   line-height:1.55;
 }
 .field-help strong,.auth-note strong{
-  color:var(--hero);
+  color:var(--heading);
 }
 .wizard-progress{
   display:flex;
@@ -568,7 +570,7 @@ a:hover{text-decoration:underline}
   margin:0 0 6px;
   font-family:"Georgia","Times New Roman",serif;
   font-size:1.05rem;
-  color:var(--hero);
+  color:var(--heading);
 }
 .self-test-item p{
   margin:0;
@@ -586,7 +588,7 @@ a:hover{text-decoration:underline}
   margin:0 0 8px;
   font-family:"Georgia","Times New Roman",serif;
   font-size:1.2rem;
-  color:var(--hero);
+  color:var(--heading);
 }
 .recovery-panel p{
   margin:0;
@@ -653,7 +655,7 @@ a:hover{text-decoration:underline}
 }
 .portal-form legend{
   padding:0 10px;
-  color:var(--hero);
+  color:var(--heading);
   font-family:"Georgia","Times New Roman",serif;
   font-size:1.15rem;
 }
@@ -677,7 +679,7 @@ a:hover{text-decoration:underline}
   margin:0 0 6px;
   font-family:"Georgia","Times New Roman",serif;
   font-size:1.05rem;
-  color:var(--hero);
+  color:var(--heading);
 }
 .portal-subsection p{
   margin:0;
@@ -830,7 +832,7 @@ button{
   margin:0 0 8px;
   font-family:"Georgia","Times New Roman",serif;
   font-size:1.1rem;
-  color:var(--hero);
+  color:var(--heading);
 }
 .upload-field p{
   margin:0;
@@ -840,6 +842,13 @@ button{
 .upload-field input[type=file]{
   margin-top:14px;
   padding:14px;
+  width:100%;
+  border:1px solid var(--field-border);
+  border-radius:14px;
+  background:var(--field-bg);
+  color:var(--text);
+  font:inherit;
+  box-shadow:var(--field-shadow);
 }
 .upload-field input[type=file]::file-selector-button{
   border:0;
@@ -889,13 +898,14 @@ button{
   padding:24px;
   border-radius:24px;
   border:1px solid var(--hero-chip-border);
+  color:var(--text);
   box-shadow:0 18px 45px rgba(22,44,58,0.18);
 }
 .upload-popup-card h3{
   margin:0 0 8px;
   font-family:"Georgia","Times New Roman",serif;
   font-size:1.45rem;
-  color:var(--hero);
+  color:var(--heading);
 }
 .upload-popup-card p{
   margin:0;
@@ -924,7 +934,7 @@ button{
 .upload-progress-label{
   margin-top:10px;
   font-weight:700;
-  color:var(--hero);
+  color:var(--heading);
 }
 .upload-progress-meta{
   margin-top:8px;
@@ -1081,7 +1091,7 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
 }
 .portal-form legend{
   padding:0 10px;
-  color:var(--hero);
+  color:var(--heading);
   font-family:"Georgia","Times New Roman",serif;
   font-size:1.15rem;
 }
@@ -1105,7 +1115,7 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
   margin:0 0 6px;
   font-family:"Georgia","Times New Roman",serif;
   font-size:1.05rem;
-  color:var(--hero);
+  color:var(--heading);
 }
 .portal-subsection p{
   margin:0;
@@ -3761,8 +3771,8 @@ void appendConsolePage(String &html, const String &accessToken)
   html += F("<span class='status-chip'><strong>Buffer Scope</strong><span>Recent runtime output retained in RAM only</span></span>");
   html += F("</div><pre id='console-output' class='console-view' data-cursor='0'></pre><p id='console-status' class='console-status'>Connecting to live console feed...</p></section>");
 
-  html += F("<section id='console-commands' class='card card-span'><div class='card-header'><h2>Send Debug Commands</h2><p class='card-subtitle'>Commands map to the existing serial shortcuts. The first non-space character is used, so enter values such as h, d, g, or s.</p></div><dl class='kv-list'>");
-  appendKeyValueRow(html, "Common Commands", F("<code>h</code> help, <code>d</code> dump debug, <code>g</code> GPS status, <code>n</code> raw NMEA, <code>p</code> GPS reset, <code>s</code> coroutine states, <code>l</code> debug logging"));
+  html += F("<section id='console-commands' class='card card-span'><div class='card-header'><h2>Send Debug Commands</h2><p class='card-subtitle'>Commands map to the existing serial shortcuts. The first non-space character is used, so enter values such as h, d, g, m, or s.</p></div><dl class='kv-list'>");
+  appendKeyValueRow(html, "Common Commands", F("<code>h</code> help, <code>d</code> dump debug, <code>g</code> GPS status, <code>m</code> runtime health, <code>n</code> raw NMEA, <code>p</code> GPS reset, <code>s</code> coroutine states, <code>l</code> debug logging"));
   appendKeyValueRow(html, "Display Tests", F("<code>a</code> AQI scroller, <code>w</code> current weather, <code>q</code> daily weather, <code>x</code> alert scroller, <code>y</code> temp + icon, <code>e</code> date, <code>t</code> alert flash"));
   appendKeyValueRow(html, "Schedule Impact", F("<code>a</code>, <code>w</code>, <code>q</code>, <code>x</code>, and <code>y</code> run one-shot tests without changing the next scheduled display time."));
   appendKeyValueRow(html, "Receiver Recovery", F("<code>p</code> resets the GPS parser and restarts the UART, <code>u</code> restarts only the GPS UART using the configured baud"));
@@ -3770,6 +3780,7 @@ void appendConsolePage(String &html, const String &accessToken)
   html += F("</dl><div class='console-toolbar'>");
   html += F("<button type='button' data-console-command='h'>Help</button>");
   html += F("<button type='button' data-console-command='d'>Debug Dump</button>");
+  html += F("<button type='button' data-console-command='m'>Runtime Health</button>");
   html += F("<button type='button' data-console-command='g'>GPS Status</button>");
   html += F("<button type='button' data-console-command='w'>Current Weather</button>");
   html += F("<button type='button' data-console-command='q'>Daily Weather</button>");
@@ -3781,7 +3792,7 @@ void appendConsolePage(String &html, const String &accessToken)
   html += F("<button type='button' data-console-command='s'>Coroutines</button>");
   html += F("<button type='button' data-console-command='l'>Debug Logs</button>");
   html += F("<button type='button' data-console-command='r'>Reboot</button>");
-  html += F("</div><form id='console-command-form' class='console-command-form'><div class='console-command-row'><input id='console-command' name='cmd' type='text' maxlength='8' placeholder='Enter a command such as w, q, a, x, y, g, n, or r'><button type='submit'>Send Command</button></div></form>");
+  html += F("</div><form id='console-command-form' class='console-command-form'><div class='console-command-row'><input id='console-command' name='cmd' type='text' maxlength='8' placeholder='Enter a command such as m, w, q, a, x, y, g, n, or r'><button type='submit'>Send Command</button></div></form>");
   html += F("<p class='console-note'>Web commands use the same handlers as the USB serial console, and their output is written back into this same RAM log buffer.</p></section>");
   html += F("</main><script>");
   html += FPSTR(kConsolePageScript);
@@ -3829,6 +3840,7 @@ void appendDiagnosticsContent(String &html)
   appendStatusChip(html, "State", htmlEscape(currentConnectionStateLabel()));
   appendStatusChip(html, "Address", activeAddressLabel());
   appendStatusChip(html, "Location", currentLocationLabel());
+  appendStatusChip(html, "Last Reboot", safeText(String(runtimeState.lastRebootReason), "Unknown"));
   html += F("</div><div class='metric-grid'>");
   appendMetricCard(html, "Healthy", htmlEscape(String(healthyCount)), "tone-good");
   appendMetricCard(html, "Attention", htmlEscape(String(attentionCount)), attentionCount > 0 ? "tone-bad" : "tone-neutral");
@@ -3849,6 +3861,8 @@ void appendDiagnosticsContent(String &html)
   appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::Wifi));
   appendKeyValueRow(html, "Connection State", htmlEscape(currentConnectionStateLabel()));
   appendKeyValueRow(html, "Address", activeAddressLabel());
+  appendKeyValueRow(html, "Last Reboot Reason", safeText(String(runtimeState.lastRebootReason), "Unknown"));
+  appendKeyValueRow(html, "Uptime", htmlEscape(elapsedTime(static_cast<uint32_t>(now - runtimeState.bootTime))));
   appendKeyValueRow(html, "Captive Portal", isSetupPortalState() ? F("Active") : F("Off"));
   appendKeyValueRow(html, "HTTP Client Ready", isHttpReady() ? F("Yes") : F("No"));
   appendKeyValueRow(html, "Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::Wifi).lastSuccess));

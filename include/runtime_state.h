@@ -118,6 +118,8 @@ struct RuntimeState
   bool clockDisplayOffset = false;
   /** Timestamp captured during boot and reused for uptime reporting. */
   ace_time::acetime_t bootTime = 0;
+  /** Human-readable ESP reset cause captured at boot for post-reboot diagnostics. */
+  char lastRebootReason[64] = "Unknown";
   /** Short tag describing the active time source, such as gps, ntp, rtc, or none. */
   char timeSource[8] = "none";
   /** User-selected brightness bias added on top of ambient-light control. */
@@ -142,6 +144,14 @@ struct RuntimeState
   bool rebootRequested = false;
   /** Millisecond timestamp used to delay restart until the HTTP response is sent. */
   uint32_t rebootRequestMillis = 0;
+  /** Millisecond timestamp of the last periodic runtime health log. */
+  uint32_t lastHealthLogMillis = 0;
+  /** Millisecond timestamp when the shared HTTP client was marked busy. */
+  uint32_t networkBusySinceMillis = 0;
+  /** Short label for the API endpoint that currently owns the shared HTTP client. */
+  char networkBusyEndpoint[16]{};
+  /** Millisecond timestamp when display ownership first looked continuously blocked. */
+  uint32_t displayBlockedSinceMillis = 0;
   /** Latest diagnostics snapshot for each major subsystem shown in the web UI. */
   ServiceDiagnostic diagnostics[kDiagnosticServiceCount]{};
 };

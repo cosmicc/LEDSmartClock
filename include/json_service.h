@@ -18,6 +18,11 @@ bool fillWeatherFromJson(const String &payload);
 bool fillIpgeoFromJson(const String &payload);
 
 /**
+ * Returns the most recent IPGeolocation parse/detail error for diagnostics.
+ */
+const char *lastIpgeoParseError();
+
+/**
  * Parses an OpenWeather reverse-geocoding payload into the shared location
  * state.
  */

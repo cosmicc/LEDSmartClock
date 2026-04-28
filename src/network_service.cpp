@@ -12,6 +12,81 @@ constexpr size_t kHttpWeatherMaxBytes = 64U * 1024U;
 constexpr size_t kHttpAlertsMaxBytes = 64U * 1024U;
 constexpr size_t kHttpAqiMaxBytes = 48U * 1024U;
 constexpr size_t kHttpSmallResponseMaxBytes = 16U * 1024U;
+constexpr const char *kSensitiveQueryKeys[] = {"apiKey=", "appid="};
+
+class BoundedStringWriteStream : public Stream
+{
+public:
+  BoundedStringWriteStream(String &target, size_t limitBytes)
+      : target(target), limitBytes(limitBytes)
+  {
+  }
+
+  int available() override
+  {
+    return 0;
+  }
+
+  int read() override
+  {
+    return -1;
+  }
+
+  int peek() override
+  {
+    return -1;
+  }
+
+  void flush() override
+  {
+  }
+
+  size_t write(uint8_t value) override
+  {
+    return write(&value, 1);
+  }
+
+  size_t write(const uint8_t *buffer, size_t size) override
+  {
+    if (buffer == nullptr || size == 0)
+      return 0;
+
+    if (target.length() + size > limitBytes)
+    {
+      exceeded = true;
+      setWriteError();
+      return 0;
+    }
+
+    if (!target.concat(reinterpret_cast<const char *>(buffer), static_cast<unsigned int>(size)))
+    {
+      outOfMemory = true;
+      setWriteError();
+      return 0;
+    }
+
+    esp_task_wdt_reset();
+    return size;
+  }
+
+  using Print::write;
+
+  bool exceededLimit() const
+  {
+    return exceeded;
+  }
+
+  bool failedAllocation() const
+  {
+    return outOfMemory;
+  }
+
+private:
+  String &target;
+  size_t limitBytes;
+  bool exceeded = false;
+  bool outOfMemory = false;
+};
 
 size_t boundedMin(size_t left, size_t right)
 {
@@ -76,6 +151,25 @@ const char *endpointName(ApiEndpoint endpoint)
     return "reserved";
   }
 }
+
+String redactedUrl(const char *url)
+{
+  String sanitized(url == nullptr ? "" : url);
+  for (const char *key : kSensitiveQueryKeys)
+  {
+    int keyIndex = sanitized.indexOf(key);
+    while (keyIndex >= 0)
+    {
+      const int valueStart = keyIndex + strlen(key);
+      int valueEnd = sanitized.indexOf('&', valueStart);
+      if (valueEnd < 0)
+        valueEnd = sanitized.length();
+      sanitized = sanitized.substring(0, valueStart) + F("<redacted>") + sanitized.substring(valueEnd);
+      keyIndex = sanitized.indexOf(key, valueStart + 10);
+    }
+  }
+  return sanitized;
+}
 } // namespace
 
 bool isApiValid(char *apikey)
@@ -97,16 +191,25 @@ bool beginApiRequest(ApiEndpoint endpoint)
   }
 
   networkService.busy = true;
+  runtimeState.networkBusySinceMillis = millis();
+  strlcpy(runtimeState.networkBusyEndpoint, endpointName(endpoint), sizeof(runtimeState.networkBusyEndpoint));
+  networkService.client.setReuse(false);
   networkService.client.setConnectTimeout(kHttpConnectTimeoutMs);
   networkService.client.setTimeout(kHttpReadTimeoutMs);
-  ESP_LOGD(TAG, "Sending %s request: %s", endpointName(endpoint), url);
-  return networkService.client.begin(url);
+  ESP_LOGD(TAG, "Sending %s request: %s", endpointName(endpoint), redactedUrl(url).c_str());
+  if (!networkService.client.begin(url))
+    return false;
+
+  networkService.client.addHeader(F("Accept"), F("application/json"));
+  return true;
 }
 
 void endApiRequest()
 {
   networkService.client.end();
   networkService.busy = false;
+  runtimeState.networkBusySinceMillis = 0;
+  runtimeState.networkBusyEndpoint[0] = '\0';
 }
 
 bool readHttpResponseBody(ApiEndpoint endpoint, String &payload, size_t maxBytes)
@@ -114,6 +217,7 @@ bool readHttpResponseBody(ApiEndpoint endpoint, String &payload, size_t maxBytes
   payload = "";
   const size_t limit = maxBytes == 0 ? defaultResponseLimit(endpoint) : maxBytes;
   const int contentLength = networkService.client.getSize();
+  const bool unknownLength = contentLength < 0;
 
   if (contentLength == 0)
     return true;
@@ -140,6 +244,39 @@ bool readHttpResponseBody(ApiEndpoint endpoint, String &payload, size_t maxBytes
   {
     ESP_LOGW(TAG, "Unable to reserve %u bytes for %s response; reading incrementally",
              static_cast<unsigned>(reserveBytes), endpointName(endpoint));
+  }
+
+  if (unknownLength)
+  {
+    BoundedStringWriteStream decodedBody(payload, limit);
+    const int bytesWritten = networkService.client.writeToStream(&decodedBody);
+    if (decodedBody.exceededLimit())
+    {
+      ESP_LOGE(TAG, "%s response body exceeded the %u byte safety limit while decoding transfer body",
+               endpointName(endpoint), static_cast<unsigned>(limit));
+      return false;
+    }
+    if (decodedBody.failedAllocation())
+    {
+      ESP_LOGE(TAG, "Out of memory while decoding %s response body", endpointName(endpoint));
+      return false;
+    }
+    if (bytesWritten < 0)
+    {
+      ESP_LOGE(TAG, "Unable to decode %s response body: %s",
+               endpointName(endpoint), HTTPClient::errorToString(bytesWritten).c_str());
+      return false;
+    }
+    if (payload.length() == 0)
+    {
+      ESP_LOGE(TAG, "%s response body decoded to an empty payload without Content-Length",
+               endpointName(endpoint));
+      return false;
+    }
+
+    ESP_LOGD(TAG, "%s response body decoded without Content-Length, payload length: [%u]",
+             endpointName(endpoint), static_cast<unsigned>(payload.length()));
+    return true;
   }
 
   uint8_t buffer[kHttpBodyChunkBytes];

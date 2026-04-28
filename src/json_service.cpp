@@ -7,9 +7,11 @@ constexpr size_t kAlertDocumentCapacity = 16384U;
 constexpr size_t kAlertDisplayTarget = 220U;
 constexpr size_t kAlertSentenceTarget = 140U;
 constexpr size_t kAqiDocumentCapacity = 24U * 1024U;
+constexpr size_t kIpgeoDocumentCapacity = 12U * 1024U;
 constexpr uint8_t kAqiUnknown = 0U;
 constexpr uint8_t kAqiMin = 1U;
 constexpr uint8_t kAqiMax = 5U;
+char lastIpgeoParseErrorText[160]{};
 
 /**
  * Copies a JSON string field into a fixed-size destination, defaulting to an
@@ -65,6 +67,251 @@ bool copyJsonStringClean(char (&dest)[N], JsonVariantConst value)
   copyJsonString(dest, value);
   cleanString(dest);
   return hasVisibleText(dest);
+}
+
+/** Reads a number from either a JSON number or a numeric string. */
+double jsonDoubleOr(JsonVariantConst value, double fallback)
+{
+  if (value.isNull())
+    return fallback;
+
+  if (value.is<double>() || value.is<float>() || value.is<long>() || value.is<int>())
+    return value.as<double>();
+
+  const char *text = value.as<const char *>();
+  if (text == nullptr || text[0] == '\0')
+    return fallback;
+
+  char *end = nullptr;
+  const double parsed = strtod(text, &end);
+  return end == text ? fallback : parsed;
+}
+
+/** Reads a whole-hour offset from either a JSON number or a numeric string. */
+int jsonIntOr(JsonVariantConst value, int fallback)
+{
+  const double parsed = jsonDoubleOr(value, fallback);
+  return static_cast<int>(parsed);
+}
+
+/** Stores the last IPGeolocation parse failure for serial and web diagnostics. */
+void setIpgeoParseError(const char *text)
+{
+  snprintf(lastIpgeoParseErrorText, sizeof(lastIpgeoParseErrorText), "%s", text == nullptr ? "" : text);
+}
+
+/** Returns a visible JSON string, or nullptr when the field is absent/blank. */
+const char *jsonVisibleString(JsonVariantConst value)
+{
+  if (value.isNull())
+    return nullptr;
+
+  const char *text = value.as<const char *>();
+  return hasVisibleText(text) ? text : nullptr;
+}
+
+/** Writes a compact byte-level payload fingerprint for non-JSON diagnostics. */
+void summarizePayloadStart(char *dest, size_t destSize, const String &payload)
+{
+  if (dest == nullptr || destSize == 0)
+    return;
+
+  const int firstObject = payload.indexOf('{');
+  int written = snprintf(dest, destSize, "len:%u json@:%d first:",
+                         static_cast<unsigned>(payload.length()), firstObject);
+  if (written < 0)
+  {
+    dest[0] = '\0';
+    return;
+  }
+
+  size_t used = static_cast<size_t>(written);
+  const size_t sampleBytes = payload.length() < 10 ? payload.length() : 10;
+  for (size_t index = 0; index < sampleBytes && used < destSize; ++index)
+  {
+    written = snprintf(dest + used, destSize - used, "%s%02X",
+                       index == 0 ? "" : " ",
+                       static_cast<unsigned int>(static_cast<unsigned char>(payload[index])));
+    if (written < 0)
+      break;
+    used += static_cast<size_t>(written);
+  }
+}
+
+/** Returns the provider error/message text from common IPGeo error shapes. */
+const char *ipgeoProviderMessage(JsonObjectConst obj)
+{
+  const char *message = jsonVisibleString(obj["message"]);
+  if (message == nullptr)
+    message = jsonVisibleString(obj["error"]);
+  if (message == nullptr)
+    message = jsonVisibleString(obj["error"]["message"]);
+  if (message == nullptr)
+    message = jsonVisibleString(obj["error_message"]);
+  if (message == nullptr)
+    message = jsonVisibleString(obj["detail"]);
+  if (message == nullptr)
+    message = jsonVisibleString(obj["reason"]);
+  if (message == nullptr)
+    message = jsonVisibleString(obj["title"]);
+  return message;
+}
+
+/** Returns the provider status/code from common IPGeo error shapes. */
+int ipgeoProviderStatus(JsonObjectConst obj)
+{
+  int status = jsonIntOr(obj["status"], 0);
+  if (status == 0)
+    status = jsonIntOr(obj["status_code"], 0);
+  if (status == 0)
+    status = jsonIntOr(obj["statusCode"], 0);
+  if (status == 0)
+    status = jsonIntOr(obj["code"], 0);
+  if (status == 0)
+    status = jsonIntOr(obj["error_code"], 0);
+  if (status == 0)
+    status = jsonIntOr(obj["errorCode"], 0);
+  if (status == 0)
+    status = jsonIntOr(obj["error"]["code"], 0);
+  return status;
+}
+
+/** Summarizes top-level keys so provider-shape failures are actionable. */
+String summarizeJsonKeys(JsonObjectConst obj)
+{
+  if (obj.isNull())
+    return String(F("not-object"));
+
+  String keys;
+  keys.reserve(96);
+  uint8_t count = 0;
+  for (JsonPairConst pair : obj)
+  {
+    if (count > 0)
+      keys += ',';
+    keys += pair.key().c_str();
+    ++count;
+    if (count >= 10 || keys.length() >= 88)
+    {
+      keys += F(",...");
+      break;
+    }
+  }
+
+  return keys.length() == 0 ? String(F("none")) : keys;
+}
+
+/** Logs and stores a missing-timezone failure with provider details when present. */
+void noteMissingIpgeoTimezone(const JsonObjectConst &obj, const String &payload)
+{
+  const char *providerMessage = ipgeoProviderMessage(obj);
+  const int providerStatus = ipgeoProviderStatus(obj);
+  if (providerMessage != nullptr)
+  {
+    if (providerStatus != 0)
+      snprintf(lastIpgeoParseErrorText, sizeof(lastIpgeoParseErrorText),
+               "IPGeo omitted time_zone. Provider %d: %.80s",
+               providerStatus, providerMessage);
+    else
+      snprintf(lastIpgeoParseErrorText, sizeof(lastIpgeoParseErrorText),
+               "IPGeo omitted time_zone. Provider: %.80s",
+               providerMessage);
+  }
+  else
+  {
+    const String keys = summarizeJsonKeys(obj);
+    snprintf(lastIpgeoParseErrorText, sizeof(lastIpgeoParseErrorText),
+             "IPGeo omitted time_zone (payload %u bytes, keys:%.72s).",
+             static_cast<unsigned>(payload.length()), keys.c_str());
+  }
+
+  ESP_LOGE(TAG, "%s", lastIpgeoParseErrorText);
+}
+
+/** Stores timezone name and offset from either an object or a string value. */
+bool assignIpgeoTimezone(JsonVariantConst value)
+{
+  ipgeo.timezone[0] = '\0';
+  ipgeo.tzoffset = 127;
+
+  JsonObjectConst timeZone = value.as<JsonObjectConst>();
+  if (!timeZone.isNull())
+  {
+    const char *name = jsonVisibleString(timeZone["name"]);
+    if (name == nullptr)
+      name = jsonVisibleString(timeZone["id"]);
+    if (name == nullptr)
+      name = jsonVisibleString(timeZone["timezone"]);
+    if (name == nullptr)
+      name = jsonVisibleString(timeZone["time_zone"]);
+    if (name == nullptr)
+      name = jsonVisibleString(timeZone["zoneName"]);
+    if (name != nullptr)
+      snprintf(ipgeo.timezone, sizeof(ipgeo.timezone), "%s", name);
+
+    ipgeo.tzoffset = jsonIntOr(timeZone["offset_with_dst"],
+                               jsonIntOr(timeZone["offset"],
+                                         jsonIntOr(timeZone["gmt_offset"],
+                                                   jsonIntOr(timeZone["utc_offset"], 127))));
+    return ipgeo.timezone[0] != '\0' || ipgeo.tzoffset != 127;
+  }
+
+  const char *name = jsonVisibleString(value);
+  if (name == nullptr)
+    return false;
+
+  snprintf(ipgeo.timezone, sizeof(ipgeo.timezone), "%s", name);
+  return true;
+}
+
+/** Stores latitude/longitude from v3, legacy, and common alternate shapes. */
+void assignIpgeoLocation(JsonObjectConst obj)
+{
+  JsonObjectConst location = obj["location"].as<JsonObjectConst>();
+  JsonObjectConst geo = obj["geo"].as<JsonObjectConst>();
+  JsonObjectConst coordinates = obj["coordinates"].as<JsonObjectConst>();
+
+  JsonVariantConst latitude = location["latitude"];
+  JsonVariantConst longitude = location["longitude"];
+  if (latitude.isNull())
+    latitude = location["lat"];
+  if (longitude.isNull())
+    longitude = location["lon"];
+  if (longitude.isNull())
+    longitude = location["lng"];
+  if (latitude.isNull())
+    latitude = geo["latitude"];
+  if (longitude.isNull())
+    longitude = geo["longitude"];
+  if (latitude.isNull())
+    latitude = geo["lat"];
+  if (longitude.isNull())
+    longitude = geo["lon"];
+  if (longitude.isNull())
+    longitude = geo["lng"];
+  if (latitude.isNull())
+    latitude = coordinates["latitude"];
+  if (longitude.isNull())
+    longitude = coordinates["longitude"];
+  if (latitude.isNull())
+    latitude = coordinates["lat"];
+  if (longitude.isNull())
+    longitude = coordinates["lon"];
+  if (longitude.isNull())
+    longitude = coordinates["lng"];
+  if (latitude.isNull())
+    latitude = obj["latitude"];
+  if (longitude.isNull())
+    longitude = obj["longitude"];
+  if (latitude.isNull())
+    latitude = obj["lat"];
+  if (longitude.isNull())
+    longitude = obj["lon"];
+  if (longitude.isNull())
+    longitude = obj["lng"];
+
+  ipgeo.lat = jsonDoubleOr(latitude, 0.0);
+  ipgeo.lon = jsonDoubleOr(longitude, 0.0);
 }
 
 /** Returns true when haystack contains needle, ignoring ASCII case. */
@@ -555,29 +802,73 @@ bool fillWeatherFromJson(const String &payload)
 
 bool fillIpgeoFromJson(const String &payload)
 {
-  StaticJsonDocument<128> filter;
-  filter["time_zone"]["name"] = true;
-  filter["time_zone"]["offset"] = true;
-  filter["latitude"] = true;
-  filter["longitude"] = true;
+  setIpgeoParseError("");
 
-  StaticJsonDocument<768> doc;
-  DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
+  DynamicJsonDocument doc(kIpgeoDocumentCapacity);
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error == DeserializationError::InvalidInput)
+  {
+    const int firstObject = payload.indexOf('{');
+    const int lastObject = payload.lastIndexOf('}');
+    if (firstObject > 0 && lastObject > firstObject)
+    {
+      doc.clear();
+      error = deserializeJson(doc,
+                              payload.c_str() + firstObject,
+                              static_cast<size_t>(lastObject - firstObject + 1));
+      if (!error)
+        ESP_LOGW(TAG, "IPGeo response had %d leading byte(s) before JSON; parsed JSON object slice",
+                 firstObject);
+    }
+  }
   if (error)
   {
-    ESP_LOGE(TAG, "IPGeo deserializeJson() failed: %s", error.c_str());
+    char payloadSummary[96];
+    summarizePayloadStart(payloadSummary, sizeof(payloadSummary), payload);
+    snprintf(lastIpgeoParseErrorText, sizeof(lastIpgeoParseErrorText),
+             "IPGeo JSON parse failed: %s (%s)", error.c_str(), payloadSummary);
+    ESP_LOGE(TAG, "%s", lastIpgeoParseErrorText);
     return false;
   }
-  JsonObject obj = doc.as<JsonObject>();
-  if (!obj["time_zone"].isNull())
+  JsonObjectConst obj = doc.as<JsonObjectConst>();
+  if (obj.isNull())
   {
-    copyJsonString(ipgeo.timezone, obj["time_zone"]["name"]);
-    ipgeo.tzoffset = obj["time_zone"]["offset"] | 127;
-    ipgeo.lat = obj["latitude"] | 0.0;
-    ipgeo.lon = obj["longitude"] | 0.0;
-    return true;
+    setIpgeoParseError("IPGeo JSON root was not an object");
+    ESP_LOGE(TAG, "%s", lastIpgeoParseErrorText);
+    return false;
   }
-  return false;
+
+  JsonVariantConst timeZone = obj["time_zone"];
+  if (timeZone.isNull())
+    timeZone = obj["timezone"];
+  if (timeZone.isNull())
+    timeZone = obj["location"]["time_zone"];
+  if (timeZone.isNull())
+    timeZone = obj["location"]["timezone"];
+  if (timeZone.isNull())
+    timeZone = obj["geo"]["time_zone"];
+  if (timeZone.isNull())
+    timeZone = obj["geo"]["timezone"];
+  if (timeZone.isNull())
+  {
+    noteMissingIpgeoTimezone(obj, payload);
+    return false;
+  }
+
+  if (!assignIpgeoTimezone(timeZone))
+  {
+    setIpgeoParseError("IPGeo payload did not include a timezone name or UTC offset");
+    ESP_LOGE(TAG, "%s", lastIpgeoParseErrorText);
+    return false;
+  }
+
+  assignIpgeoLocation(obj);
+  return true;
+}
+
+const char *lastIpgeoParseError()
+{
+  return lastIpgeoParseErrorText;
 }
 
 bool fillGeocodeFromJson(const String &payload)

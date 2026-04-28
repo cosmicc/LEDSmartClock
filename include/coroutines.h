@@ -44,6 +44,13 @@ static bool crossedEpochBoundary(acetime_t previous, acetime_t current, acetime_
   return previous < boundary && current >= boundary;
 }
 
+/** Period between runtime heartbeat log lines used for field lockup captures. */
+static constexpr uint32_t kRuntimeHealthLogIntervalMs = 60UL * 1000UL;
+/** Time after which an orphaned HTTP busy flag is treated as stale. */
+static constexpr uint32_t kNetworkBusyStallMs = 120UL * 1000UL;
+/** Time after which display ownership is considered stuck and safe to recover. */
+static constexpr uint32_t kDisplayOwnerStallMs = 10UL * 60UL * 1000UL;
+
 COROUTINE(IotWebConf) 
 {
   COROUTINE_LOOP() 
@@ -504,11 +511,19 @@ COROUTINE(serialInput)
 {
   COROUTINE_LOOP() 
   {
-    COROUTINE_AWAIT(500);
-    if (Serial.available())
+    COROUTINE_DELAY(50);
+    while (Serial.available() > 0)
     {
+      const int incoming = Serial.read();
+      if (incoming < 0)
+        break;
+
+      const char input = static_cast<char>(incoming);
+      if (input == '\r' || input == '\n' || input == ' ' || input == '\t')
+        continue;
+
       ConsoleMirrorPrint out(true);
-      handleDebugCommand(Serial.read(), out, true);
+      handleDebugCommand(input, out, true);
     }
   }
 }
@@ -619,8 +634,10 @@ COROUTINE(checkIpgeo)
           else
           {
             ESP_LOGE(TAG, "fillIpgeoFromJson() Error parsing response");
+            const char *parseError = lastIpgeoParseError();
             noteDiagnosticFailure(DiagnosticService::IpGeo, true, "Parse failed",
-                                  F("ipgeolocation.io returned data, but the JSON payload could not be parsed cleanly."),
+                                  hasVisibleText(parseError) ? String(parseError)
+                                                             : String(F("ipgeolocation.io returned data, but the JSON payload could not be parsed cleanly.")),
                                   httpCode, checkipgeo.retries);
           }
         }
@@ -735,6 +752,70 @@ COROUTINE(systemMessages)
   }
 }
 
+static void clearStalledDisplayOwner(uint32_t stalledMillis)
+{
+  const String tokens = displaytoken.showTokens();
+  ESP_LOGE(TAG,
+           "Display ownership stalled for %lu ms; clearing tokens. Tokens:%s showClockSusp:%s alertflash:%s scroll:%s scrollPos:%d scrollSize:%d",
+           static_cast<unsigned long>(stalledMillis),
+           tokens.c_str(),
+           yesno[showClock.isSuspended()],
+           yesno[alertflash.active],
+           yesno[scrolltext.active],
+           scrolltext.position,
+           scrolltext.size);
+
+  alertflash.active = false;
+  scrolltext.active = false;
+  scrolltext.displayicon = false;
+  scrolltext.position = mw - 1;
+  scrolltext.size = 0;
+  matrix->setBrightness(current.brightness);
+  matrix->clear();
+  matrix->show();
+  displaytoken.resetAllTokens();
+  showClock.resume();
+  runtimeState.displayBlockedSinceMillis = 0;
+}
+
+static void checkRuntimeHealth()
+{
+  const uint32_t nowMs = millis();
+  const bool displayBlocked = !displaytoken.isReady(0) || showClock.isSuspended();
+
+  if (runtimeState.lastHealthLogMillis == 0 ||
+      nowMs - runtimeState.lastHealthLogMillis >= kRuntimeHealthLogIntervalMs)
+  {
+    logRuntimeHealth();
+    runtimeState.lastHealthLogMillis = nowMs;
+  }
+
+  if (networkService.busy && runtimeState.networkBusySinceMillis != 0 &&
+      nowMs - runtimeState.networkBusySinceMillis >= kNetworkBusyStallMs)
+  {
+    ESP_LOGE(TAG, "HTTP client busy flag stale for %lu ms on endpoint %s; releasing shared client",
+             static_cast<unsigned long>(nowMs - runtimeState.networkBusySinceMillis),
+             runtimeState.networkBusyEndpoint[0] == '\0' ? "unknown" : runtimeState.networkBusyEndpoint);
+    endApiRequest();
+  }
+
+  if (displayBlocked)
+  {
+    if (runtimeState.displayBlockedSinceMillis == 0)
+    {
+      runtimeState.displayBlockedSinceMillis = nowMs;
+    }
+    else if (nowMs - runtimeState.displayBlockedSinceMillis >= kDisplayOwnerStallMs)
+    {
+      clearStalledDisplayOwner(nowMs - runtimeState.displayBlockedSinceMillis);
+    }
+  }
+  else
+  {
+    runtimeState.displayBlockedSinceMillis = 0;
+  }
+}
+
 COROUTINE(coroutineManager) 
 {
   COROUTINE_LOOP() 
@@ -756,15 +837,10 @@ COROUTINE(coroutineManager)
     showClock.resume();
     ESP_LOGD(TAG, "Show Clock Coroutine Resumed");
   }
-  if (serialdebug.isChecked() && serialInput.isSuspended())
+  if (serialInput.isSuspended())
   {
     serialInput.resume();
     ESP_LOGD(TAG, "Serial Input Coroutine Resumed");
-  }
-  else if (!serialdebug.isChecked() && !serialInput.isSuspended())
-  {
-    serialInput.suspend();
-   ESP_LOGD(TAG, "Serial Input Coroutine Suspended"); 
   }
     #ifndef DISABLE_WEATHERCHECK         
   // Weather couroutine management
@@ -912,6 +988,7 @@ COROUTINE(coroutineManager)
     ESP_LOGE(TAG, "Check Geocode retry limit [%d] exceeded, disabling service for protection", HTTP_MAX_RETRIES);
     checkGeocode.suspend();
   }
+  checkRuntimeHealth();
   COROUTINE_YIELD();
   }
 }

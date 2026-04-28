@@ -54,7 +54,7 @@
 #define OPENWEATHER_GEOCODE_ENDPOINT "https://api.openweathermap.org/geo/1.0/reverse"
 #define OPENWEATHER_AQI_ENDPOINT "https://api.openweathermap.org/data/2.5/air_pollution/forecast"
 #define WEATHER_GOV_ALERTS_ENDPOINT "https://api.weather.gov/alerts/active"
-#define IPGEOLOCATION_ENDPOINT "https://api.ipgeolocation.io/ipgeo"
+#define IPGEOLOCATION_ENDPOINT "https://api.ipgeolocation.io/v3/ipgeo"
 
 // second aliases
 #define T1S 1*1L  // 1 second
@@ -196,6 +196,12 @@ void print_gpsStatus();
 void print_gpsRawNmea(ConsoleMirrorPrint &out);
 /** Prints the retained raw NMEA tail to the default serial/web console output. */
 void print_gpsRawNmea();
+/** Prints the current runtime health snapshot to the selected console output. */
+void print_runtimeHealth(ConsoleMirrorPrint &out);
+/** Prints the current runtime health snapshot to the default serial/web console output. */
+void print_runtimeHealth();
+/** Emits the current runtime health snapshot through the ESP log path. */
+void logRuntimeHealth();
 /** Executes one single-character debug command from serial or the web console. */
 bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediateRestart = true);
 /** Returns true when the supplied GPS UART baud is one of the supported receiver rates. */

@@ -25,6 +25,45 @@ uint32_t lastAutoPersistMillis = 0;
 bool pendingAutoPersist = false;
 char pendingAutoPersistReason[48]{};
 
+/** Returns a readable label for the ESP reset cause captured at boot. */
+const char *espResetReasonLabel(esp_reset_reason_t reason)
+{
+  switch (reason)
+  {
+  case ESP_RST_POWERON:
+    return "Power-on reset";
+  case ESP_RST_EXT:
+    return "External reset";
+  case ESP_RST_SW:
+    return "Software reset";
+  case ESP_RST_PANIC:
+    return "Exception or panic";
+  case ESP_RST_INT_WDT:
+    return "Interrupt watchdog";
+  case ESP_RST_TASK_WDT:
+    return "Task watchdog";
+  case ESP_RST_WDT:
+    return "Other watchdog";
+  case ESP_RST_DEEPSLEEP:
+    return "Deep-sleep wake";
+  case ESP_RST_BROWNOUT:
+    return "Brownout";
+  case ESP_RST_SDIO:
+    return "SDIO reset";
+  case ESP_RST_UNKNOWN:
+  default:
+    return "Unknown reset";
+  }
+}
+
+/** Captures the reset cause early so later debug output can explain this boot. */
+void captureLastRebootReason()
+{
+  const esp_reset_reason_t reason = esp_reset_reason();
+  snprintf(runtimeState.lastRebootReason, sizeof(runtimeState.lastRebootReason),
+           "%s (%d)", espResetReasonLabel(reason), static_cast<int>(reason));
+}
+
 /** Formats the remaining time until the next scheduled display for debug output. */
 String nextShowDebug(acetime_t now, acetime_t lastShown, uint32_t intervalSeconds)
 {
@@ -475,6 +514,60 @@ void startGpsUart(const char *reason, bool logToSerial)
              GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(baud), reason == nullptr ? "startup" : reason);
   }
 }
+
+struct RuntimeHealthSnapshot
+{
+  uint32_t nowMs = 0;
+  unsigned long heap = 0;
+  unsigned long minHeap = 0;
+  unsigned long stack = 0;
+  uint8_t wifiState = 0;
+  int wifiStatus = 0;
+  String ipAddress;
+  bool httpReady = false;
+  bool httpBusy = false;
+  const char *endpoint = "none";
+  unsigned long busyMs = 0;
+  String tokens;
+  bool showClockSuspended = false;
+  bool alertFlashActive = false;
+  bool scrollActive = false;
+  int scrollPosition = 0;
+  int scrollSize = 0;
+  unsigned long displayBlockedMs = 0;
+  unsigned long lastHealthLogAgeMs = 0;
+};
+
+RuntimeHealthSnapshot captureRuntimeHealthSnapshot()
+{
+  RuntimeHealthSnapshot snapshot;
+  snapshot.nowMs = millis();
+  snapshot.heap = static_cast<unsigned long>(ESP.getFreeHeap());
+  snapshot.minHeap = static_cast<unsigned long>(ESP.getMinFreeHeap());
+  snapshot.stack = static_cast<unsigned long>(uxTaskGetStackHighWaterMark(NULL));
+  snapshot.wifiState = iotWebConf.getState();
+  snapshot.wifiStatus = static_cast<int>(WiFi.status());
+  snapshot.ipAddress = WiFi.localIP().toString();
+  snapshot.httpReady = isHttpReady();
+  snapshot.httpBusy = networkService.busy;
+  snapshot.endpoint = runtimeState.networkBusyEndpoint[0] == '\0' ? "none" : runtimeState.networkBusyEndpoint;
+  snapshot.busyMs = networkService.busy && runtimeState.networkBusySinceMillis != 0
+                        ? static_cast<unsigned long>(snapshot.nowMs - runtimeState.networkBusySinceMillis)
+                        : 0UL;
+  snapshot.tokens = displaytoken.showTokens();
+  snapshot.showClockSuspended = showClock.isSuspended();
+  snapshot.alertFlashActive = alertflash.active;
+  snapshot.scrollActive = scrolltext.active;
+  snapshot.scrollPosition = scrolltext.position;
+  snapshot.scrollSize = scrolltext.size;
+  snapshot.displayBlockedMs = runtimeState.displayBlockedSinceMillis == 0
+                                  ? 0UL
+                                  : static_cast<unsigned long>(snapshot.nowMs - runtimeState.displayBlockedSinceMillis);
+  snapshot.lastHealthLogAgeMs = runtimeState.lastHealthLogMillis == 0
+                                    ? 0UL
+                                    : static_cast<unsigned long>(snapshot.nowMs - runtimeState.lastHealthLogMillis);
+  return snapshot;
+}
 } // namespace
 
 void flushDeferredConfigurationState()
@@ -500,6 +593,8 @@ extern "C" void app_main()
 {
   Serial.begin(115200);
   initConsoleLog();
+  captureLastRebootReason();
+  ESP_EARLY_LOGI(TAG, "Boot reset reason: %s", runtimeState.lastRebootReason);
   uint32_t init_timer = millis();
   nvs_flash_init();
   ESP_EARLY_LOGD(TAG, "Initializing Hardware Watchdog...");
@@ -903,7 +998,21 @@ void print_debugData(ConsoleMirrorPrint &out)
     out.printf("Currently not known\n");
   out.printf("[^----------------------------------------------------------------^]\n");
   out.printf("Firmware - Version:v%s\n", VERSION_SEMVER);
-  out.printf("System - RawLux:%d | Lux:%d | UsrBright:+%d | Brightness:%d | ClockHue:%d | TempHue:%d | WifiState:%s | HttpReady:%s | IP:%s | Uptime:%s\n", current.rawlux, current.lux, runtimeState.userBrightness, current.brightness, current.clockhue, current.temphue, (connection_state[iotWebConf.getState()]), (yesno[isHttpReady()]), ((WiFi.localIP()).toString()).c_str(), elapsedTime(now - runtimeState.bootTime).c_str());
+  out.printf("Boot - LastRebootReason:%s\n",
+             runtimeState.lastRebootReason[0] == '\0' ? "Unknown" : runtimeState.lastRebootReason);
+  out.printf("System - RawLux:%d | Lux:%d | UsrBright:+%d | Brightness:%d | ClockHue:%d | TempHue:%d | WifiState:%s | HttpReady:%s | IP:%s | Uptime:%s | Heap:%lu | MinHeap:%lu\n",
+             current.rawlux,
+             current.lux,
+             runtimeState.userBrightness,
+             current.brightness,
+             current.clockhue,
+             current.temphue,
+             (connection_state[iotWebConf.getState()]),
+             (yesno[isHttpReady()]),
+             ((WiFi.localIP()).toString()).c_str(),
+             elapsedTime(now - runtimeState.bootTime).c_str(),
+             static_cast<unsigned long>(ESP.getFreeHeap()),
+             static_cast<unsigned long>(ESP.getMinFreeHeap()));
   out.printf("Clock - Status:%s | TimeSource:%s | CurrentTZ:%s | Timezone:%s | DstActive:%s | NtpReady:%s | NtpServer:%s(%s) | Skew:%d Seconds | LastAttempt:%s | NextAttempt:%s | NextNtp:%s | LastSync:%s\n", clock_status[systemClock.getSyncStatusCode()], runtimeState.timeSource, getSystemTimezoneOffsetString().c_str(), getSystemTimezoneName().c_str(), yesno[isSystemTimezoneDstActive()], yesno[gpsClock.ntpIsReady], runtimeState.ntpServer, runtimeState.ntpServerSource, systemClock.getClockSkew(), elapsedTime(systemClock.getSecondsSinceSyncAttempt()).c_str(), elapsedTime(systemClock.getSecondsToSyncAttempt()).c_str(), elapsedTime((now - runtimeState.lastNtpCheck) - NTPCHECKTIME * 60).c_str(), elapsedTime(now - systemClock.getLastSyncTime()).c_str());
   out.printf("Loc - SavedLat:%.5f | SavedLon:%.5f | CurrentLat:%.5f | CurrentLon:%.5f | LocValid:%s\n", atof(savedlat.value()), atof(savedlon.value()), current.lat, current.lon, yesno[isCoordsValid()]);
   out.printf("IPGeo - Complete:%s | Lat:%.5f | Lon:%.5f | TZoffset:%d | Timezone:%s | ValidApi:%s | Retries:%d | LastAttempt:%s | LastSuccess:%s\n", yesno[checkipgeo.complete], ipgeo.lat, ipgeo.lon, ipgeo.tzoffset, ipgeo.timezone, yesno[isApiValid(ipgeoapi.value())], checkipgeo.retries, elapsedTime(now - checkipgeo.lastattempt).c_str(), elapsedTime(now - checkipgeo.lastsuccess).c_str());
@@ -935,7 +1044,17 @@ void print_debugData(ConsoleMirrorPrint &out)
              elapsedTime(now - lastshown.alerts).c_str());
   out.printf("[^----------------------------------------------------------------^]\n");
   out.printf("Main task stack size: %s bytes remaining\n", formatLargeNumber(uxTaskGetStackHighWaterMark(NULL)).c_str());
+  out.printf("HTTP Client - Busy:%s | Endpoint:%s | BusyFor:%lu ms\n",
+             yesno[networkService.busy],
+             runtimeState.networkBusyEndpoint[0] == '\0' ? "none" : runtimeState.networkBusyEndpoint,
+             networkService.busy && runtimeState.networkBusySinceMillis != 0
+                 ? static_cast<unsigned long>(millis() - runtimeState.networkBusySinceMillis)
+                 : 0UL);
   out.printf("Current Display Tokens: %s\n", displaytoken.showTokens().c_str());
+  out.printf("Display Blocked For: %lu ms\n",
+             runtimeState.displayBlockedSinceMillis == 0
+                 ? 0UL
+                 : static_cast<unsigned long>(millis() - runtimeState.displayBlockedSinceMillis));
   out.printf("[^----------------------------------------------------------------^]\n");
   if (alerts.active)
   {
@@ -1025,6 +1144,65 @@ void print_gpsRawNmea()
   print_gpsRawNmea(out);
 }
 
+void logRuntimeHealth()
+{
+  const RuntimeHealthSnapshot snapshot = captureRuntimeHealthSnapshot();
+  ESP_LOGI(TAG,
+           "Runtime health: heap:%lu minHeap:%lu stack:%lu wifi:%s wifiStatus:%d ip:%s httpBusy:%s endpoint:%s busyMs:%lu tokens:%s showClockSusp:%s alertflash:%s scroll:%s scrollPos:%d",
+           snapshot.heap,
+           snapshot.minHeap,
+           snapshot.stack,
+           connection_state[snapshot.wifiState],
+           snapshot.wifiStatus,
+           snapshot.ipAddress.c_str(),
+           yesno[snapshot.httpBusy],
+           snapshot.endpoint,
+           snapshot.busyMs,
+           snapshot.tokens.c_str(),
+           yesno[snapshot.showClockSuspended],
+           yesno[snapshot.alertFlashActive],
+           yesno[snapshot.scrollActive],
+           snapshot.scrollPosition);
+}
+
+void print_runtimeHealth(ConsoleMirrorPrint &out)
+{
+  const RuntimeHealthSnapshot snapshot = captureRuntimeHealthSnapshot();
+  out.printf("[^---------------------- Runtime Health ----------------------^]\n");
+  out.printf("Snapshot - UptimeMs:%lu | LastAutoLog:%lu ms ago\n",
+             static_cast<unsigned long>(snapshot.nowMs),
+             snapshot.lastHealthLogAgeMs);
+  out.printf("Memory - Heap:%lu | MinHeap:%lu | Stack:%lu bytes remaining\n",
+             snapshot.heap,
+             snapshot.minHeap,
+             snapshot.stack);
+  out.printf("Network - WifiState:%s | WiFiStatus:%d | IP:%s\n",
+             connection_state[snapshot.wifiState],
+             snapshot.wifiStatus,
+             snapshot.ipAddress.c_str());
+  out.printf("HTTP - Ready:%s | Busy:%s | Endpoint:%s | BusyFor:%lu ms\n",
+             yesno[snapshot.httpReady],
+             yesno[snapshot.httpBusy],
+             snapshot.endpoint,
+             snapshot.busyMs);
+  out.printf("Display - Tokens:%s\n", snapshot.tokens.c_str());
+  out.printf("Display - ShowClockSuspended:%s | AlertFlash:%s | Scroll:%s\n",
+             yesno[snapshot.showClockSuspended],
+             yesno[snapshot.alertFlashActive],
+             yesno[snapshot.scrollActive]);
+  out.printf("Display - ScrollPos:%d | ScrollSize:%d | BlockedFor:%lu ms\n",
+             snapshot.scrollPosition,
+             snapshot.scrollSize,
+             snapshot.displayBlockedMs);
+  out.printf("[^------------------------------------------------------------^]\n");
+}
+
+void print_runtimeHealth()
+{
+  ConsoleMirrorPrint out(true);
+  print_runtimeHealth(out);
+}
+
 bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediateRestart)
 {
   switch (input)
@@ -1048,6 +1226,9 @@ bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediate
     return true;
   case 's':
     CoroutineScheduler::list(out);
+    return true;
+  case 'm':
+    print_runtimeHealth(out);
     return true;
   case 'a':
     if (!checkaqi.complete)
@@ -1128,6 +1309,7 @@ bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediate
     out.printf("  p: Reset GPS parser and restart GPS UART\n");
     out.printf("  u: Restart GPS UART using the configured baud\n");
     out.printf("  s: Display coroutines states\n");
+    out.printf("  m: Display runtime health snapshot\n");
     out.printf("  a: Test AQI scroller without changing schedule\n");
     out.printf("  w: Test current weather scroller without changing schedule\n");
     out.printf("  e: Display the current date\n");

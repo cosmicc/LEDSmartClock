@@ -7,6 +7,8 @@ extern IotWebConf iotWebConf;
 void setupIotWebConf();
 /** Repairs out-of-range or legacy config values currently loaded in memory. */
 void normalizeLoadedConfigValues();
+/** Returns true when a web password is present and long enough to protect the full web UI. */
+bool hasConfiguredWebPassword(const char *password);
 
 /** Last persisted latitude used before live location services update it. */
 extern iotwebconf::TextTParameter<12> savedlat;
@@ -22,7 +24,7 @@ extern iotwebconf::TextTParameter<32> savedcity;
 extern iotwebconf::TextTParameter<32> savedstate;
 /** Last persisted country used during startup and offline operation. */
 extern iotwebconf::TextTParameter<32> savedcountry;
-/** Requests a factory reset when the next configuration save completes. */
+/** Requests a full configuration wipe and setup AP mode when the next config save completes. */
 extern iotwebconf::CheckboxTParameter resetdefaults;
 /** Enables verbose serial logging intended for maintenance and debugging. */
 extern iotwebconf::CheckboxTParameter serialdebug;

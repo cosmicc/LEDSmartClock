@@ -25,11 +25,11 @@ iotwebconf::TextTParameter<32> savedstate =
 iotwebconf::TextTParameter<32> savedcountry =
   iotwebconf::Builder<iotwebconf::TextTParameter<32>>("savedcountry").label("Saved Country").defaultValue("").build();
 iotwebconf::CheckboxTParameter resetdefaults =
-  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("resetdefaults").label("Reset to Defaults (AP mode)").defaultValue(false).build();
+  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("resetdefaults").label("Restore AP mode (wipe all config)").defaultValue(false).build();
 iotwebconf::CheckboxTParameter serialdebug =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("serialdebug").label("Enable serial debug output (for debugging)").defaultValue(false).build();
 iotwebconf::CheckboxTParameter web_password_protection =
-  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("web_password_protection").label("Require password for the full web interface").defaultValue(true).build();
+  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("web_password_protection").label("Require password for the full web interface").defaultValue(false).build();
 iotwebconf::CheckboxTParameter web_dark_mode =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("web_dark_mode").label("Use dark mode for the web interface").defaultValue(false).build();
 iotwebconf::TextTParameter<33> ipgeoapi =
@@ -123,11 +123,11 @@ iotwebconf::IntTParameter<int8_t> alert_interval =
 
 iotwebconf::ParameterGroup group7 = iotwebconf::ParameterGroup("Status", "Status LEDs");
 iotwebconf::CheckboxTParameter enable_system_status =
-  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_system_status").label("Enable system status LED (Bottom left)").defaultValue(true).build();
+  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_system_status").label("Enable system status LED (Bottom left)").defaultValue(false).build();
 iotwebconf::CheckboxTParameter enable_aqi_status =
-  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_aqi_status").label("Enable Air Quality status LED (Top Left)").defaultValue(true).build();
+  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_aqi_status").label("Enable Air Quality status LED (Top Left)").defaultValue(false).build();
 iotwebconf::CheckboxTParameter enable_uvi_status =
-  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_uvi_status").label("Enable UV Index status LED (Top Right)").defaultValue(true).build();
+  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_uvi_status").label("Enable UV Index status LED (Top Right)").defaultValue(false).build();
 iotwebconf::CheckboxTParameter green_status =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("green_status").label("Use green instead of black/off for good/low status leds").defaultValue(false).build();
 
@@ -155,6 +155,11 @@ iotwebconf::TextTParameter<12> fixedLat =
 iotwebconf::TextTParameter<12> fixedLon =
   iotwebconf::Builder<iotwebconf::TextTParameter<12>>("fixedLon").label("Custom longitude").defaultValue("").build();
 iotwebconf::ParameterGroup group10 = iotwebconf::ParameterGroup("GPS", "GPS & Receiver");
+
+bool hasConfiguredWebPassword(const char *password)
+{
+  return password != nullptr && strlen(password) >= 8;
+}
 
 namespace
 {
@@ -236,6 +241,20 @@ void normalizeLoadedConfigValuesImpl()
     strlcpy(ntp_server.value(), DEFAULT_NTP_SERVER, 64);
     corrected = true;
   }
+  if (web_password_protection.isChecked() &&
+      !hasConfiguredWebPassword(iotWebConf.getApPasswordParameter()->valueBuffer))
+  {
+    web_password_protection.value() = false;
+    corrected = true;
+    ESP_LOGW(TAG, "Disabled web password protection because no web password is configured.");
+  }
+  if (!web_password_protection.isChecked() &&
+      !hasConfiguredWebPassword(iotWebConf.getApPasswordParameter()->valueBuffer))
+  {
+    strlcpy(iotWebConf.getApPasswordParameter()->valueBuffer, wifiInitialApPassword,
+            static_cast<size_t>(iotWebConf.getApPasswordParameter()->getLength()));
+    corrected = true;
+  }
 
   if (corrected)
     ESP_LOGW(TAG, "One or more out-of-range configuration values were normalized in memory.");
@@ -244,6 +263,7 @@ void normalizeLoadedConfigValuesImpl()
 /** Populates the themed configuration sections with their owned parameters. */
 void populateParameterGroups()
 {
+  group1.addItem(&imperial);
   group1.addItem(&brightness_level);
   group1.addItem(&text_scroll_speed);
   group1.addItem(&system_color);
@@ -268,7 +288,6 @@ void populateParameterGroups()
   group3.addItem(&current_temp_interval);
   group3.addItem(&current_temp_duration);
 
-  group4.addItem(&imperial);
   group4.addItem(&show_current_weather);
   group4.addItem(&current_weather_color);
   group4.addItem(&current_weather_interval);

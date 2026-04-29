@@ -33,6 +33,12 @@ private:
 /** Installs the ESP-IDF log hook so runtime logs are captured in the RAM buffer. */
 void initConsoleLog();
 
+/** Enables or disables mirroring ESP log output to USB serial. */
+void setConsoleSerialMirrorEnabled(bool enabled);
+
+/** Returns true when ESP log output is currently mirrored to USB serial. */
+bool isConsoleSerialMirrorEnabled();
+
 /** Appends text directly into the RAM console buffer and optional Serial mirror. */
 void appendConsoleBytes(const char *data, size_t length, bool mirrorToSerial);
 

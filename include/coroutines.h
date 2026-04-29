@@ -722,7 +722,7 @@ COROUTINE(systemMessages)
     {
       startFlash(hex2rgb(system_color.value()), 1);
       COROUTINE_AWAIT(!alertflash.active);
-      snprintf(scrolltext.message, sizeof(scrolltext.message), "IP: %s", WiFi.localIP().toString().c_str());
+      snprintf(scrolltext.message, sizeof(scrolltext.message), "v%s IP: %s", VERSION_SEMVER, WiFi.localIP().toString().c_str());
       startScroll(hex2rgb(system_color.value()), false);
       COROUTINE_AWAIT(!scrolltext.active);
       showready.ip = false;

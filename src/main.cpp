@@ -9,6 +9,7 @@
 #include "bitmaps.h"
 #include "config_backup.h"
 #include "coroutines.h"
+#include <cctype>
 #include <cmath>
 
 namespace
@@ -102,6 +103,13 @@ void seedDisplaySchedules()
   lastshown.aqi = seedLastShown(runtimeState.bootTime, static_cast<uint32_t>(aqi_interval.value()) * T1M);
 }
 
+void applyEspLogLevel(bool enabled)
+{
+  const esp_log_level_t level = enabled ? ESP_LOG_DEBUG : ESP_LOG_INFO;
+  esp_log_level_set("*", level);
+  esp_log_level_set(TAG, level);
+}
+
 bool isAutoPersistReason(const char *reason)
 {
   return reason != nullptr &&
@@ -156,6 +164,22 @@ bool persistConfigurationState(const char *reason)
   pendingAutoPersist = true;
   ESP_LOGW(TAG, "Deferred configuration persist after %s to reduce flash write churn.", saveReason);
   return true;
+}
+
+/** Applies the checkbox-backed serial debug setting to the live ESP log pipeline. */
+void applySerialDebugRuntimeConfiguration()
+{
+  const bool enabled = serialdebug.isChecked();
+  setConsoleSerialMirrorEnabled(enabled);
+  applyEspLogLevel(enabled);
+}
+
+/** Updates the serial debug checkbox from a console command and persists it. */
+bool setSerialDebugConfiguration(bool enabled, const char *reason)
+{
+  serialdebug.value() = enabled;
+  applySerialDebugRuntimeConfiguration();
+  return persistConfigurationState(reason);
 }
 
 /** Returns true when a timezone-name buffer contains a usable identifier. */
@@ -593,14 +617,15 @@ extern "C" void app_main()
 {
   Serial.begin(115200);
   initConsoleLog();
+  applyEspLogLevel(false);
   captureLastRebootReason();
-  ESP_EARLY_LOGI(TAG, "Boot reset reason: %s", runtimeState.lastRebootReason);
+  ESP_LOGI(TAG, "Boot reset reason: %s", runtimeState.lastRebootReason);
   uint32_t init_timer = millis();
   nvs_flash_init();
-  ESP_EARLY_LOGD(TAG, "Initializing Hardware Watchdog...");
+  ESP_LOGD(TAG, "Initializing Hardware Watchdog...");
   esp_task_wdt_init(WDT_TIMEOUT, true); // enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);               // add current thread to WDT watch
-  ESP_EARLY_LOGD(TAG, "Initializing the system clock...");
+  ESP_LOGD(TAG, "Initializing the system clock...");
   initializeI2cBus("startup");
   systemClock.setup();
   resetServiceDiagnostics();
@@ -623,26 +648,36 @@ extern "C" void app_main()
                         F("IP geolocation will run after Wi-Fi is connected if an API key is configured."));
   dsClock.setup();
   gpsClock.setup();
-  printSystemZonedTime();
-  ESP_EARLY_LOGD(TAG, "Initializing IotWebConf...");
+  ESP_LOGD(TAG, "Initializing IotWebConf...");
   setupIotWebConf();
+  bool loadedStoredConfiguration = false;
   if (hasStoredConfiguration())
   {
     String configStoreError;
     if (loadStoredConfiguration(configStoreError))
-      ESP_EARLY_LOGI(TAG, "Loaded key-based configuration store.");
+    {
+      ESP_LOGI(TAG, "Loaded key-based configuration store.");
+      loadedStoredConfiguration = true;
+    }
     else
     {
-      ESP_EARLY_LOGE(TAG, "Failed to load key-based configuration store: %s", configStoreError.c_str());
-      ESP_EARLY_LOGW(TAG, "Ignoring the persisted key-based store and continuing with defaults.");
+      ESP_LOGE(TAG, "Failed to load key-based configuration store: %s", configStoreError.c_str());
+      ESP_LOGW(TAG, "Ignoring the persisted key-based store and continuing with defaults.");
       iotWebConf.getRootParameterGroup()->applyDefaultValue();
       normalizeLoadedConfigValues();
     }
   }
   else
   {
-    ESP_EARLY_LOGI(TAG, "No persisted configuration store found. Using defaults until first save.");
+    ESP_LOGI(TAG, "No persisted configuration store found. Using defaults until first save.");
   }
+  if (loadedStoredConfiguration && iotWebConf.getWifiSsidParameter()->valueBuffer[0] != '\0')
+  {
+    iotWebConf.skipApStartup();
+    ESP_LOGI(TAG, "Skipping setup AP startup because a stored Wi-Fi configuration is available.");
+  }
+  applySerialDebugRuntimeConfiguration();
+  printSystemZonedTime();
   noteDiagnosticPending(DiagnosticService::Weather, isApiValid(weatherapi.value()),
                         isApiValid(weatherapi.value()) ? "Waiting" : "Missing API key",
                         isApiValid(weatherapi.value())
@@ -664,17 +699,17 @@ extern "C" void app_main()
                             ? String(F("Reverse geocoding is waiting for valid coordinates."))
                             : String(F("OpenWeather API key is not configured for reverse geocoding.")));
   gpsClock.refreshNtpServer();
-  ESP_EARLY_LOGD(TAG, "Initializing Light Sensor...");
+  ESP_LOGD(TAG, "Initializing Light Sensor...");
   runtimeState.userBrightness = calcbright(brightness_level.value());
   current.brightness = runtimeState.userBrightness;
   constexpr uint32_t kLightSensorStartupTimeoutMs = 5000UL;
   initializeLightSensor(kLightSensorStartupTimeoutMs);
-  ESP_EARLY_LOGD(TAG, "Initializing GPS Module...");
+  ESP_LOGD(TAG, "Initializing GPS Module...");
   startGpsUart("startup", false);
   gps.uartRestartCount = 0;
-  ESP_EARLY_LOGI(TAG, "GPS UART started on RX:%d TX:%d at %lu baud. Waiting for module traffic and satellite lock.",
+  ESP_LOGI(TAG, "GPS UART started on RX:%d TX:%d at %lu baud. Waiting for module traffic and satellite lock.",
                  GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(gpsActiveBaud()));
-  ESP_EARLY_LOGD(TAG, "Initializing coroutine scheduler...");
+  ESP_LOGD(TAG, "Initializing coroutine scheduler...");
   sysClock.setName("sysclock");
   coroutineManager.setName("manager");
   showClock.setName("show_clock");
@@ -706,8 +741,8 @@ extern "C" void app_main()
   processTimezone();
   registerWebRoutes();
   cotimer.scrollspeed = map(text_scroll_speed.value(), 1, 10, 100, 10);
-  ESP_EARLY_LOGD(TAG, "IotWebConf initilization is complete. Web server is ready.");
-  ESP_EARLY_LOGD(TAG, "Setting class timestamps...");
+  ESP_LOGD(TAG, "IotWebConf initilization is complete. Web server is ready.");
+  ESP_LOGD(TAG, "Setting class timestamps...");
   runtimeState.bootTime = systemClock.getNow();
   runtimeState.lastNtpCheck = systemClock.getNow() - 3601;
   cotimer.icontimer = millis(); // reset all delay timers
@@ -728,19 +763,19 @@ extern "C" void app_main()
   seedDisplaySchedules();
   scrolltext.position = mw;
   if (enable_fixed_loc.isChecked())
-    ESP_EARLY_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
+    ESP_LOGI(TAG, "Setting Fixed GPS Location Lat: %s Lon: %s", fixedLat.value(), fixedLon.value());
   updateCoords();
   updateLocation();
   showclock.fstop = 250;
   if (flickerfast.isChecked())
     showclock.fstop = 20;
-  ESP_EARLY_LOGD(TAG, "Initializing the display...");
+  ESP_LOGD(TAG, "Initializing the display...");
   FastLED.addLeds<NEOPIXEL, HSPI_MOSI>(leds, NUMMATRIX).setCorrection(TypicalLEDStrip);
   matrix->begin();
   matrix->setBrightness(runtimeState.userBrightness);
   matrix->setTextWrap(false);
-  ESP_EARLY_LOGD(TAG, "Display initalization complete.");
-  ESP_EARLY_LOGD(TAG, "Setup initialization complete: %d ms", (millis() - init_timer));
+  ESP_LOGD(TAG, "Display initalization complete.");
+  ESP_LOGD(TAG, "Setup initialization complete: %lu ms", static_cast<unsigned long>(millis() - init_timer));
   scrolltext.resetmsgtime = millis() - 60000;
   displaytoken.resetAllTokens();
   CoroutineScheduler::setup();
@@ -763,12 +798,14 @@ void configSaved()
   if (!web_password_protection.isChecked())
     strlcpy(iotWebConf.getApPasswordParameter()->valueBuffer, wifiInitialApPassword,
             static_cast<size_t>(iotWebConf.getApPasswordParameter()->getLength()));
+  applySerialDebugRuntimeConfiguration();
   persistConfigurationState("config save");
   applyRuntimeConfiguration();
 }
 
 void applyRuntimeConfiguration()
 {
+  applySerialDebugRuntimeConfiguration();
   updateCoords();
   processTimezone();
   if (gps.activeBaud != gpsConfiguredBaud())
@@ -799,13 +836,7 @@ void applyRuntimeConfiguration()
   cotimer.scrollspeed = map(text_scroll_speed.value(), 1, 10, 100, 10);
   runtimeState.userBrightness = calcbright(brightness_level.value());
   ESP_LOGI(TAG, "Configuration was updated.");
-  if (resetdefaults.isChecked())
-    showready.reset = true;
-  if (!serialdebug.isChecked())
-  {
-    ConsoleMirrorPrint out(true);
-    out.printf("Serial debug info has been disabled.\n");
-  }
+  showready.reset = resetdefaults.isChecked();
   runtimeState.firstTimeFailsafe = false;
 }
 
@@ -1205,7 +1236,8 @@ void print_runtimeHealth()
 
 bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediateRestart)
 {
-  switch (input)
+  const char command = static_cast<char>(tolower(static_cast<unsigned char>(input)));
+  switch (command)
   {
   case 'd':
     print_debugData(out);
@@ -1288,9 +1320,16 @@ bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediate
     return true;
 #endif
   case 'l':
-    out.printf("Log level changed to DEBUG\n");
-    esp_log_level_set(TAG, ESP_LOG_DEBUG);
+  {
+    const bool enabled = !serialdebug.isChecked();
+    const bool saved = setSerialDebugConfiguration(enabled, "serial debug toggle");
+    out.printf("Serial debug output %s. Log level is %s.\n",
+               enabled ? "enabled" : "disabled",
+               enabled ? "DEBUG" : "INFO");
+    if (!saved)
+      out.printf("Warning: serial debug setting could not be saved to configuration.\n");
     return true;
+  }
   case 'r':
     out.printf("Rebooting...\n");
     if (allowImmediateRestart)
@@ -1321,7 +1360,7 @@ bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediate
 #ifdef COROUTINE_PROFILER
     out.printf("  f: Display coroutine execution time table (Profiler)\n");
 #endif
-    out.printf("  l: Change log level to DEBUG\n");
+    out.printf("  l: Toggle serial debug output and DEBUG log level\n");
     out.printf("  r: Reboot clock\n");
     out.printf("  h: Display this help\n");
     return true;
@@ -1890,8 +1929,9 @@ void display_temperature()
 
 void printSystemZonedTime()
 {
-  getSystemZonedTime().printTo(SERIAL_PORT_MONITOR);
-  SERIAL_PORT_MONITOR.println();
+  ConsoleMirrorPrint out(isConsoleSerialMirrorEnabled());
+  getSystemZonedTime().printTo(out);
+  out.println();
 }
 
 ZonedDateTime getSystemZonedTime()

@@ -18,6 +18,7 @@ uint32_t sConsoleLogCursor = 0;
 portMUX_TYPE sConsoleLogMux = portMUX_INITIALIZER_UNLOCKED;
 vprintf_like_t sOriginalLogWriter = nullptr;
 bool sConsoleLogInstalled = false;
+volatile bool sConsoleSerialMirrorEnabled = false;
 
 /** Appends raw bytes into the circular RAM console buffer. */
 void appendConsoleBytesLocked(const char *data, size_t length)
@@ -89,7 +90,7 @@ bool copyConsoleWindow(uint32_t since, String &out, uint32_t &cursor, bool &trun
   return true;
 }
 
-/** Captures ESP-IDF log lines into the RAM console buffer while preserving Serial output. */
+/** Captures ESP-IDF log lines into the RAM console buffer and mirrors to Serial only when enabled. */
 int consoleLogVprintf(const char *format, va_list args)
 {
   char line[kConsolePrintfBuffer];
@@ -110,6 +111,9 @@ int consoleLogVprintf(const char *format, va_list args)
     appendConsoleBytesLocked(line, used);
     portEXIT_CRITICAL(&sConsoleLogMux);
   }
+
+  if (!sConsoleSerialMirrorEnabled)
+    return written > 0 ? written : 0;
 
   if (sOriginalLogWriter != nullptr)
     return sOriginalLogWriter(format, args);
@@ -165,6 +169,16 @@ void initConsoleLog()
 
   sOriginalLogWriter = esp_log_set_vprintf(consoleLogVprintf);
   sConsoleLogInstalled = true;
+}
+
+void setConsoleSerialMirrorEnabled(bool enabled)
+{
+  sConsoleSerialMirrorEnabled = enabled;
+}
+
+bool isConsoleSerialMirrorEnabled()
+{
+  return sConsoleSerialMirrorEnabled;
 }
 
 void appendConsoleBytes(const char *data, size_t length, bool mirrorToSerial)

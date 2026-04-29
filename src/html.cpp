@@ -6,6 +6,7 @@ namespace
 constexpr char kFirmwareUpdatePath[] = "/firmware";
 constexpr char kConfigExportPath[] = "/config/export";
 constexpr char kConfigImportPath[] = "/config/import";
+constexpr char kConfigResetDefaultsPath[] = "/config/reset-defaults";
 constexpr char kDiagnosticsPath[] = "/diagnostics";
 constexpr char kConsolePath[] = "/console";
 constexpr char kConsoleLogPath[] = "/console/log";
@@ -63,7 +64,7 @@ struct OnboardingDraft
   String adminPassword;
   String weatherApiKey;
   String ipGeoApiKey;
-  bool enableWebPassword = true;
+  bool enableWebPassword = false;
   bool useFixedTimezone = false;
   int8_t fixedOffset = 0;
 };
@@ -1657,7 +1658,14 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
       return;
     }
 
-    passwordCard.hidden = !protectionToggle.checked;
+    var protectionEnabled = protectionToggle.checked;
+    passwordCard.hidden = !protectionEnabled;
+    if (protectionEnabled) {
+      passwordField.setAttribute('minlength', '8');
+    } else {
+      passwordField.removeAttribute('required');
+      passwordField.setCustomValidity('');
+    }
   }
 
   document.querySelectorAll('.portal-form > fieldset[id]').forEach(function (group) {
@@ -1807,7 +1815,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!protectionMode || !adminPassword || !adminPassword.parentElement) {
       return;
     }
-    var enabled = protectionMode.value !== 'disabled';
+    var enabled = protectionMode.value === 'enabled';
     adminPassword.parentElement.hidden = !enabled;
     adminPassword.required = enabled;
     adminPassword.minLength = enabled ? 8 : 0;
@@ -3336,13 +3344,43 @@ bool copyParameterValue(iotwebconf::TextTParameter<N> &parameter, const String &
   return true;
 }
 
+/** Restores factory defaults while preserving network credentials and external API keys. */
+bool resetConfigurationToDefaultsPreservingConnectivity(String &error)
+{
+  const String wifiSsid = String(iotWebConf.getWifiSsidParameter()->valueBuffer);
+  const String wifiPassword = String(iotWebConf.getWifiPasswordParameter()->valueBuffer);
+  const String openWeatherApiKey = String(weatherapi.value());
+  const String ipGeoApiKey = String(ipgeoapi.value());
+
+  iotWebConf.getRootParameterGroup()->applyDefaultValue();
+
+  if (!copyParameterValue(*iotWebConf.getWifiSsidParameter(), wifiSsid, "Wi-Fi SSID", error) ||
+      !copyParameterValue(*iotWebConf.getWifiPasswordParameter(), wifiPassword, "Wi-Fi password", error) ||
+      !copyParameterValue(weatherapi, openWeatherApiKey, "OpenWeather API key", error) ||
+      !copyParameterValue(ipgeoapi, ipGeoApiKey, "IPGeolocation API key", error))
+  {
+    return false;
+  }
+
+  resetdefaults.value() = false;
+  showready.reset = false;
+  normalizeLoadedConfigValues();
+
+  if (!saveStoredConfiguration(error))
+    return false;
+
+  applyRuntimeConfiguration();
+  ESP_LOGI(TAG, "Reset configuration to factory defaults while preserving Wi-Fi credentials and API keys.");
+  return true;
+}
+
 /** Builds an onboarding draft from the current POST body so invalid submissions can be re-rendered. */
 OnboardingDraft submittedOnboardingDraft()
 {
   OnboardingDraft draft = currentOnboardingDraft();
   draft.wifiSsid = server.hasArg("wifi_ssid") ? server.arg("wifi_ssid") : draft.wifiSsid;
   draft.wifiPassword = server.hasArg("wifi_password") ? server.arg("wifi_password") : draft.wifiPassword;
-  draft.enableWebPassword = !server.hasArg("web_protection") || server.arg("web_protection") != "disabled";
+  draft.enableWebPassword = server.hasArg("web_protection") && server.arg("web_protection") == "enabled";
   draft.adminPassword = server.hasArg("admin_password") ? server.arg("admin_password") : draft.adminPassword;
   draft.weatherApiKey = server.hasArg("weather_api") ? server.arg("weather_api") : draft.weatherApiKey;
   draft.ipGeoApiKey = server.hasArg("ipgeo_api") ? server.arg("ipgeo_api") : draft.ipGeoApiKey;
@@ -3526,13 +3564,13 @@ void appendSetupPage(String &html, const OnboardingDraft *draft, const char *not
                   "This is the normal Wi-Fi network the clock should join after setup.", "autocomplete='username' required");
   appendFormField(html, "Wi-Fi Password", "wifi_password", effectiveDraft.wifiPassword, "password",
                   "Leave blank only for an open Wi-Fi network.", "autocomplete='current-password'");
-  html += F("<div class='form-field'><label for='web_protection'>Password Protect The Web Interface</label><select id='web_protection' name='web_protection'><option value='enabled'");
-  if (effectiveDraft.enableWebPassword)
-    html += F(" selected");
-  html += F(">Enabled (recommended)</option><option value='disabled'");
+  html += F("<div class='form-field'><label for='web_protection'>Password Protect The Web Interface</label><select id='web_protection' name='web_protection'><option value='disabled'");
   if (!effectiveDraft.enableWebPassword)
     html += F(" selected");
-  html += F(">Disabled</option></select><p class='field-help'>When enabled, the dashboard, diagnostics, console, firmware page, and configuration portal require the clock password before access.</p></div>");
+  html += F(">Disabled</option><option value='enabled'");
+  if (effectiveDraft.enableWebPassword)
+    html += F(" selected");
+  html += F(">Enabled</option></select><p class='field-help'>When enabled, the dashboard, diagnostics, console, firmware page, and configuration portal require the clock password before access.</p></div>");
   appendFormField(html, "Clock Web Password", "admin_password", effectiveDraft.adminPassword, "password",
                   "Only required when password protection is enabled above. Recovery setup still remains available with the physical configuration button.",
                   "autocomplete='new-password' minlength='8'");
@@ -3561,15 +3599,16 @@ void appendSetupPage(String &html, const OnboardingDraft *draft, const char *not
                      effectiveDraft.wifiSsid.length() > 0 ? String(F("SSID entered")) : String(F("Missing SSID")),
                      effectiveDraft.wifiSsid.length() > 0 ? String(F("The clock can attempt to join ")) + effectiveDraft.wifiSsid
                                                           : String(F("Enter the Wi-Fi network name before saving onboarding.")));
+  const bool onboardingPasswordConfigured = hasConfiguredWebPassword(effectiveDraft.adminPassword.c_str());
   appendSelfTestItem(html, "Web Access", effectiveDraft.enableWebPassword
-                                                ? (effectiveDraft.adminPassword.length() >= 8 ? "tone-good" : "tone-bad")
+                                                ? (onboardingPasswordConfigured ? "tone-good" : "tone-bad")
                                                 : "tone-neutral",
                      effectiveDraft.enableWebPassword
-                         ? (effectiveDraft.adminPassword.length() >= 8 ? String(F("Password protection enabled")) : String(F("Password too short")))
+                         ? (onboardingPasswordConfigured ? String(F("Password protection enabled")) : String(F("Password required")))
                          : String(F("No password required")),
                      effectiveDraft.enableWebPassword
-                         ? (effectiveDraft.adminPassword.length() >= 8 ? String(F("The web interface will require the clock password after setup."))
-                                                                      : String(F("Use at least 8 characters or disable protection before saving.")))
+                         ? (onboardingPasswordConfigured ? String(F("The web interface will require the clock password after setup."))
+                                                         : String(F("Set a password with at least 8 characters or disable protection before saving.")))
                          : String(F("The dashboard and maintenance pages will open directly without a login.")));
   appendSelfTestItem(html, "OpenWeather", effectiveDraft.weatherApiKey.length() > 0 ? "tone-good" : "tone-warn",
                      effectiveDraft.weatherApiKey.length() > 0 ? String(F("Configured")) : String(F("Optional but missing")),
@@ -3614,7 +3653,6 @@ void appendFirmwareUpdatePage(String &html, const char *noticeToneClass, const S
   appendStatusChip(html, "Update Path", firmwareUpdatePathLabel());
   html += F("</div><div class='metric-grid'>");
   appendMetricCard(html, "Accepted File", F("update.bin"), "tone-neutral");
-  appendMetricCard(html, "Expected Size", F("About 2 MB"), "tone-neutral");
   appendMetricCard(html, "Upload Type", F("Application OTA"), "tone-good");
   html += F("</div></header>");
 
@@ -3631,11 +3669,9 @@ void appendFirmwareUpdatePage(String &html, const char *noticeToneClass, const S
 
   appendCardStart(html, "Before You Upload", "Use the OTA application image only. This screen does not replace the bootloader or partition table.");
   appendKeyValueRow(html, "Required File", F("<code>update.bin</code>"));
-  appendKeyValueRow(html, "Typical Location", F("<code>.pio/build/esp32dev/update.bin</code>"));
   appendKeyValueRow(html, "Release Download", F("Download <code>firmware.zip</code> from GitHub Releases, then extract and upload <code>update.bin</code>"));
   appendKeyValueRow(html, "First Install", F("Use the online installer with release <code>firmware.bin</code> instead of this OTA page"));
-  appendKeyValueRow(html, "Typical Size", F("Approximately 2 MB"));
-  appendKeyValueRow(html, "Do Not Upload", F("<code>bootloader.bin</code> or <code>partitions.bin</code>"));
+  appendKeyValueRow(html, "Do Not Upload", F("<code>firmware.bin</code>"));
   appendCardEnd(html);
 
   html += F("<section class='card upload-panel'><div class='card-header'><h2>Upload Firmware</h2><p class='card-subtitle'>Choose the freshly built <code>update.bin</code> file, then submit it once. The device will validate, write, and reboot into the new firmware if the upload succeeds.</p></div>");
@@ -3772,7 +3808,7 @@ void appendConsolePage(String &html, const String &accessToken)
   html += F("</div><pre id='console-output' class='console-view' data-cursor='0'></pre><p id='console-status' class='console-status'>Connecting to live console feed...</p></section>");
 
   html += F("<section id='console-commands' class='card card-span'><div class='card-header'><h2>Send Debug Commands</h2><p class='card-subtitle'>Commands map to the existing serial shortcuts. The first non-space character is used, so enter values such as h, d, g, m, or s.</p></div><dl class='kv-list'>");
-  appendKeyValueRow(html, "Common Commands", F("<code>h</code> help, <code>d</code> dump debug, <code>g</code> GPS status, <code>m</code> runtime health, <code>n</code> raw NMEA, <code>p</code> GPS reset, <code>s</code> coroutine states, <code>l</code> debug logging"));
+  appendKeyValueRow(html, "Common Commands", F("<code>h</code> help, <code>d</code> dump debug, <code>g</code> GPS status, <code>m</code> runtime health, <code>n</code> raw NMEA, <code>p</code> GPS reset, <code>s</code> coroutine states, <code>l</code> toggle debug logging"));
   appendKeyValueRow(html, "Display Tests", F("<code>a</code> AQI scroller, <code>w</code> current weather, <code>q</code> daily weather, <code>x</code> alert scroller, <code>y</code> temp + icon, <code>e</code> date, <code>t</code> alert flash"));
   appendKeyValueRow(html, "Schedule Impact", F("<code>a</code>, <code>w</code>, <code>q</code>, <code>x</code>, and <code>y</code> run one-shot tests without changing the next scheduled display time."));
   appendKeyValueRow(html, "Receiver Recovery", F("<code>p</code> resets the GPS parser and restarts the UART, <code>u</code> restarts only the GPS UART using the configured baud"));
@@ -3790,7 +3826,7 @@ void appendConsolePage(String &html, const String &accessToken)
   html += F("<button type='button' data-console-command='n'>Raw NMEA</button>");
   html += F("<button type='button' data-console-command='p'>Reset GPS</button>");
   html += F("<button type='button' data-console-command='s'>Coroutines</button>");
-  html += F("<button type='button' data-console-command='l'>Debug Logs</button>");
+  html += F("<button type='button' data-console-command='l'>Toggle Debug</button>");
   html += F("<button type='button' data-console-command='r'>Reboot</button>");
   html += F("</div><form id='console-command-form' class='console-command-form'><div class='console-command-row'><input id='console-command' name='cmd' type='text' maxlength='8' placeholder='Enter a command such as m, w, q, a, x, y, g, n, or r'><button type='submit'>Send Command</button></div></form>");
   html += F("<p class='console-note'>Web commands use the same handlers as the USB serial console, and their output is written back into this same RAM log buffer.</p></section>");
@@ -4242,6 +4278,11 @@ public:
     html += F("'>Download Config Backup</a><a class='button-link secondary' href='");
     html += kConfigImportPath;
     html += F("'>Restore From Backup</a></div><p>The backup file includes Wi-Fi credentials, portal passwords, and API keys, so store it privately.</p></section>");
+    if (server.hasArg("defaults_reset"))
+      appendNotice(html, "notice-good", F("Configuration settings were reset to factory defaults. Wi-Fi SSID, Wi-Fi password, and API keys were kept. Setup AP mode was not requested."));
+    html += F("<section class='portal-card portal-intro'><div class='card-header'><h2>Factory Defaults</h2><p class='card-subtitle'>Reset saved settings while keeping the current Wi-Fi SSID, Wi-Fi password, OpenWeather key, and IPGeolocation key. This does not wipe the saved config or enter setup AP mode.</p></div><form action='");
+    html += kConfigResetDefaultsPath;
+    html += F("' method='post' onsubmit=\"return confirm('Reset settings to factory defaults while keeping Wi-Fi and API keys, without entering setup AP mode?');\"><input type='hidden' name='confirm' value='factory-defaults'><div class='action-row'><button class='button-link danger' type='submit'>Reset to Defaults</button></div></form></section>");
     html += F("<section class='portal-card portal-intro'><div class='card-header'><h2>Before You Save</h2><p class='card-subtitle'>Changes are written to flash when you apply them. Wi-Fi or API edits can briefly interrupt online services while the clock reconnects and refreshes its derived state.</p></div>");
     html += F("<p>Use the status page at <a href='/'>/</a> to confirm runtime basics, and the <a href='");
     html += kDiagnosticsPath;
@@ -4299,9 +4340,9 @@ bool applyOnboardingDraft(const OnboardingDraft &draft, String &error)
     error = F("Wi-Fi SSID is required before onboarding can finish.");
     return false;
   }
-  if (enableWebProtection && adminPassword.length() < 8)
+  if (enableWebProtection && !hasConfiguredWebPassword(adminPassword.c_str()))
   {
-    error = F("Choose a password that is at least 8 characters long.");
+    error = F("Set a web password with at least 8 characters before enabling password protection.");
     return false;
   }
 
@@ -4481,6 +4522,31 @@ void handleConfigPage()
 
   SessionWebRequestWrapper requestWrapper;
   iotWebConf.handleConfig(&requestWrapper);
+}
+
+/** Resets saved settings to defaults while keeping connectivity credentials and API keys. */
+void handleConfigResetDefaults()
+{
+  if (iotWebConf.handleCaptivePortal())
+    return;
+  if (!authorizeAdminRequest())
+    return;
+
+  if (!server.hasArg("confirm") || server.arg("confirm") != "factory-defaults")
+  {
+    server.send(400, "text/plain; charset=UTF-8", F("Missing reset confirmation."));
+    return;
+  }
+
+  String error;
+  if (!resetConfigurationToDefaultsPreservingConnectivity(error))
+  {
+    ESP_LOGE(TAG, "Failed to reset configuration defaults: %s", error.c_str());
+    server.send(500, "text/plain; charset=UTF-8", String(F("Failed to reset configuration: ")) + error);
+    return;
+  }
+
+  redirectTo(F("/config?defaults_reset=1"));
 }
 
 /** Captures the latest OTA updater error as readable text for the themed status page. */
@@ -4992,7 +5058,7 @@ void handleConsoleCommand()
     return;
   }
 
-  ConsoleMirrorPrint out(true);
+  ConsoleMirrorPrint out(isConsoleSerialMirrorEnabled());
   out.printf("[web] command: %c\n", input);
   bool handled = handleDebugCommand(input, out, false);
   if (!handled)
@@ -5071,6 +5137,7 @@ void registerWebRoutes()
   server.on(kConfigExportPath, HTTP_GET, handleConfigExport);
   server.on(kConfigImportPath, HTTP_GET, handleConfigImport);
   server.on(kConfigImportPath, HTTP_POST, handleConfigImportPost, handleConfigImportUpload);
+  server.on(kConfigResetDefaultsPath, HTTP_POST, handleConfigResetDefaults);
   server.on(kFirmwareUpdatePath, HTTP_GET, handleFirmwareUpdate);
   server.on(kFirmwareUpdatePath, HTTP_POST, handleFirmwareUpdatePost, handleFirmwareUpload);
   server.on("/config", handleConfigPage);
@@ -5141,12 +5208,17 @@ bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
   if (webRequestWrapper != nullptr)
   {
     const bool protectionEnabled = webRequestWrapper->hasArg("web_password_protection");
-    if (protectionEnabled && webRequestWrapper->hasArg("iwcApPassword"))
+    if (protectionEnabled)
     {
-      String submittedPassword = webRequestWrapper->arg("iwcApPassword");
-      if (submittedPassword.length() < 8)
+      String submittedPassword = webRequestWrapper->hasArg("iwcApPassword")
+                                     ? webRequestWrapper->arg("iwcApPassword")
+                                     : String();
+      const bool keepExistingPassword = submittedPassword.length() == 0 &&
+                                        web_password_protection.isChecked() &&
+                                        hasConfiguredWebPassword(iotWebConf.getApPasswordParameter()->valueBuffer);
+      if (!keepExistingPassword && !hasConfiguredWebPassword(submittedPassword.c_str()))
       {
-        iotWebConf.getApPasswordParameter()->errorMessage = "Use at least 8 characters when web password protection is enabled.";
+        iotWebConf.getApPasswordParameter()->errorMessage = "Set a web password with at least 8 characters before enabling password protection.";
         return false;
       }
     }

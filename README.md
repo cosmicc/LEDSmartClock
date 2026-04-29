@@ -1,6 +1,6 @@
-# LED SmartClock
+# LED Smart Clock
 
-LED SmartClock is an ESP32-based wall clock built around an 8x32 WS2812B LED matrix. It combines large-format time display with GPS, NTP, weather, air quality, and alert data, then exposes everything through a web dashboard, diagnostics page, live console, configuration portal, backup and restore, and OTA updates.
+LED Smart Clock is an ESP32-based wall clock built around an 8x32 WS2812B LED matrix. It combines large-format time display with GPS, NTP, weather, air quality, and alert data, then exposes everything through a web dashboard, diagnostics page, live console, configuration portal, backup and restore, and OTA updates.
 
 ## What It Does
 

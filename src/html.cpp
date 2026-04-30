@@ -17,6 +17,7 @@ constexpr char kDisplayTestPath[] = "/display-test";
 constexpr char kGpsActionPath[] = "/gps/action";
 constexpr char kGpsRawPath[] = "/gps/raw";
 constexpr char kThemeCssPath[] = "/theme.css";
+constexpr char kThemeCssRevision[] = "2";
 constexpr char kLoginPath[] = "/login";
 constexpr char kLogoutPath[] = "/logout";
 constexpr char kOnboardingPath[] = "/onboarding";
@@ -567,6 +568,22 @@ a:hover{text-decoration:underline}
   background:var(--tile-bg);
   box-shadow:var(--tile-shadow);
 }
+.self-test-item.tone-good{
+  background:linear-gradient(180deg, var(--good-soft), var(--tile-bg));
+  border-color:rgba(22,101,52,0.18);
+}
+.self-test-item.tone-warn{
+  background:linear-gradient(180deg, var(--warm-soft), var(--tile-bg));
+  border-color:rgba(199,103,30,0.18);
+}
+.self-test-item.tone-bad{
+  background:linear-gradient(180deg, var(--bad-soft), var(--tile-bg));
+  border-color:rgba(180,83,9,0.2);
+}
+.self-test-item.tone-neutral{
+  background:linear-gradient(180deg, var(--accent-soft), var(--tile-bg));
+  border-color:rgba(15,118,110,0.14);
+}
 .self-test-item h3{
   margin:0 0 6px;
   font-family:"Georgia","Times New Roman",serif;
@@ -577,6 +594,29 @@ a:hover{text-decoration:underline}
   margin:0;
   color:var(--muted);
   line-height:1.55;
+}
+.hardware-status-section{
+  margin-top:22px;
+}
+.hardware-status-section .self-test-item.tone-good{
+  background:linear-gradient(135deg, rgba(22,101,52,0.24), var(--tile-bg) 72%);
+  border-color:rgba(22,101,52,0.36);
+  box-shadow:inset 5px 0 0 rgba(22,101,52,0.58), var(--tile-shadow);
+}
+.hardware-status-section .self-test-item.tone-bad{
+  background:linear-gradient(135deg, rgba(180,35,24,0.22), var(--tile-bg) 72%);
+  border-color:rgba(180,35,24,0.34);
+  box-shadow:inset 5px 0 0 rgba(180,35,24,0.55), var(--tile-shadow);
+}
+html[data-web-theme='dark'] .hardware-status-section .self-test-item.tone-good{
+  background:linear-gradient(135deg, rgba(79,195,122,0.24), var(--tile-bg) 72%);
+  border-color:rgba(79,195,122,0.38);
+  box-shadow:inset 5px 0 0 rgba(79,195,122,0.66), var(--tile-shadow);
+}
+html[data-web-theme='dark'] .hardware-status-section .self-test-item.tone-bad{
+  background:linear-gradient(135deg, rgba(248,113,113,0.22), var(--tile-bg) 72%);
+  border-color:rgba(248,113,113,0.36);
+  box-shadow:inset 5px 0 0 rgba(248,113,113,0.62), var(--tile-shadow);
 }
 .recovery-panel{
   margin-top:18px;
@@ -3213,6 +3253,8 @@ void appendDocumentHead(String &html, const char *title, bool autoRefresh)
   html += kThemeCssPath;
   html += F("?v=");
   html += VERSION_SEMVER;
+  html += F("&amp;r=");
+  html += kThemeCssRevision;
   html += F("'></head><body>");
 }
 
@@ -3444,6 +3486,62 @@ void appendSelfTestItem(String &html, const char *title, const char *toneClass, 
   html += F("</strong><br>");
   html += htmlEscape(detail);
   html += F("</p></article>");
+}
+
+/** Renders one detected/not-detected item for the diagnostics hardware summary. */
+void appendHardwareStatusItem(String &html,
+                              const char *title,
+                              bool detected,
+                              const String &detectedSummary,
+                              const String &missingSummary,
+                              const String &detectedDetail,
+                              const String &missingDetail)
+{
+  appendSelfTestItem(html,
+                     title,
+                     detected ? "tone-good" : "tone-bad",
+                     detected ? detectedSummary : missingSummary,
+                     detected ? detectedDetail : missingDetail);
+}
+
+/** Renders the top diagnostics summary for local hardware and network presence. */
+void appendDiagnosticsHardwareStatusSection(String &html)
+{
+  const bool gpsDetected = gps.moduleDetected || GPS.charsProcessed() > 0;
+  const bool lightDetected = isLightSensorHealthy();
+  const bool rtcDetected = systemClock.isInit();
+  const bool internetConnected = iotWebConf.getState() == iotwebconf::OnLine && WiFi.status() == WL_CONNECTED;
+
+  html += F("<section class='hardware-status-section'><div class='card-header'><h2>Hardware &amp; Connectivity</h2><p class='card-subtitle'>Detected local modules and current internet readiness.</p></div><div class='self-test-grid'>");
+  appendHardwareStatusItem(html,
+                           "GPS Module",
+                           gpsDetected,
+                           F("Detected"),
+                           F("Not detected"),
+                           String(F("GPS UART traffic has been received at ")) + gpsActiveBaud() + F(" baud."),
+                           String(F("No GPS UART traffic has been seen yet on RX ")) + GPS_RX_PIN + F(" / TX ") + GPS_TX_PIN + F("."));
+  appendHardwareStatusItem(html,
+                           "Light Sensor Module",
+                           lightDetected,
+                           F("Detected"),
+                           F("Not detected"),
+                           F("The TSL2561 ambient light sensor is responding."),
+                           F("The TSL2561 sensor is unavailable; brightness is using the fixed fallback."));
+  appendHardwareStatusItem(html,
+                           "RTC Module",
+                           rtcDetected,
+                           F("Detected"),
+                           F("Not detected"),
+                           F("The DS3231 RTC responded during startup."),
+                           F("The DS3231 RTC did not report a valid startup time."));
+  appendHardwareStatusItem(html,
+                           "Internet Connectivity",
+                           internetConnected,
+                           F("Connected"),
+                           F("Not connected"),
+                           String(F("The clock is online at ")) + WiFi.localIP().toString() + F("."),
+                           F("The clock is not online; remote services will wait for Wi-Fi/internet access."));
+  html += F("</div></section>");
 }
 
 /** Renders the live hardware and service checks shown after onboarding saves. */
@@ -3839,7 +3937,9 @@ void appendConsolePage(String &html, const String &accessToken)
 void handleThemeCss()
 {
   const size_t cssLength = strlen_P(kWebThemeCss) + strlen_P(kPortalConsoleCss);
-  server.sendHeader("Cache-Control", "public, max-age=86400");
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Expires", "0");
   server.setContentLength(cssLength);
   server.send_P(200, PSTR("text/css; charset=UTF-8"), kWebThemeCss);
   server.sendContent_P(kPortalConsoleCss);
@@ -3877,7 +3977,9 @@ void appendDiagnosticsContent(String &html)
   appendStatusChip(html, "Address", activeAddressLabel());
   appendStatusChip(html, "Location", currentLocationLabel());
   appendStatusChip(html, "Last Reboot", safeText(String(runtimeState.lastRebootReason), "Unknown"));
-  html += F("</div><div class='metric-grid'>");
+  html += F("</div>");
+  appendDiagnosticsHardwareStatusSection(html);
+  html += F("<div class='metric-grid'>");
   appendMetricCard(html, "Healthy", htmlEscape(String(healthyCount)), "tone-good");
   appendMetricCard(html, "Attention", htmlEscape(String(attentionCount)), attentionCount > 0 ? "tone-bad" : "tone-neutral");
   appendMetricCard(html, "Waiting", htmlEscape(String(pendingCount)), pendingCount > 0 ? "tone-warn" : "tone-neutral");
@@ -4228,7 +4330,7 @@ public:
 
   String getStyle() override
   {
-    return String(F("<link rel='stylesheet' href='")) + kThemeCssPath + F("?v=") + VERSION_SEMVER + F("'>");
+    return String(F("<link rel='stylesheet' href='")) + kThemeCssPath + F("?v=") + VERSION_SEMVER + F("&amp;r=") + kThemeCssRevision + F("'>");
   }
 
   String getStyleInner() override

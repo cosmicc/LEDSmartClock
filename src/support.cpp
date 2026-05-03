@@ -220,7 +220,7 @@ const char *diagnosticServiceLabel(DiagnosticService service)
   case DiagnosticService::AirQuality:
     return "Air Quality";
   case DiagnosticService::Alerts:
-    return "Alerts";
+    return "Weather Alerts";
   case DiagnosticService::Geocode:
     return "Geocode";
   case DiagnosticService::IpGeo:

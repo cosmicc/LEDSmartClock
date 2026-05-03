@@ -64,12 +64,16 @@ extern iotwebconf::CheckboxTParameter twelve_clock;
 extern iotwebconf::CheckboxTParameter enable_fixed_tz;
 /** User-selected fixed GMT offset used when fixed timezone mode is enabled. */
 extern iotwebconf::IntTParameter<int8_t> fixed_offset;
+/** Enables a user-selected IANA timezone name instead of automatic timezone detection. */
+extern iotwebconf::CheckboxTParameter enable_manual_timezone;
+/** User-entered IANA timezone name, such as America/New_York. */
+extern iotwebconf::TextTParameter<64> manual_timezone;
 /** Preferred NTP hostname used when DHCP does not supply a server or override is enabled. */
 extern iotwebconf::TextTParameter<64> ntp_server;
 /** Forces the preferred NTP server even when DHCP offers its own NTP server. */
 extern iotwebconf::CheckboxTParameter override_dhcp_ntp;
 /** Preferred GPS UART baud rate used when talking to the receiver module. */
-extern iotwebconf::IntTParameter<int32_t> gps_baud;
+extern iotwebconf::SelectTParameter<7> gps_baud;
 /** Enables blinking of the colon between the clock digits. */
 extern iotwebconf::CheckboxTParameter colonflicker;
 /** Speeds up the colon blink cadence when blinking is enabled. */
@@ -124,6 +128,8 @@ extern iotwebconf::ColorTParameter aqi_color;
 extern iotwebconf::CheckboxTParameter enable_aqi_color;
 /** Interval between air-quality presentations. */
 extern iotwebconf::IntTParameter<int8_t> aqi_interval;
+/** Weather-alert configuration section. */
+extern iotwebconf::ParameterGroup group11;
 /** Interval between alert-display opportunities. */
 extern iotwebconf::IntTParameter<int8_t> alert_interval;
 
@@ -166,3 +172,5 @@ extern iotwebconf::TextTParameter<12> fixedLon;
 
 /** GPS receiver configuration section. */
 extern iotwebconf::ParameterGroup group10;
+/** Maintenance and recovery configuration section. */
+extern iotwebconf::ParameterGroup group12;

@@ -256,6 +256,8 @@ void display_temperature();
 void display_weatherIcon(char *icon);
 /** Rebuilds the active timezone after config or location changes. */
 void processTimezone();
+/** Returns true when the supplied IANA timezone name resolves through AceTime. */
+bool isSupportedTimezoneName(const char *zoneName);
 /** Returns the active sunrise/sunset epochs from weather data or GPS-based fallback. */
 bool getActiveSunEvents(acetime_t nowEpoch, acetime_t &sunriseEpoch, acetime_t &sunsetEpoch);
 /** Returns the current time converted into the active timezone. */

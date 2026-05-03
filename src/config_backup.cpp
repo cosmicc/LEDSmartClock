@@ -195,6 +195,17 @@ bool importIntValue(JsonVariantConst value, T &destination, int32_t minValue, in
   return true;
 }
 
+/** Restores the GPS baud dropdown while accepting old numeric backup values. */
+bool importGpsBaudValue(JsonVariantConst value)
+{
+  int32_t parsed = 0;
+  if (!parseImportedInt(value, parsed) || !isSupportedGpsBaud(static_cast<uint32_t>(parsed)))
+    return false;
+
+  snprintf(gps_baud.value(), sizeof(gps_baud.value()), "%ld", static_cast<long>(parsed));
+  return true;
+}
+
 #define CLASSIC_FIELD(idLiteral, paramExpr)                                                                                  \
   {                                                                                                                          \
     idLiteral, [](JsonObject values, const char *key) { exportClassicBuffer(values, key, *(paramExpr)); },                  \
@@ -224,6 +235,12 @@ bool importIntValue(JsonVariantConst value, T &destination, int32_t minValue, in
     idLiteral, [](JsonObject values, const char *key) { values[key] = param.value(); },                                     \
       [](JsonVariantConst value) { return importIntValue(value, param.value(), static_cast<int32_t>(minValue),              \
                                                          static_cast<int32_t>(maxValue)); }                                  \
+  }
+
+#define GPS_BAUD_FIELD(idLiteral)                                                                                            \
+  {                                                                                                                          \
+    idLiteral, [](JsonObject values, const char *key) { values[key] = gpsConfiguredBaud(); },                               \
+      [](JsonVariantConst value) { return importGpsBaudValue(value); }                                                       \
   }
 
 /** Stable backup schema used to export and import config by key instead of storage order. */
@@ -256,9 +273,11 @@ const ConfigBackupField kConfigBackupFields[] = {
     BOOL_FIELD("twelve_clock", twelve_clock),
     BOOL_FIELD("enable_fixed_tz", enable_fixed_tz),
     INT_FIELD("fixed_offset", fixed_offset, -12, 12),
+    BOOL_FIELD("enable_manual_timezone", enable_manual_timezone),
+    TEXT_FIELD("manual_timezone", manual_timezone),
     TEXT_FIELD("ntp_server", ntp_server),
     BOOL_FIELD("override_dhcp_ntp", override_dhcp_ntp),
-    INT_FIELD("gps_baud", gps_baud, 4800, 115200),
+    GPS_BAUD_FIELD("gps_baud"),
     BOOL_FIELD("colonflicker", colonflicker),
     BOOL_FIELD("flickerfast", flickerfast),
     BOOL_FIELD("enable_clock_color", enable_clock_color),

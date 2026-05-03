@@ -17,9 +17,10 @@ constexpr char kDisplayTestPath[] = "/display-test";
 constexpr char kGpsActionPath[] = "/gps/action";
 constexpr char kGpsRawPath[] = "/gps/raw";
 constexpr char kThemeCssPath[] = "/theme.css";
-constexpr char kThemeCssRevision[] = "2";
+constexpr char kThemeCssRevision[] = "5";
 constexpr char kLoginPath[] = "/login";
 constexpr char kLogoutPath[] = "/logout";
+constexpr char kRebootPath[] = "/reboot";
 constexpr char kOnboardingPath[] = "/onboarding";
 constexpr char kOnboardingMatrixTestPath[] = "/onboarding/self-test/matrix";
 constexpr size_t kMaxConfigImportBytes = 24U * 1024U;
@@ -66,6 +67,8 @@ struct OnboardingDraft
   String weatherApiKey;
   String ipGeoApiKey;
   bool enableWebPassword = false;
+  bool useManualTimezone = false;
+  String manualTimezone;
   bool useFixedTimezone = false;
   int8_t fixedOffset = 0;
 };
@@ -685,9 +688,14 @@ html[data-web-theme='dark'] .hardware-status-section .self-test-item.tone-bad{
   line-height:1.6;
 }
 .portal-surface{margin-top:18px}
-.portal-form{display:block}
+.portal-form{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(340px, 1fr));
+  gap:18px;
+  align-items:start;
+}
 .portal-form fieldset{
-  margin:0 0 18px;
+  margin:0;
   padding:20px;
   border:1px solid var(--line);
   border-radius:22px;
@@ -739,10 +747,19 @@ html[data-web-theme='dark'] .hardware-status-section .self-test-item.tone-bad{
   border:1px solid var(--tile-border);
   background:var(--tile-bg);
   box-shadow:var(--tile-shadow);
+  display:flex;
+  flex-direction:column;
+  gap:10px;
 }
 .portal-field-card > div,
 .portal-field-card > fieldset{
-  height:100%;
+  min-height:0;
+}
+.portal-field-help{
+  margin:0;
+  color:var(--muted);
+  font-size:0.86rem;
+  line-height:1.5;
 }
 .portal-form fieldset > div{margin-top:14px}
 .portal-form fieldset > div:first-of-type{margin-top:8px}
@@ -813,6 +830,7 @@ html[data-web-theme='dark'] .hardware-status-section .self-test-item.tone-bad{
   line-height:1.5;
 }
 .portal-actions{
+  grid-column:1 / -1;
   display:flex;
   flex-wrap:wrap;
   gap:14px;
@@ -1087,6 +1105,7 @@ button{
     overflow:visible;
     white-space:normal;
   }
+  .portal-form{grid-template-columns:minmax(0, 1fr)}
   .portal-actions{justify-content:flex-start}
   .portal-button-row{width:100%;margin-left:0}
   .portal-button-row .button-link{width:100%}
@@ -1121,9 +1140,14 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
   line-height:1.6;
 }
 .portal-surface{margin-top:18px}
-.portal-form{display:block}
+.portal-form{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(340px, 1fr));
+  gap:18px;
+  align-items:start;
+}
 .portal-form fieldset{
-  margin:0 0 18px;
+  margin:0;
   padding:20px;
   border:1px solid var(--line);
   border-radius:22px;
@@ -1175,10 +1199,19 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
   border:1px solid var(--tile-border);
   background:var(--tile-bg);
   box-shadow:var(--tile-shadow);
+  display:flex;
+  flex-direction:column;
+  gap:10px;
 }
 .portal-field-card > div,
 .portal-field-card > fieldset{
-  height:100%;
+  min-height:0;
+}
+.portal-field-help{
+  margin:0;
+  color:var(--muted);
+  font-size:0.86rem;
+  line-height:1.5;
 }
 .portal-form fieldset > div{margin-top:14px}
 .portal-form fieldset > div:first-of-type{margin-top:8px}
@@ -1249,6 +1282,7 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
   line-height:1.5;
 }
 .portal-actions{
+  grid-column:1 / -1;
   display:flex;
   flex-wrap:wrap;
   gap:14px;
@@ -1352,6 +1386,7 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
 }
 @media (max-width: 720px){
   .portal-mode-bar{align-items:flex-start}
+  .portal-form{grid-template-columns:minmax(0, 1fr)}
   .portal-actions{justify-content:flex-start}
   .portal-button-row{width:100%;margin-left:0}
   .portal-button-row .button-link{width:100%}
@@ -1437,7 +1472,7 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
   var runtimeMeta = document.getElementById('portal-runtime');
   var modeButtons = Array.prototype.slice.call(document.querySelectorAll('[data-config-view]'));
   var modeStorageKey = 'ledsmartclock-config-mode';
-  var basicVisibleGroups = ['iwcSys', 'Display', 'Clock', 'CurrentTemp', 'CurrentWeather', 'DailyWeather', 'Alerts', 'Status'];
+  var basicVisibleGroups = ['iwcSys', 'Display', 'Clock', 'CurrentTemp', 'CurrentWeather', 'DailyWeather', 'AirQuality', 'WeatherAlerts', 'Status'];
   var basicVisibleFields = {
     iwcThingName: true,
     iwcWifiSsid: true,
@@ -1456,6 +1491,8 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
     twelve_clock: true,
     enable_fixed_tz: true,
     fixed_offset: true,
+    enable_manual_timezone: true,
+    manual_timezone: true,
     show_current_temp: true,
     current_temp_interval: true,
     current_temp_duration: true,
@@ -1474,17 +1511,84 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
     green_status: true
   };
   var sectionNotes = {
-    iwcSys: 'Network identity, credentials, web theme, API keys, and maintenance controls.',
+    iwcSys: 'Network identity, credentials, web theme, and API keys.',
     Display: 'Brightness, scrolling, colors, and date messaging.',
-    Clock: 'Clock format, timezone fallback, and clock-face appearance.',
+    Clock: 'Clock format, timezone selection, NTP source, and clock-face appearance.',
     CurrentTemp: 'Temperature display cadence and custom coloring.',
     CurrentWeather: 'Current-conditions scrolling and presentation timing.',
-    DailyWeather: 'Forecast and AQI summaries used during the daily rotation.',
-    Alerts: 'Alert polling cadence and interrupt timing.',
+    DailyWeather: 'Daily forecast summary text, color, and rotation timing.',
+    AirQuality: 'AQI display settings from OpenWeather air-pollution data.',
+    WeatherAlerts: 'Weather.gov alert polling and display timing.',
     Status: 'Corner status pixels that summarize system, AQI, and UV state. Turn any of the three corners off entirely here.',
     Sun: 'Sunrise and sunset messages based on local solar events.',
     Location: 'Coordinate overrides and location-change messaging.',
-    GPS: 'Receiver-specific troubleshooting controls such as UART baud and hardware recovery.'
+    GPS: 'Receiver-specific settings for the attached GPS module.',
+    Maintenance: 'Debug and recovery controls. These are kept at the bottom because they are only needed during troubleshooting.'
+  };
+  var fieldHelp = {
+    iwcThingName: 'Sets the clock hostname and network display name used by the portal.',
+    iwcWifiSsid: 'Wi-Fi network the clock joins after setup mode.',
+    iwcWifiPassword: 'Password for the Wi-Fi network. Leave unchanged unless your network credentials changed.',
+    web_password_protection: 'When enabled, the dashboard, diagnostics, console, firmware page, backup tools, and config portal require the clock web password.',
+    web_dark_mode: 'Switches the browser interface between the normal light theme and dark theme.',
+    iwcApPassword: 'Password used for the setup access point and for the protected web interface when password protection is enabled. Use at least 8 characters.',
+    iwcApTimeout: 'How long setup AP mode stays open before the clock retries normal Wi-Fi mode.',
+    ipgeoapi: 'ipgeolocation.io key used for automatic timezone names and coarse location fallback when GPS or saved location data is unavailable.',
+    weatherapi: 'OpenWeather key used for current weather, daily forecast, AQI, reverse geocoding, and API-provided sun events.',
+    imperial: 'Uses Fahrenheit and mph. Turn off for Celsius and metric wind units.',
+    brightness_level: 'User brightness bias from 1 to 10. Ambient-light sensing still adjusts around this preference.',
+    text_scroll_speed: 'Controls ticker speed for scrolling messages. Lower values scroll slower; higher values scroll faster.',
+    system_color: 'Default color for system messages such as location changes and setup notices.',
+    enable_alertflash: 'Flashes the matrix before selected notifications so important scrolls are easier to notice.',
+    show_date: 'Adds the current date to the normal display rotation.',
+    date_color: 'Text color used when the date scrolls across the matrix.',
+    date_interval: 'Hours between scheduled date displays.',
+    twelve_clock: 'Shows standard 12-hour time when enabled, or 24-hour time when disabled.',
+    enable_fixed_tz: 'Uses a fixed GMT offset with no DST rules. Leave off when using automatic or manual named timezones.',
+    fixed_offset: 'Whole-hour GMT offset used only when fixed-offset mode is enabled.',
+    enable_manual_timezone: 'Uses the timezone name below before IP geolocation, saved timezone data, GPS longitude, or fixed fallback logic.',
+    manual_timezone: 'IANA timezone name with DST rules, such as America/New_York, America/Detroit, Europe/London, or UTC.',
+    ntp_server: 'Preferred NTP hostname. DHCP-provided NTP can still take priority unless the override below is enabled.',
+    override_dhcp_ntp: 'Forces the preferred NTP server even when your router advertises its own NTP server.',
+    colonflicker: 'Blinks the colon between clock digits.',
+    flickerfast: 'Uses a faster colon blink when colon blinking is enabled.',
+    enable_clock_color: 'Locks the clock digits to the custom color instead of automatic clock coloring.',
+    clock_color: 'Color used for clock digits when custom clock color is enabled.',
+    show_current_temp: 'Adds the standalone current-temperature block to the display rotation.',
+    enable_temp_color: 'Locks temperature text to the custom color instead of automatic temperature coloring.',
+    temp_color: 'Color used for temperature text when custom temperature color is enabled.',
+    current_temp_interval: 'Minutes between current-temperature displays.',
+    current_temp_duration: 'Seconds the temperature block stays on screen when it appears.',
+    show_current_weather: 'Adds current weather conditions to the display rotation.',
+    current_weather_color: 'Text color for current weather messages.',
+    current_weather_interval: 'Hours between current weather displays.',
+    current_weather_short_text: 'Uses a condensed current-weather message instead of the longer detailed text.',
+    show_daily_weather: 'Adds the daily forecast summary to the display rotation.',
+    daily_weather_color: 'Text color for daily forecast messages.',
+    daily_weather_interval: 'Hours between daily forecast displays.',
+    daily_weather_short_text: 'Uses a condensed daily forecast message instead of the longer detailed text.',
+    show_aqi: 'Adds air-quality details to the display rotation.',
+    enable_aqi_color: 'Uses the custom AQI color below instead of coloring AQI text by severity bucket.',
+    aqi_color: 'Text color used for AQI messages when custom AQI color is enabled.',
+    aqi_interval: 'Minutes between air-quality displays.',
+    alert_interval: 'Minutes between weather-alert display opportunities while alerts are active.',
+    enable_system_status: 'Shows the bottom-left system/time status pixel.',
+    enable_aqi_status: 'Shows the top-left AQI status pixel.',
+    enable_uvi_status: 'Shows the top-right UV index status pixel.',
+    green_status: 'Uses green for good/low status instead of leaving those status pixels off.',
+    show_sunrise: 'Shows the sunrise message when the active local sunrise time is crossed.',
+    sunrise_color: 'Text color for the sunrise message.',
+    sunrise_message: 'Custom text shown at sunrise.',
+    show_sunset: 'Shows the sunset message when the active local sunset time is crossed.',
+    sunset_color: 'Text color for the sunset message.',
+    sunset_message: 'Custom text shown at sunset.',
+    show_loc_change: 'Shows a matrix message when the resolved city or location source changes significantly.',
+    enable_fixed_loc: 'Uses the custom latitude and longitude below instead of GPS, reverse geocoding, or IP-based coordinates.',
+    fixedLat: 'Latitude used for weather, AQI, alerts, and sun-event fallback when fixed location is enabled.',
+    fixedLon: 'Longitude used for weather, AQI, alerts, and sun-event fallback when fixed location is enabled.',
+    gps_baud: 'UART speed for the GPS receiver. Choose the rate your module is configured for; common NEO-6M modules use 9600.',
+    serialdebug: 'Mirrors verbose runtime diagnostics to USB serial and the web console buffer.',
+    resetdefaults: 'On save, wipes all saved configuration and returns the device to setup AP mode.'
   };
 
   if (runtimeMeta && runtimeMeta.dataset.ntpServer) {
@@ -1500,7 +1604,23 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
       card.dataset.configId = control.id;
     }
     card.appendChild(node);
+    addFieldHelp(card);
     return card;
+  }
+
+  function addFieldHelp(card) {
+    if (!card || card.dataset.helpAdded === 'true') {
+      return;
+    }
+    var helpText = fieldHelp[card.dataset.configId || ''];
+    if (!helpText) {
+      return;
+    }
+    var help = document.createElement('p');
+    help.className = 'portal-field-help';
+    help.textContent = helpText;
+    card.appendChild(help);
+    card.dataset.helpAdded = 'true';
   }
 
   function wrapFieldsetRows(fieldset) {
@@ -1575,18 +1695,10 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
       },
       {
         title: 'Cloud Services',
-        description: 'External APIs used for automatic timezone, weather, forecast, AQI, and reverse geocoding.',
+        description: 'External APIs used for automatic timezone, weather, daily forecast, AQI, and reverse geocoding.',
         nodes: [
           findWrapper('ipgeoapi'),
           findWrapper('weatherapi')
-        ]
-      },
-      {
-        title: 'Maintenance',
-        description: 'Troubleshooting and recovery controls that are only needed occasionally.',
-        nodes: [
-          findWrapper('serialdebug'),
-          findWrapper('resetdefaults')
         ]
       }
     ];
@@ -2544,6 +2656,38 @@ void appendLogoutAction(String &html)
   html += F("'>Log Out</a>");
 }
 
+/** Appends one top-level navigation button and marks the current page as primary. */
+void appendTopNavButton(String &html, const char *href, const char *label, const char *activePath, bool danger = false)
+{
+  html += F("<a class='button-link ");
+  if (danger)
+    html += F("danger");
+  else if (activePath != nullptr && strcmp(activePath, href) == 0)
+    html += F("primary");
+  else
+    html += F("secondary");
+  html += F("' href='");
+  html += href;
+  html += F("'>");
+  html += label;
+  html += F("</a>");
+}
+
+/** Appends the same top-level navigation actions to every normal web page. */
+void appendTopNavigation(String &html, const char *activePath)
+{
+  html += F("<div class='action-row'>");
+  appendTopNavButton(html, "/", "Dashboard", activePath);
+  appendTopNavButton(html, "/config", "Configuration", activePath);
+  appendTopNavButton(html, kConfigImportPath, "Backup & Restore", activePath);
+  appendTopNavButton(html, kDiagnosticsPath, "Diagnostics", activePath);
+  appendTopNavButton(html, kConsolePath, "Console", activePath);
+  appendTopNavButton(html, kFirmwareUpdatePath, "Firmware Update", activePath);
+  appendLogoutAction(html);
+  appendTopNavButton(html, kRebootPath, "Reboot", activePath, true);
+  html += F("</div>");
+}
+
 /** Percent-encodes a path so it can safely round-trip through query parameters. */
 String urlEncode(const String &value)
 {
@@ -3354,6 +3498,8 @@ OnboardingDraft currentOnboardingDraft()
   draft.adminPassword = draft.enableWebPassword ? String(iotWebConf.getApPasswordParameter()->valueBuffer) : String();
   draft.weatherApiKey = String(weatherapi.value());
   draft.ipGeoApiKey = String(ipgeoapi.value());
+  draft.useManualTimezone = enable_manual_timezone.isChecked();
+  draft.manualTimezone = String(manual_timezone.value());
   draft.useFixedTimezone = enable_fixed_tz.isChecked();
   draft.fixedOffset = fixed_offset.value();
   return draft;
@@ -3426,7 +3572,11 @@ OnboardingDraft submittedOnboardingDraft()
   draft.adminPassword = server.hasArg("admin_password") ? server.arg("admin_password") : draft.adminPassword;
   draft.weatherApiKey = server.hasArg("weather_api") ? server.arg("weather_api") : draft.weatherApiKey;
   draft.ipGeoApiKey = server.hasArg("ipgeo_api") ? server.arg("ipgeo_api") : draft.ipGeoApiKey;
-  draft.useFixedTimezone = server.hasArg("timezone_mode") && server.arg("timezone_mode") == "fixed";
+  const String timezoneMode = server.hasArg("timezone_mode") ? server.arg("timezone_mode") : String();
+  draft.useManualTimezone = timezoneMode == "manual";
+  draft.useFixedTimezone = timezoneMode == "fixed";
+  draft.manualTimezone = server.hasArg("manual_timezone") ? server.arg("manual_timezone") : draft.manualTimezone;
+  draft.manualTimezone.trim();
   if (server.hasArg("fixed_offset"))
     draft.fixedOffset = static_cast<int8_t>(constrain(server.arg("fixed_offset").toInt(), -12, 12));
   return draft;
@@ -3570,10 +3720,12 @@ void appendOnboardingSelfTest(String &html)
                      isApiValid(weatherapi.value()) ? String(F("Configured")) : String(F("Missing OpenWeather key")),
                      isApiValid(weatherapi.value()) ? String(F("Weather, forecast, reverse geocode, and AQI requests can run once networking is ready."))
                                                     : String(F("Add the OpenWeather key in onboarding or advanced configuration.")));
-  appendSelfTestItem(html, "Timezone", enable_fixed_tz.isChecked() ? "tone-good" : "tone-neutral",
-                     enable_fixed_tz.isChecked() ? String(F("Fixed GMT offset")) : String(F("Automatic timezone")),
-                     enable_fixed_tz.isChecked() ? String(F("Using GMT ")) + String(fixed_offset.value())
-                                                 : String(F("The clock will use geolocation or saved timezone data for DST-aware local time.")));
+  appendSelfTestItem(html, "Timezone",
+                     enable_manual_timezone.isChecked() ? "tone-good" : (enable_fixed_tz.isChecked() ? "tone-good" : "tone-neutral"),
+                     enable_manual_timezone.isChecked() ? String(F("Manual timezone")) : (enable_fixed_tz.isChecked() ? String(F("Fixed GMT offset")) : String(F("Automatic timezone"))),
+                     enable_manual_timezone.isChecked() ? String(F("Using ")) + manual_timezone.value()
+                                                        : (enable_fixed_tz.isChecked() ? String(F("Using GMT ")) + String(fixed_offset.value())
+                                                                                       : String(F("The clock will use geolocation or saved timezone data for DST-aware local time."))));
   html += F("</div><div class='action-row'>");
   html += F("<a class='button-link secondary' href='");
   html += kOnboardingMatrixTestPath;
@@ -3681,13 +3833,19 @@ void appendSetupPage(String &html, const OnboardingDraft *draft, const char *not
                   "Optional but recommended for automatic timezone and coarse IP location fallback.", "autocomplete='off'");
   html += F("</div><p class='field-help'>If you are restoring from a backup, these keys are usually already included there.</p><div class='onboarding-actions'><button type='button' class='button-link ghost' data-prev-step='1'>Back</button><span class='spacer'></span><button type='button' data-next-step='3'>Next: Timezone</button></div></section>");
 
-  html += F("<section class='onboarding-step' data-step='3'><div class='card-header'><h2>Step 3: Timezone Behavior</h2><p class='card-subtitle'>Choose whether the clock should determine local time automatically or always use a fixed GMT offset.</p></div><div class='field-grid'><div class='form-field'><label for='timezone_mode'>Timezone Mode</label><select id='timezone_mode' name='timezone_mode'><option value='auto'");
-  if (!effectiveDraft.useFixedTimezone)
+  html += F("<section class='onboarding-step' data-step='3'><div class='card-header'><h2>Step 3: Timezone Behavior</h2><p class='card-subtitle'>Choose automatic location-based time, a DST-aware timezone name, or a fixed GMT offset.</p></div><div class='field-grid'><div class='form-field'><label for='timezone_mode'>Timezone Mode</label><select id='timezone_mode' name='timezone_mode'><option value='auto'");
+  if (!effectiveDraft.useManualTimezone && !effectiveDraft.useFixedTimezone)
     html += F(" selected");
-  html += F(">Automatic (recommended)</option><option value='fixed'");
+  html += F(">Automatic (recommended)</option><option value='manual'");
+  if (effectiveDraft.useManualTimezone)
+    html += F(" selected");
+  html += F(">Manual timezone name</option><option value='fixed'");
   if (effectiveDraft.useFixedTimezone)
     html += F(" selected");
-  html += F(">Fixed GMT offset</option></select><p class='field-help'>Automatic mode allows DST-aware timezone handling when the clock knows its location or saved timezone.</p></div>");
+  html += F(">Fixed GMT offset</option></select><p class='field-help'>Manual timezone names use DST rules. Fixed GMT offsets do not.</p></div>");
+  appendFormField(html, "Manual Timezone Name", "manual_timezone", effectiveDraft.manualTimezone, "text",
+                  "Only used when Manual timezone name is selected. Examples: America/New_York, America/Detroit, Europe/London, UTC.",
+                  "autocomplete='off' placeholder='America/New_York'");
   appendFormField(html, "Fixed GMT Offset", "fixed_offset", String(effectiveDraft.fixedOffset), "number",
                   "Only used when Fixed GMT offset mode is selected above.", "min='-12' max='12' step='1'");
   html += F("</div><div class='onboarding-actions'><button type='button' class='button-link ghost' data-prev-step='2'>Back</button><span class='spacer'></span><button type='button' data-next-step='4'>Next: Review</button></div></section>");
@@ -3712,10 +3870,12 @@ void appendSetupPage(String &html, const OnboardingDraft *draft, const char *not
                      effectiveDraft.weatherApiKey.length() > 0 ? String(F("Configured")) : String(F("Optional but missing")),
                      effectiveDraft.weatherApiKey.length() > 0 ? String(F("Weather, AQI, and reverse-geocode services can run."))
                                                                : String(F("You can still finish setup now and add the key later.")));
-  appendSelfTestItem(html, "Timezone", effectiveDraft.useFixedTimezone ? "tone-good" : "tone-neutral",
-                     effectiveDraft.useFixedTimezone ? String(F("Fixed GMT offset")) : String(F("Automatic")),
-                     effectiveDraft.useFixedTimezone ? String(F("The clock will always use GMT ")) + String(effectiveDraft.fixedOffset)
-                                                     : String(F("The clock will use automatic location and timezone data when available.")));
+  appendSelfTestItem(html, "Timezone",
+                     effectiveDraft.useManualTimezone ? "tone-good" : (effectiveDraft.useFixedTimezone ? "tone-good" : "tone-neutral"),
+                     effectiveDraft.useManualTimezone ? String(F("Manual timezone")) : (effectiveDraft.useFixedTimezone ? String(F("Fixed GMT offset")) : String(F("Automatic"))),
+                     effectiveDraft.useManualTimezone ? String(F("The clock will use ")) + effectiveDraft.manualTimezone + F(" with DST rules.")
+                                                      : (effectiveDraft.useFixedTimezone ? String(F("The clock will always use GMT ")) + String(effectiveDraft.fixedOffset)
+                                                                                         : String(F("The clock will use automatic location and timezone data when available."))));
   html += F("</div><div class='onboarding-actions'><button type='button' class='button-link ghost' data-prev-step='3'>Back</button><span class='spacer'></span><button type='submit'>Save Onboarding</button></div></section></form></section>");
 
   if (showSelfTest)
@@ -3735,17 +3895,9 @@ void appendFirmwareUpdatePage(String &html, const char *noticeToneClass, const S
   html += F("<div class='shell'><header class='hero'>");
   html += F("<p class='eyebrow'>LED Smart Clock Maintenance</p>");
   html += F("<h1>Firmware Update</h1>");
-  html += F("<p class='lede'>Upload the compiled <code>update.bin</code> OTA image to install a new release over the network without opening the enclosure. For a first-time install on a blank ESP32, use the web installer and release <code>firmware.bin</code> image instead.</p><div class='action-row'>");
-  html += F("<a class='button-link primary' href='/'>Dashboard</a>");
-  html += F("<a class='button-link secondary' href='/config'>Configuration</a>");
-  html += F("<a class='button-link secondary' href='");
-  html += kDiagnosticsPath;
-  html += F("'>Diagnostics</a>");
-  html += F("<a class='button-link secondary' href='");
-  html += kConsolePath;
-  html += F("'>Console</a>");
-  appendLogoutAction(html);
-  html += F("</div><div class='portal-chip-row'>");
+  html += F("<p class='lede'>Upload the compiled <code>update.bin</code> OTA image to install a new release over the network without opening the enclosure. For a first-time install on a blank ESP32, use the web installer and release <code>firmware.bin</code> image instead.</p>");
+  appendTopNavigation(html, kFirmwareUpdatePath);
+  html += F("<div class='portal-chip-row'>");
   appendStatusChip(html, "Firmware", htmlEscape(String(VERSION_SEMVER)));
   appendStatusChip(html, "Address", activeAddressLabel());
   appendStatusChip(html, "Update Path", firmwareUpdatePathLabel());
@@ -3809,17 +3961,9 @@ void appendConfigBackupPage(String &html, const char *noticeToneClass, const Str
   html += F("<div class='shell'><header class='hero'>");
   html += F("<p class='eyebrow'>LED Smart Clock Maintenance</p>");
   html += F("<h1>Backup & Restore</h1>");
-  html += F("<p class='lede'>Download a JSON snapshot of the current configuration or restore one from another clock or older firmware. Import matches fields by key so older backups can seed newer builds without depending on storage order.</p><div class='action-row'>");
-  html += F("<a class='button-link primary' href='/config'>Configuration</a>");
-  html += F("<a class='button-link secondary' href='/'>Dashboard</a>");
-  html += F("<a class='button-link secondary' href='");
-  html += kDiagnosticsPath;
-  html += F("'>Diagnostics</a>");
-  html += F("<a class='button-link secondary' href='");
-  html += kConsolePath;
-  html += F("'>Console</a>");
-  appendLogoutAction(html);
-  html += F("</div><div class='portal-chip-row'>");
+  html += F("<p class='lede'>Download a JSON snapshot of the current configuration or restore one from another clock or older firmware. Import matches fields by key so older backups can seed newer builds without depending on storage order.</p>");
+  appendTopNavigation(html, kConfigImportPath);
+  html += F("<div class='portal-chip-row'>");
   appendStatusChip(html, "Firmware", htmlEscape(String(VERSION_SEMVER)));
   appendStatusChip(html, "Address", activeAddressLabel());
   html += F("</div><div class='metric-grid'>");
@@ -3868,16 +4012,9 @@ void appendConsolePage(String &html, const String &accessToken)
   html += F("<div class='shell'><header class='hero'>");
   html += F("<p class='eyebrow'>LED Smart Clock Console</p>");
   html += F("<h1>Live Debug Console</h1>");
-  html += F("<p class='lede'>This page shows the in-memory runtime console buffer, keeps polling for new output, and can send the same one-character debug commands that normally go over USB serial.</p><div class='action-row'>");
-  html += F("<a class='button-link primary' href='");
-  html += kDiagnosticsPath;
-  html += F("'>Diagnostics</a>");
-  html += F("<a class='button-link secondary' href='/'>Dashboard</a>");
-  html += F("<a class='button-link secondary' href='");
-  html += kConsoleDownloadPath;
-  html += F("'>Download Log</a>");
-  html += F("<a class='button-link secondary' href='#console-commands'>Commands</a>");
-  html += F("</div><div class='portal-chip-row'>");
+  html += F("<p class='lede'>This page shows the in-memory runtime console buffer, keeps polling for new output, and can send the same one-character debug commands that normally go over USB serial.</p>");
+  appendTopNavigation(html, kConsolePath);
+  html += F("<div class='portal-chip-row'>");
   appendStatusChip(html, "Address", activeAddressLabel());
   appendStatusChip(html, "Cursor", htmlEscape(String(cursor)));
   appendStatusChip(html, "Serial Debug", serialdebug.isChecked() ? F("Enabled") : F("Disabled"));
@@ -3962,17 +4099,9 @@ void appendDiagnosticsContent(String &html)
   html += F("<header class='hero'>");
   html += F("<p class='eyebrow'>LED Smart Clock Diagnostics</p>");
   html += F("<h1>Service Health</h1>");
-  html += F("<p class='lede'>This page tracks the live state of Wi-Fi, timekeeping, GPS, weather, alerts, air quality, and location services so field debugging does not require a serial console for every issue.</p><div class='action-row'>");
-  html += F("<a class='button-link primary' href='/'>Dashboard</a>");
-  html += F("<a class='button-link secondary' href='/config'>Configuration</a>");
-  html += F("<a class='button-link secondary' href='");
-  html += kConsolePath;
-  html += F("'>Console</a>");
-  html += F("<a class='button-link secondary' href='");
-  html += kFirmwareUpdatePath;
-  html += F("'>Firmware Update</a>");
-  appendLogoutAction(html);
-  html += F("</div><div class='portal-chip-row'>");
+  html += F("<p class='lede'>This page tracks the live state of Wi-Fi, timekeeping, GPS, weather, alerts, air quality, and location services so field debugging does not require a serial console for every issue.</p>");
+  appendTopNavigation(html, kDiagnosticsPath);
+  html += F("<div class='portal-chip-row'>");
   appendStatusChip(html, "State", htmlEscape(currentConnectionStateLabel()));
   appendStatusChip(html, "Address", activeAddressLabel());
   appendStatusChip(html, "Location", currentLocationLabel());
@@ -4095,7 +4224,7 @@ void appendDiagnosticsContent(String &html)
   html += F("</div>");
   appendCardEnd(html);
 
-  appendTonedCardStart(html, "Alerts", "weather.gov polling health and the currently selected watch or warning text.", diagnosticTone(DiagnosticService::Alerts));
+  appendTonedCardStart(html, "Weather Alerts", "weather.gov polling health and the currently selected watch or warning text.", diagnosticTone(DiagnosticService::Alerts));
   appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::Alerts));
   appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::Alerts));
   appendKeyValueRow(html, "Alert Active", alerts.active ? F("Yes") : F("No"));
@@ -4171,18 +4300,9 @@ void appendStatusContent(String &html)
   html += F("<h1>Runtime Dashboard</h1>");
   html += F("<p class='lede'>");
   html += htmlEscape(getSystemZonedDateTimeString());
-  html += F("</p><div class='action-row'>");
-  html += F("<a class='button-link primary' href='/config'>Configuration</a>");
-  html += F("<a class='button-link secondary' href='");
-  html += kDiagnosticsPath;
-  html += F("'>Diagnostics</a>");
-  html += F("<a class='button-link secondary' href='");
-  html += kConsolePath;
-  html += F("'>Console</a>");
-  html += F("<a class='button-link secondary' href='/firmware'>Firmware Update</a>");
-  appendLogoutAction(html);
-  html += F("<a class='button-link danger' href='/reboot'>Reboot</a>");
-  html += F("</div><div class='portal-chip-row'>");
+  html += F("</p>");
+  appendTopNavigation(html, "/");
+  html += F("<div class='portal-chip-row'>");
   appendStatusChip(html, "State", htmlEscape(currentConnectionStateLabel()));
   appendStatusChip(html, "Address", activeAddressLabel());
   appendStatusChip(html, "Location", currentLocationLabel());
@@ -4286,7 +4406,7 @@ void appendStatusContent(String &html)
   appendKeyValueRow(html, "Next AQI Scroll", formatUntil(now, lastshown.aqi, static_cast<uint32_t>(aqi_interval.value()) * 60U));
   appendCardEnd(html);
 
-  appendCardStart(html, "Alerts", "Weather.gov alert state and recent delivery timing.");
+  appendCardStart(html, "Weather Alerts", "Weather.gov alert state and recent delivery timing.");
   appendKeyValueRow(html, "Alert Active", alerts.active ? F("Yes") : F("No"));
   appendKeyValueRow(html, "Tracked Alerts", htmlEscape(String(alerts.count)));
   appendKeyValueRow(html, "Warning Count", htmlEscape(String(alerts.warningCount)));
@@ -4360,31 +4480,15 @@ public:
     html += F("</p><h1>Configuration</h1><p class='portal-lede'>Tune Wi-Fi, display behavior, weather services, alerts, and location rules from a single cohesive control surface.</p><div class='portal-chip-row'>");
   appendStatusChip(html, "State", htmlEscape(currentConnectionStateLabel()));
   appendStatusChip(html, "Address", activeAddressLabel());
-    html += F("</div><div class='action-row'>");
-    html += F("<a class='button-link primary' href='/'>Dashboard</a>");
-    html += F("<a class='button-link secondary' href='");
-    html += kDiagnosticsPath;
-    html += F("'>Diagnostics</a>");
-  html += F("<a class='button-link secondary' href='");
-  html += kConsolePath;
-  html += F("'>Console</a>");
-    appendLogoutAction(html);
-    html += F("</div></header><div id='portal-runtime' hidden data-ntp-server='");
+  html += F("</div>");
+  appendTopNavigation(html, "/config");
+  html += F("</header><div id='portal-runtime' hidden data-ntp-server='");
   html += ntpServerLabel();
   html += F("' data-ntp-source='");
   html += ntpServerSourceLabel();
   html += F("'></div><div class='portal-mode-bar'><p class='portal-mode-help'>Basic mode highlights the settings most people change often. Advanced mode reveals every saved option and maintenance control.</p><div class='portal-mode-toggle'><button type='button' data-config-view='basic'>Basic Mode</button><button type='button' data-config-view='advanced'>Advanced Mode</button></div></div><nav class='portal-nav' id='portal-nav-links'></nav>");
-    html += F("<section class='portal-card portal-intro'><div class='card-header'><h2>Backup & Restore</h2><p class='card-subtitle'>Download a JSON backup before firmware work or major changes, then use restore to seed this clock from a previous setup. Import matches fields by stable IDs, so older backups can still restore the settings this firmware recognizes.</p></div><div class='action-row'>");
-    html += F("<a class='button-link primary' href='");
-    html += kConfigExportPath;
-    html += F("'>Download Config Backup</a><a class='button-link secondary' href='");
-    html += kConfigImportPath;
-    html += F("'>Restore From Backup</a></div><p>The backup file includes Wi-Fi credentials, portal passwords, and API keys, so store it privately.</p></section>");
     if (server.hasArg("defaults_reset"))
       appendNotice(html, "notice-good", F("Configuration settings were reset to factory defaults. Wi-Fi SSID, Wi-Fi password, and API keys were kept. Setup AP mode was not requested."));
-    html += F("<section class='portal-card portal-intro'><div class='card-header'><h2>Factory Defaults</h2><p class='card-subtitle'>Reset saved settings while keeping the current Wi-Fi SSID, Wi-Fi password, OpenWeather key, and IPGeolocation key. This does not wipe the saved config or enter setup AP mode.</p></div><form action='");
-    html += kConfigResetDefaultsPath;
-    html += F("' method='post' onsubmit=\"return confirm('Reset settings to factory defaults while keeping Wi-Fi and API keys, without entering setup AP mode?');\"><input type='hidden' name='confirm' value='factory-defaults'><div class='action-row'><button class='button-link danger' type='submit'>Reset to Defaults</button></div></form></section>");
     html += F("<section class='portal-card portal-intro'><div class='card-header'><h2>Before You Save</h2><p class='card-subtitle'>Changes are written to flash when you apply them. Wi-Fi or API edits can briefly interrupt online services while the clock reconnects and refreshes its derived state.</p></div>");
     html += F("<p>Use the status page at <a href='/'>/</a> to confirm runtime basics, and the <a href='");
     html += kDiagnosticsPath;
@@ -4410,7 +4514,12 @@ public:
 
   String getUpdate() override
   {
-    return F("<div class='portal-meta'><a class='portal-inline-action' href='{u}'>Open Firmware Update</a><p class='portal-meta-note'>Web updates flash the compiled <code>update.bin</code> image into the OTA application slot. First-time installs use the release <code>firmware.bin</code> image through the web installer or USB. If a release changes the partition table or bootloader, those images still need to be flashed over USB.</p></div>");
+    String html;
+    html.reserve(520);
+    html += F("<div class='portal-meta'><form action='");
+    html += kConfigResetDefaultsPath;
+    html += F("' method='post' onsubmit=\"return confirm('Reset settings to factory defaults while keeping Wi-Fi and API keys, without entering setup AP mode?');\"><input type='hidden' name='confirm' value='factory-defaults'><button class='portal-inline-action danger' type='submit'>Reset to Defaults</button></form><p class='portal-meta-note'>Returns saved settings to factory defaults while keeping Wi-Fi credentials, the web password, OpenWeather, and IPGeolocation keys. The clock stays on the network and does not enter setup AP mode.</p></div>");
+    return html;
   }
 
   String getConfigVer() override { return String(); }
@@ -4447,11 +4556,17 @@ bool applyOnboardingDraft(const OnboardingDraft &draft, String &error)
     error = F("Set a web password with at least 8 characters before enabling password protection.");
     return false;
   }
+  if (draft.useManualTimezone && !isSupportedTimezoneName(draft.manualTimezone.c_str()))
+  {
+    error = F("Enter a supported timezone name such as America/New_York before using manual timezone mode.");
+    return false;
+  }
 
   if (!copyParameterValue(*iotWebConf.getWifiSsidParameter(), wifiSsid, "Wi-Fi SSID", error) ||
       !copyParameterValue(*iotWebConf.getWifiPasswordParameter(), draft.wifiPassword, "Wi-Fi password", error) ||
       !copyParameterValue(weatherapi, draft.weatherApiKey, "OpenWeather API key", error) ||
-      !copyParameterValue(ipgeoapi, draft.ipGeoApiKey, "IPGeolocation API key", error))
+      !copyParameterValue(ipgeoapi, draft.ipGeoApiKey, "IPGeolocation API key", error) ||
+      !copyParameterValue(manual_timezone, draft.manualTimezone, "Manual timezone name", error))
   {
     return false;
   }
@@ -4463,6 +4578,7 @@ bool applyOnboardingDraft(const OnboardingDraft &draft, String &error)
   {
     return false;
   }
+  enable_manual_timezone.value() = draft.useManualTimezone;
   enable_fixed_tz.value() = draft.useFixedTimezone;
   fixed_offset.value() = draft.fixedOffset;
   normalizeLoadedConfigValues();
@@ -5243,7 +5359,7 @@ void registerWebRoutes()
   server.on(kFirmwareUpdatePath, HTTP_GET, handleFirmwareUpdate);
   server.on(kFirmwareUpdatePath, HTTP_POST, handleFirmwareUpdatePost, handleFirmwareUpload);
   server.on("/config", handleConfigPage);
-  server.on("/reboot", handleReboot);
+  server.on(kRebootPath, handleReboot);
   server.onNotFound([]()
                     {
                       if (isProtectedPortalState() && !hasValidWebSession())
@@ -5299,7 +5415,7 @@ void handleReboot()
   html += F("<p class='eyebrow'>LED Smart Clock</p>");
   html += F("<h1>Restarting Device</h1>");
   html += F("<p class='lede'>The clock accepted the reboot request. Give it a few seconds to restart, reconnect to Wi-Fi, and resume the dashboard.</p>");
-  html += F("<div class='action-row'><a class='button-link ghost' href='/'>Return to Dashboard</a></div>");
+  appendTopNavigation(html, kRebootPath);
   html += F("</header><section class='notice notice-warn'>If the page stops responding during the restart window, refresh the dashboard after the device finishes booting.</section></div></body></html>");
   server.send(200, "text/html; charset=UTF-8", html);
 }
@@ -5321,6 +5437,34 @@ bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
       if (!keepExistingPassword && !hasConfiguredWebPassword(submittedPassword.c_str()))
       {
         iotWebConf.getApPasswordParameter()->errorMessage = "Set a web password with at least 8 characters before enabling password protection.";
+        return false;
+      }
+    }
+
+    const bool manualTimezoneEnabled = webRequestWrapper->hasArg("enable_manual_timezone");
+    if (manualTimezoneEnabled)
+    {
+      String submittedTimezone = webRequestWrapper->hasArg("manual_timezone")
+                                     ? webRequestWrapper->arg("manual_timezone")
+                                     : String();
+      submittedTimezone.trim();
+      if (!isSupportedTimezoneName(submittedTimezone.c_str()))
+      {
+        manual_timezone.errorMessage = "Enter a supported IANA timezone name, for example America/New_York.";
+        return false;
+      }
+    }
+
+    if (webRequestWrapper->hasArg("gps_baud"))
+    {
+      String submittedBaud = webRequestWrapper->arg("gps_baud");
+      submittedBaud.trim();
+      char *end = nullptr;
+      const uint32_t parsedBaud = static_cast<uint32_t>(strtoul(submittedBaud.c_str(), &end, 10));
+      if (submittedBaud.length() == 0 || end == submittedBaud.c_str() || (end != nullptr && *end != '\0') ||
+          !isSupportedGpsBaud(parsedBaud))
+      {
+        gps_baud.errorMessage = "Choose a supported GPS baud rate.";
         return false;
       }
     }

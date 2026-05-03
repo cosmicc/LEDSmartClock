@@ -188,6 +188,14 @@ bool hasTimezoneName(const char *zoneName)
   return zoneName != nullptr && zoneName[0] != '\0';
 }
 
+bool isSupportedTimezoneNameImpl(const char *zoneName)
+{
+  if (!hasTimezoneName(zoneName))
+    return false;
+
+  return !timezoneManager.createForZoneName(zoneName).isError();
+}
+
 /** Formats an AceTime offset into a signed +HH:MM string. */
 String formatTimeOffset(const TimeOffset &offset)
 {
@@ -469,9 +477,13 @@ bool isSupportedGpsBaudValue(uint32_t baud)
 {
   switch (baud)
   {
+    case 1200UL:
+    case 2400UL:
     case 4800UL:
     case 9600UL:
+    case 14400UL:
     case 19200UL:
+    case 28800UL:
     case 38400UL:
     case 57600UL:
     case 115200UL:
@@ -593,6 +605,11 @@ RuntimeHealthSnapshot captureRuntimeHealthSnapshot()
   return snapshot;
 }
 } // namespace
+
+bool isSupportedTimezoneName(const char *zoneName)
+{
+  return isSupportedTimezoneNameImpl(zoneName);
+}
 
 void flushDeferredConfigurationState()
 {
@@ -876,8 +893,8 @@ bool isSupportedGpsBaud(uint32_t baud)
 
 uint32_t gpsConfiguredBaud()
 {
-  const int32_t configured = gps_baud.value();
-  return isSupportedGpsBaudValue(static_cast<uint32_t>(configured)) ? static_cast<uint32_t>(configured) : DEFAULT_GPS_BAUD;
+  const uint32_t configured = static_cast<uint32_t>(strtoul(gps_baud.value(), nullptr, 10));
+  return isSupportedGpsBaudValue(configured) ? configured : DEFAULT_GPS_BAUD;
 }
 
 uint32_t gpsActiveBaud()
@@ -1403,6 +1420,7 @@ void processTimezone()
   int16_t savedoffset = savedtzoffset.value();
   int16_t fixedoffset = fixed_offset.value();
   const char *savedZoneName = savedtimezone.value();
+  const char *manualZoneName = manual_timezone.value();
   const acetime_t nowEpoch = systemClock.getNow();
 
   auto applyTimezoneOffset = [&](int16_t offset, const char *source) {
@@ -1442,25 +1460,49 @@ void processTimezone()
     persistConfigurationState("timezone update");
   };
 
-  if (enable_fixed_tz.isChecked())
+  bool timezoneApplied = false;
+
+  if (enable_manual_timezone.isChecked() && applyNamedTimezone(manualZoneName, "manual"))
+  {
+    persistTimezoneSelection(getTimezoneOffsetAt(nowEpoch).toMinutes() / 60, nullptr, "Manual");
+    setTimezoneSource("Manual timezone name");
+    noteDiagnosticPending(DiagnosticService::Timekeeping, true, "Manual timezone",
+                          String(F("Using DST-aware manual timezone ")) + manualZoneName +
+                              F(" with current offset GMT") + getSystemTimezoneOffsetString() + F("."));
+    timezoneApplied = true;
+  }
+  else if (enable_manual_timezone.isChecked() && hasTimezoneName(manualZoneName))
+  {
+    noteDiagnosticFailure(DiagnosticService::Timekeeping, true, "Invalid timezone",
+                          String(F("Manual timezone name is not available in the firmware timezone database: ")) +
+                              manualZoneName);
+  }
+
+  if (!timezoneApplied && enable_fixed_tz.isChecked())
   {
     applyTimezoneOffset(fixedoffset, "fixed");
     persistTimezoneSelection(fixedoffset, nullptr, "Fixed");
     setTimezoneSource("Fixed override");
     noteDiagnosticPending(DiagnosticService::Timekeeping, true, "Fixed timezone",
                           String(F("Using a manual GMT offset of ")) + getSystemTimezoneOffsetString() + F(" with no automatic DST rules."));
+    timezoneApplied = true;
   }
-  else if (applyNamedTimezone(ipgeo.timezone, "ip geolocation"))
+
+  if (!timezoneApplied && applyNamedTimezone(ipgeo.timezone, "ip geolocation"))
   {
     persistTimezoneSelection(getTimezoneOffsetAt(nowEpoch).toMinutes() / 60, ipgeo.timezone, "IP Geo");
     setTimezoneSource("IP geolocation name");
+    timezoneApplied = true;
   }
-  else if (applyNamedTimezone(savedZoneName, "saved"))
+
+  if (!timezoneApplied && applyNamedTimezone(savedZoneName, "saved"))
   {
     persistTimezoneSelection(getTimezoneOffsetAt(nowEpoch).toMinutes() / 60, savedZoneName, "Saved");
     setTimezoneSource("Saved timezone name");
+    timezoneApplied = true;
   }
-  else
+
+  if (!timezoneApplied)
   {
     int16_t gpsDerivedOffset = 0;
     if (gps.fix && hasValidCoordinatePair(gps.lat, gps.lon) &&
@@ -1948,6 +1990,9 @@ String getSystemTimezoneOffsetString()
 
 String getSystemTimezoneName()
 {
+  if (enable_manual_timezone.isChecked() && isSupportedTimezoneName(manual_timezone.value()))
+    return String(manual_timezone.value());
+
   if (enable_fixed_tz.isChecked())
     return String(F("Fixed GMT")) + getSystemTimezoneOffsetString();
 
@@ -2037,7 +2082,6 @@ uint16_t calcaqi(double c, double i_hi, double i_low, double c_hi, double c_low)
 // TODO: table titles
 // TODO: remove tables if show is disabled
 // TODO: weather daily in web
-// TODO: timezone name in web
 // TODO: full/new moon scroll and status icon?
 // TODO: make very severe weather alerts (like tornado warnings) scroll continuosly
 // FIXME: location change is adding scrolltext and color, needs to be only for changes

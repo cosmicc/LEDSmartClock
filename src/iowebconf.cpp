@@ -6,6 +6,20 @@ namespace
 // distinct marker for IotWebConf's internal blob so old positional layouts are
 // no longer recognized as valid application config during boot.
 constexpr char kIotWebConfStorageMarker[] = "NVS2";
+constexpr size_t kGpsBaudOptionLength = 7;
+constexpr size_t kGpsBaudOptionCount = 10;
+constexpr char kDefaultGpsBaudValue[] = "9600";
+constexpr char kGpsBaudOptionValues[] =
+  "1200\0\0\0"
+  "2400\0\0\0"
+  "4800\0\0\0"
+  "9600\0\0\0"
+  "14400\0\0"
+  "19200\0\0"
+  "28800\0\0"
+  "38400\0\0"
+  "57600\0\0"
+  "115200\0";
 }
 
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, kIotWebConfStorageMarker);
@@ -59,15 +73,19 @@ iotwebconf::ParameterGroup group2 = iotwebconf::ParameterGroup("Clock", "Clock &
 iotwebconf::CheckboxTParameter twelve_clock =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("twelve_clock").label("Use 12 Hour Clock").defaultValue(true).build();
 iotwebconf::CheckboxTParameter enable_fixed_tz =
-  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_fixed_tz").label("Use custom timezone (Disables auto timezone)").defaultValue(false).build();
+  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_fixed_tz").label("Use fixed GMT offset (no DST)").defaultValue(false).build();
 iotwebconf::IntTParameter<int8_t> fixed_offset =
   iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("fixed_offset").label("Custom fixed GMT offset hours (no DST)").defaultValue(0).min(-12).max(12).step(1).placeholder("-12...12").build();
+iotwebconf::CheckboxTParameter enable_manual_timezone =
+  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_manual_timezone").label("Use manual timezone name (DST-aware)").defaultValue(false).build();
+iotwebconf::TextTParameter<64> manual_timezone =
+  iotwebconf::Builder<iotwebconf::TextTParameter<64>>("manual_timezone").label("Manual timezone name").defaultValue("").build();
 iotwebconf::TextTParameter<64> ntp_server =
   iotwebconf::Builder<iotwebconf::TextTParameter<64>>("ntp_server").label("Preferred NTP server").defaultValue(DEFAULT_NTP_SERVER).build();
 iotwebconf::CheckboxTParameter override_dhcp_ntp =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("override_dhcp_ntp").label("Always use preferred NTP server (ignore DHCP NTP)").defaultValue(false).build();
-iotwebconf::IntTParameter<int32_t> gps_baud =
-  iotwebconf::Builder<iotwebconf::IntTParameter<int32_t>>("gps_baud").label("GPS UART baud rate").defaultValue(DEFAULT_GPS_BAUD).min(4800).max(115200).step(1).placeholder("4800, 9600, 19200, 38400, 57600, 115200").build();
+iotwebconf::SelectTParameter<7> gps_baud =
+  iotwebconf::Builder<iotwebconf::SelectTParameter<7>>("gps_baud").label("GPS UART baud rate").defaultValue(kDefaultGpsBaudValue).optionValues(kGpsBaudOptionValues).optionNames(kGpsBaudOptionValues).optionCount(kGpsBaudOptionCount).nameLength(kGpsBaudOptionLength).build();
 iotwebconf::CheckboxTParameter colonflicker =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("colonflicker").label("Enable clock colon flash").defaultValue(true).build();
 iotwebconf::CheckboxTParameter flickerfast =
@@ -99,7 +117,7 @@ iotwebconf::IntTParameter<int8_t> current_weather_interval =
 iotwebconf::CheckboxTParameter current_weather_short_text =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("current_weather_short_text").label("Use short current weather text").defaultValue(true).build();
 
-iotwebconf::ParameterGroup group5 = iotwebconf::ParameterGroup("DailyWeather", "Forecast & Air Quality");
+iotwebconf::ParameterGroup group5 = iotwebconf::ParameterGroup("DailyWeather", "Daily Weather");
 iotwebconf::CheckboxTParameter show_daily_weather =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_daily_weather").label("Display daily weather conditions").defaultValue(true).build();
 iotwebconf::ColorTParameter daily_weather_color =
@@ -109,7 +127,7 @@ iotwebconf::IntTParameter<int8_t> daily_weather_interval =
 iotwebconf::CheckboxTParameter daily_weather_short_text =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("daily_weather_short_text").label("Use short daily forecast text").defaultValue(true).build();
 
-iotwebconf::ParameterGroup group6 = iotwebconf::ParameterGroup("Alerts", "Alerts");
+iotwebconf::ParameterGroup group6 = iotwebconf::ParameterGroup("AirQuality", "Air Quality");
 iotwebconf::CheckboxTParameter show_aqi =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_aqi").label("Display air quality details").defaultValue(true).build();
 iotwebconf::ColorTParameter aqi_color =
@@ -118,6 +136,8 @@ iotwebconf::CheckboxTParameter enable_aqi_color =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_aqi_color").label("Use custom air quality color (Disables auto color)").defaultValue(false).build();
 iotwebconf::IntTParameter<int8_t> aqi_interval =
   iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("aqi_interval").label("Air quality display interval in minutes (1-120)").defaultValue(DEF_AQI_INTERVAL).min(1).max(120).step(1).placeholder("1(min)..120(min)").build();
+
+iotwebconf::ParameterGroup group11 = iotwebconf::ParameterGroup("WeatherAlerts", "Weather Alerts");
 iotwebconf::IntTParameter<int8_t> alert_interval =
   iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("alert_interval").label("Weather alert display interval in minutes (1-60)").defaultValue(DEF_ALERT_INTERVAL).min(1).max(60).step(1).placeholder("1(min)..60(min)").build();
 
@@ -155,6 +175,7 @@ iotwebconf::TextTParameter<12> fixedLat =
 iotwebconf::TextTParameter<12> fixedLon =
   iotwebconf::Builder<iotwebconf::TextTParameter<12>>("fixedLon").label("Custom longitude").defaultValue("").build();
 iotwebconf::ParameterGroup group10 = iotwebconf::ParameterGroup("GPS", "GPS & Receiver");
+iotwebconf::ParameterGroup group12 = iotwebconf::ParameterGroup("Maintenance", "Maintenance");
 
 bool hasConfiguredWebPassword(const char *password)
 {
@@ -180,9 +201,13 @@ bool isSupportedGpsBaudValue(int32_t baud)
 {
   switch (baud)
   {
+    case 1200:
+    case 2400:
     case 4800:
     case 9600:
+    case 14400:
     case 19200:
+    case 28800:
     case 38400:
     case 57600:
     case 115200:
@@ -195,10 +220,8 @@ bool isSupportedGpsBaudValue(int32_t baud)
 /** Registers top-level system parameters managed directly by IotWebConf. */
 void addSystemParameters()
 {
-  iotWebConf.addSystemParameter(&serialdebug);
   iotWebConf.addSystemParameter(&web_password_protection);
   iotWebConf.addSystemParameter(&web_dark_mode);
-  iotWebConf.addSystemParameter(&resetdefaults);
   iotWebConf.addSystemParameter(&ipgeoapi);
   iotWebConf.addSystemParameter(&weatherapi);
 }
@@ -231,15 +254,21 @@ void normalizeLoadedConfigValuesImpl()
   corrected |= normalizeIntParameter(alert_interval, static_cast<int8_t>(1), static_cast<int8_t>(60), static_cast<int8_t>(DEF_ALERT_INTERVAL));
   corrected |= normalizeIntParameter(fixed_offset, static_cast<int8_t>(-12), static_cast<int8_t>(12), static_cast<int8_t>(0));
   corrected |= normalizeIntParameter(savedtzoffset, static_cast<int8_t>(-12), static_cast<int8_t>(12), static_cast<int8_t>(0));
-  if (!isSupportedGpsBaudValue(gps_baud.value()))
+  if (!isSupportedGpsBaudValue(static_cast<int32_t>(strtol(gps_baud.value(), nullptr, 10))))
   {
-    gps_baud.value() = DEFAULT_GPS_BAUD;
+    strlcpy(gps_baud.value(), kDefaultGpsBaudValue, sizeof(gps_baud.value()));
     corrected = true;
   }
   if (ntp_server.value()[0] == '\0')
   {
     strlcpy(ntp_server.value(), DEFAULT_NTP_SERVER, 64);
     corrected = true;
+  }
+  if (enable_manual_timezone.isChecked() && !isSupportedTimezoneName(manual_timezone.value()))
+  {
+    enable_manual_timezone.value() = false;
+    corrected = true;
+    ESP_LOGW(TAG, "Disabled manual timezone because the saved timezone name is blank or unsupported: %s", manual_timezone.value());
   }
   if (web_password_protection.isChecked() &&
       !hasConfiguredWebPassword(iotWebConf.getApPasswordParameter()->valueBuffer))
@@ -275,6 +304,8 @@ void populateParameterGroups()
   group2.addItem(&twelve_clock);
   group2.addItem(&enable_fixed_tz);
   group2.addItem(&fixed_offset);
+  group2.addItem(&enable_manual_timezone);
+  group2.addItem(&manual_timezone);
   group2.addItem(&ntp_server);
   group2.addItem(&override_dhcp_ntp);
   group2.addItem(&colonflicker);
@@ -297,12 +328,13 @@ void populateParameterGroups()
   group5.addItem(&daily_weather_color);
   group5.addItem(&daily_weather_interval);
   group5.addItem(&daily_weather_short_text);
-  group5.addItem(&show_aqi);
-  group5.addItem(&enable_aqi_color);
-  group5.addItem(&aqi_color);
-  group5.addItem(&aqi_interval);
 
-  group6.addItem(&alert_interval);
+  group6.addItem(&show_aqi);
+  group6.addItem(&enable_aqi_color);
+  group6.addItem(&aqi_color);
+  group6.addItem(&aqi_interval);
+
+  group11.addItem(&alert_interval);
 
   group7.addItem(&enable_system_status);
   group7.addItem(&enable_aqi_status);
@@ -322,6 +354,9 @@ void populateParameterGroups()
   group9.addItem(&fixedLon);
 
   group10.addItem(&gps_baud);
+
+  group12.addItem(&serialdebug);
+  group12.addItem(&resetdefaults);
 }
 
 /** Registers the custom configuration groups on the portal in display order. */
@@ -333,10 +368,12 @@ void addParameterGroups()
   iotWebConf.addParameterGroup(&group4);
   iotWebConf.addParameterGroup(&group5);
   iotWebConf.addParameterGroup(&group6);
+  iotWebConf.addParameterGroup(&group11);
   iotWebConf.addParameterGroup(&group7);
   iotWebConf.addParameterGroup(&group8);
   iotWebConf.addParameterGroup(&group9);
   iotWebConf.addParameterGroup(&group10);
+  iotWebConf.addParameterGroup(&group12);
 }
 } // namespace
 

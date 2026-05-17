@@ -2,6 +2,24 @@
 
 LED Smart Clock is an ESP32-based wall clock for an 8x32 WS2812B LED matrix. It combines a large time display with GPS, NTP, RTC fallback, weather, air quality, weather alerts, automatic brightness, a web dashboard, diagnostics, live console logging, configuration backup and restore, and browser-based firmware updates.
 
+<p align="center">
+  <a href="https://www.pcbway.com/" target="_blank">
+    <img src="docs/pcbway-logo.png" alt="PCBWay logo" width="420">
+  </a>
+</p>
+
+## Project Supporter: PCBWay
+
+This project is supported by [PCBWay](https://www.pcbway.com/), a PCB fabrication and prototype manufacturing service that helps bring hardware projects from breadboard or hand-wired prototypes into cleaner, more repeatable physical designs.
+
+PCBWay helps this LED Smart Clock project and many other maker, hobby electronics, student, and open-source hardware projects by making custom PCB manufacturing more accessible. Their cost-effective prototyping services make it practical to test a board, revise the design, and continue improving the hardware without needing a large production run.
+
+For a project like this, a professionally manufactured PCB helps reduce loose wiring, makes the build easier to assemble, improves long-term reliability, and gives other builders a clearer hardware reference to follow. That support benefits this project directly, but it also helps the broader community by making shared designs easier to reproduce, modify, and improve.
+
+PCBWay offers a useful path for electronics projects that need more than a one-off breadboard build, including prototype PCBs, small-batch board runs, and manufacturing services that can support projects as they move from early testing toward a finished design.
+
+Thank you to PCBWay for supporting this project and for helping makers, developers, and open-source hardware projects turn working ideas into real hardware.
+
 ## Highlights
 
 - Large 12-hour or 24-hour clock display on an 8x32 LED matrix.
@@ -32,6 +50,7 @@ The current project assumes:
 - TSL2561 light sensor
 - NEO-6M GPS module
 - 5V power supply sized for the LED matrix
+- Custom PCB revision manufactured with support from PCBWay for cleaner module interconnects and power wiring
 
 The PlatformIO target is currently `esp32dev`. Earlier project notes referenced ESP32-S3 hardware, so confirm your actual board target and pinout before flashing.
 
@@ -97,6 +116,7 @@ If serial debug output is enabled in configuration, the same runtime diagnostics
 - `scripts/` - build metadata, release package, and artifact helpers
 - `web-installer/` - hosted/local browser installer template
 - `docs/feature-changelog.md` - completed work and planned feature changes for the v2 firmware line
+- `docs/pcbway-logo.png` - PCBWay sponsor logo used in this README
 - `INSTALL.md` - end-user install, first boot, update, and release artifact notes
 
 ## Known Caveats
@@ -119,6 +139,7 @@ Bug reports, hardware notes, cleanup patches, and UI improvements are welcome. I
 ## Credits
 
 - Project author: Ian Perry ([cosmicc](https://github.com/cosmicc))
+- Project supporter and PCB manufacturing partner: [PCBWay](https://www.pcbway.com/)
 - AceTime, AceTimeClock, AceRoutine: Brian Parks ([bxparks](https://github.com/bxparks))
 - IotWebConf: Balazs Kelemen ([prampec](https://github.com/prampec))
 - FastLED NeoMatrix: Marc Merlin ([marcmerlin](https://github.com/marcmerlin))

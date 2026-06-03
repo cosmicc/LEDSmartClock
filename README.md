@@ -1,10 +1,16 @@
 # LED Smart Clock
 
+<p align="center">
+  <img src="docs/images/led-smart-clock-time.jpg" alt="LED Smart Clock showing the current time" width="900">
+  <br>
+  <img src="docs/images/led-smart-clock-weather.jpg" alt="LED Smart Clock showing the current temperature and weather icon" width="900">
+</p>
+
 LED Smart Clock is an ESP32-based wall clock for an 8x32 WS2812B LED matrix. It combines a large time display with GPS, NTP, RTC fallback, weather, air quality, weather alerts, automatic brightness, a web dashboard, diagnostics, live console logging, configuration backup and restore, and browser-based firmware updates.
 
 <p align="center">
   <a href="https://www.pcbway.com/" target="_blank">
-    <img src="docs/pcbway-logo.png" alt="PCBWay logo" width="420">
+    <img src="pcbway-logo.png" alt="PCBWay logo" width="420">
   </a>
 </p>
 
@@ -139,7 +145,8 @@ If serial debug output is enabled in configuration, the same runtime diagnostics
 - `scripts/` - build metadata, release package, and artifact helpers
 - `web-installer/` - hosted/local browser installer template
 - `docs/feature-changelog.md` - completed work and planned feature changes for the v2 firmware line
-- `docs/pcbway-logo.png` - PCBWay sponsor logo used in this README
+- `docs/images/` - project photos used in this README
+- `pcbway-logo.png` - PCBWay sponsor logo used in this README
 - `INSTALL.md` - end-user install, first boot, update, and release artifact notes
 
 ## Known Caveats

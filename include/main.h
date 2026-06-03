@@ -204,6 +204,8 @@ void print_runtimeHealth();
 void logRuntimeHealth();
 /** Executes one single-character debug command from serial or the web console. */
 bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediateRestart = true);
+/** Executes a full debug command line, including commands that need arguments. */
+bool handleDebugCommandLine(const String &commandLine, ConsoleMirrorPrint &out, bool allowImmediateRestart = true);
 /** Returns true when the supplied GPS UART baud is one of the supported receiver rates. */
 bool isSupportedGpsBaud(uint32_t baud);
 /** Returns the configured GPS UART baud, falling back to the default when invalid. */

@@ -27,6 +27,11 @@ struct GPSData
   uint32_t lastNoDataLogMillis = 0;
   uint32_t lastProgressLogMillis = 0;
   uint32_t activeBaud = DEFAULT_GPS_BAUD;
+  uint32_t detectedBaud = 0;
+  uint32_t uartStartMillis = 0;
+  uint32_t passedChecksumAtUartStart = 0;
+  uint32_t failedChecksumAtUartStart = 0;
+  uint32_t lastInvalidTrafficLogMillis = 0;
   uint32_t parserResetCount = 0;
   uint32_t uartRestartCount = 0;
   uint32_t rawBytesCaptured = 0;

@@ -11,11 +11,30 @@
 #include "coroutines.h"
 #include <cctype>
 #include <cmath>
+#include <cstring>
 
 namespace
 {
 constexpr uint8_t kTimezoneCacheSize = 2;
 constexpr uint32_t kAutoPersistCooldownMs = 10UL * 60UL * 1000UL;
+constexpr uint32_t kGpsBaudProbeRates[] = {
+    1200UL,
+    2400UL,
+    4800UL,
+    9600UL,
+    14400UL,
+    19200UL,
+    28800UL,
+    38400UL,
+    57600UL,
+    115200UL,
+};
+constexpr size_t kGpsBaudProbeCount = sizeof(kGpsBaudProbeRates) / sizeof(kGpsBaudProbeRates[0]);
+constexpr uint32_t kGpsBaudDetectWindowMs = 1400UL;
+constexpr uint32_t kGpsBaudVerifyWindowMs = 1800UL;
+constexpr size_t kGpsConsoleCommandMaxLength = 192U;
+constexpr size_t kGpsConsoleHexMaxBytes = 96U;
+constexpr char kGpsBaudProbeList[] = "1200, 2400, 4800, 9600, 14400, 19200, 28800, 38400, 57600, 115200";
 ExtendedZoneProcessorCache<kTimezoneCacheSize> timezoneProcessorCache;
 ExtendedZoneManager timezoneManager(
     zonedbx::kZoneAndLinkRegistrySize,
@@ -25,6 +44,326 @@ ExtendedZoneManager timezoneManager(
 uint32_t lastAutoPersistMillis = 0;
 bool pendingAutoPersist = false;
 char pendingAutoPersistReason[48]{};
+
+struct GpsBaudProbeResult
+{
+  bool sawBytes = false;
+  bool validNmea = false;
+  uint32_t bytesRead = 0;
+  char sentenceId[6]{};
+};
+
+class NmeaChecksumProbe
+{
+public:
+  bool feed(uint8_t byte)
+  {
+    if (byte == '$')
+    {
+      resetSentence();
+      active = true;
+      return false;
+    }
+
+    if (!active)
+      return false;
+
+    if (readingChecksum)
+      return feedChecksum(byte);
+
+    if (byte == '*')
+    {
+      readingChecksum = true;
+      checksumDigits = 0;
+      receivedChecksum = 0;
+      return false;
+    }
+
+    if (byte == '\r' || byte == '\n' || byte < 0x20U || byte > 0x7EU)
+    {
+      resetSentence();
+      return false;
+    }
+
+    checksum ^= byte;
+    if (payloadLength < 5U)
+      sentenceId[payloadLength] = static_cast<char>(byte);
+    ++payloadLength;
+    return false;
+  }
+
+  const char *lastSentenceId() const
+  {
+    return lastValidSentenceId;
+  }
+
+private:
+  bool active = false;
+  bool readingChecksum = false;
+  uint8_t checksum = 0;
+  uint8_t receivedChecksum = 0;
+  uint8_t checksumDigits = 0;
+  size_t payloadLength = 0;
+  char sentenceId[6]{};
+  char lastValidSentenceId[6]{};
+
+  void resetSentence()
+  {
+    active = false;
+    readingChecksum = false;
+    checksum = 0;
+    receivedChecksum = 0;
+    checksumDigits = 0;
+    payloadLength = 0;
+    memset(sentenceId, 0, sizeof(sentenceId));
+  }
+
+  static int hexValue(uint8_t byte)
+  {
+    if (byte >= '0' && byte <= '9')
+      return byte - '0';
+    if (byte >= 'A' && byte <= 'F')
+      return byte - 'A' + 10;
+    if (byte >= 'a' && byte <= 'f')
+      return byte - 'a' + 10;
+    return -1;
+  }
+
+  bool feedChecksum(uint8_t byte)
+  {
+    const int value = hexValue(byte);
+    if (value < 0)
+    {
+      resetSentence();
+      return false;
+    }
+
+    receivedChecksum = static_cast<uint8_t>((receivedChecksum << 4U) | static_cast<uint8_t>(value));
+    ++checksumDigits;
+    if (checksumDigits < 2U)
+      return false;
+
+    const bool valid = payloadLength >= 5U && receivedChecksum == checksum;
+    if (valid)
+      memcpy(lastValidSentenceId, sentenceId, sizeof(lastValidSentenceId));
+    resetSentence();
+    return valid;
+  }
+};
+
+bool addGpsBaudProbeCandidate(uint32_t *candidates, size_t &candidateCount, size_t capacity, uint32_t baud)
+{
+  if (!isSupportedGpsBaud(baud))
+    return false;
+
+  for (size_t index = 0; index < candidateCount; ++index)
+  {
+    if (candidates[index] == baud)
+      return false;
+  }
+
+  if (candidateCount >= capacity)
+    return false;
+
+  candidates[candidateCount++] = baud;
+  return true;
+}
+
+GpsBaudProbeResult probeGpsReceiverBaud(uint32_t baud, uint32_t windowMs)
+{
+  GpsBaudProbeResult result;
+  NmeaChecksumProbe nmeaProbe;
+  Serial1.flush();
+  Serial1.end();
+  delay(20);
+  Serial1.begin(baud, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+
+  const uint32_t started = millis();
+  while (static_cast<uint32_t>(millis() - started) < windowMs)
+  {
+    while (Serial1.available() > 0)
+    {
+      const int incoming = Serial1.read();
+      if (incoming < 0)
+        continue;
+
+      result.sawBytes = true;
+      ++result.bytesRead;
+      if (nmeaProbe.feed(static_cast<uint8_t>(incoming)))
+      {
+        result.validNmea = true;
+        strlcpy(result.sentenceId, nmeaProbe.lastSentenceId(), sizeof(result.sentenceId));
+        return result;
+      }
+    }
+    delay(5);
+    yield();
+  }
+
+  return result;
+}
+
+void writeLittleEndian32(uint8_t *buffer, size_t offset, uint32_t value)
+{
+  buffer[offset] = static_cast<uint8_t>(value & 0xFFUL);
+  buffer[offset + 1U] = static_cast<uint8_t>((value >> 8UL) & 0xFFUL);
+  buffer[offset + 2U] = static_cast<uint8_t>((value >> 16UL) & 0xFFUL);
+  buffer[offset + 3U] = static_cast<uint8_t>((value >> 24UL) & 0xFFUL);
+}
+
+void writeUbloxChecksum(uint8_t *message, size_t messageLength)
+{
+  uint8_t checkA = 0;
+  uint8_t checkB = 0;
+  for (size_t index = 2; index < messageLength - 2U; ++index)
+  {
+    checkA = static_cast<uint8_t>(checkA + message[index]);
+    checkB = static_cast<uint8_t>(checkB + checkA);
+  }
+
+  message[messageLength - 2U] = checkA;
+  message[messageLength - 1U] = checkB;
+}
+
+/** Writes the u-blox NEO-6M UART configuration packet for the requested target baud. */
+void sendNeo6mBaudCommand(uint32_t targetBaud)
+{
+  constexpr size_t kUbloxPayloadLength = 20;
+  constexpr size_t kUbloxMessageLength = 6 + kUbloxPayloadLength + 2;
+  uint8_t message[kUbloxMessageLength] = {
+      0xB5, 0x62,       // UBX sync chars
+      0x06, 0x00,       // CFG-PRT
+      static_cast<uint8_t>(kUbloxPayloadLength), 0x00,
+      0x01,             // UART1
+      0x00,             // reserved
+      0x00, 0x00,       // txReady disabled
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00,
+      0x03, 0x00,       // accept UBX + NMEA input
+      0x02, 0x00,       // output NMEA sentences for TinyGPSPlus
+      0x00, 0x00,       // flags
+      0x00, 0x00,       // reserved
+      0x00, 0x00,       // checksum filled below
+  };
+
+  writeLittleEndian32(message, 10, 0x000008D0UL); // UART mode: 8 data bits, no parity, 1 stop bit.
+  writeLittleEndian32(message, 14, targetBaud);
+  writeUbloxChecksum(message, sizeof(message));
+  Serial1.write(message, sizeof(message));
+  Serial1.flush();
+}
+
+/** Blindly broadcasts the NEO-6M baud-change command at every supported rate. */
+void broadcastNeo6mBaudCommand(uint32_t targetBaud)
+{
+  for (size_t probeIndex = 0; probeIndex < kGpsBaudProbeCount; ++probeIndex)
+  {
+    const uint32_t probeBaud = kGpsBaudProbeRates[probeIndex];
+    Serial1.flush();
+    Serial1.end();
+    Serial1.begin(probeBaud, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+    ESP_LOGI(TAG, "GPS baud sync fallback %u/%u: sending NEO-6M CFG-PRT target %lu while UART is at %lu baud.",
+             static_cast<unsigned>(probeIndex + 1U), static_cast<unsigned>(kGpsBaudProbeCount),
+             static_cast<unsigned long>(targetBaud), static_cast<unsigned long>(probeBaud));
+    sendNeo6mBaudCommand(targetBaud);
+    delay(20);
+    yield();
+  }
+}
+
+/** Detects the receiver baud with valid NMEA, sends the NEO-6M change command, then returns Serial1 closed. */
+void syncNeo6mReceiverBaud(uint32_t targetBaud)
+{
+  if (!isSupportedGpsBaud(targetBaud))
+  {
+    ESP_LOGW(TAG, "GPS baud sync skipped because %lu is not a supported target baud.",
+             static_cast<unsigned long>(targetBaud));
+    return;
+  }
+
+  ESP_LOGI(TAG, "GPS baud sync starting. Target:%lu | ProbeRates:%s",
+           static_cast<unsigned long>(targetBaud), kGpsBaudProbeList);
+
+  uint32_t candidates[kGpsBaudProbeCount]{};
+  size_t candidateCount = 0;
+  addGpsBaudProbeCandidate(candidates, candidateCount, kGpsBaudProbeCount, targetBaud);
+  addGpsBaudProbeCandidate(candidates, candidateCount, kGpsBaudProbeCount, DEFAULT_GPS_BAUD);
+  for (size_t index = 0; index < kGpsBaudProbeCount; ++index)
+    addGpsBaudProbeCandidate(candidates, candidateCount, kGpsBaudProbeCount, kGpsBaudProbeRates[index]);
+
+  uint32_t detectedBaud = 0;
+  for (size_t candidateIndex = 0; candidateIndex < candidateCount; ++candidateIndex)
+  {
+    const uint32_t candidateBaud = candidates[candidateIndex];
+    ESP_LOGI(TAG, "GPS baud detection probe %u/%u: listening at %lu baud for up to %lu ms.",
+             static_cast<unsigned>(candidateIndex + 1U), static_cast<unsigned>(candidateCount),
+             static_cast<unsigned long>(candidateBaud), static_cast<unsigned long>(kGpsBaudDetectWindowMs));
+    const GpsBaudProbeResult probe = probeGpsReceiverBaud(candidateBaud, kGpsBaudDetectWindowMs);
+    ESP_LOGI(TAG, "GPS baud detection probe %u/%u result at %lu baud: bytes:%lu | validNmea:%s | sentence:%s",
+             static_cast<unsigned>(candidateIndex + 1U), static_cast<unsigned>(candidateCount),
+             static_cast<unsigned long>(candidateBaud), static_cast<unsigned long>(probe.bytesRead),
+             probe.validNmea ? "yes" : "no", probe.sentenceId[0] == '\0' ? "-" : probe.sentenceId);
+
+    if (probe.validNmea)
+    {
+      detectedBaud = candidateBaud;
+      break;
+    }
+
+    if (probe.sawBytes)
+    {
+      ESP_LOGW(TAG, "GPS bytes were present at %lu baud, but no valid NMEA checksum passed. Raw output may look corrupted at this rate.",
+               static_cast<unsigned long>(candidateBaud));
+    }
+  }
+
+  if (detectedBaud != 0)
+  {
+    ESP_LOGI(TAG, "GPS receiver baud detected as %lu. Configured target is %lu.",
+             static_cast<unsigned long>(detectedBaud), static_cast<unsigned long>(targetBaud));
+    if (detectedBaud != targetBaud)
+    {
+      ESP_LOGI(TAG, "Sending NEO-6M CFG-PRT baud change from detected %lu baud to target %lu baud.",
+               static_cast<unsigned long>(detectedBaud), static_cast<unsigned long>(targetBaud));
+      sendNeo6mBaudCommand(targetBaud);
+      delay(120);
+    }
+    else
+    {
+      ESP_LOGI(TAG, "GPS receiver already matches the configured baud. No NEO-6M baud change command needed.");
+      Serial1.flush();
+      Serial1.end();
+      delay(50);
+      ESP_LOGI(TAG, "GPS baud sync complete. Reopening GPS UART at configured target %lu baud.",
+               static_cast<unsigned long>(targetBaud));
+      return;
+    }
+
+    const GpsBaudProbeResult verify = probeGpsReceiverBaud(targetBaud, kGpsBaudVerifyWindowMs);
+    if (verify.validNmea)
+    {
+      ESP_LOGI(TAG, "GPS baud sync verified valid NMEA at target %lu baud. Sentence:%s | Bytes:%lu",
+               static_cast<unsigned long>(targetBaud), verify.sentenceId, static_cast<unsigned long>(verify.bytesRead));
+    }
+    else
+    {
+      ESP_LOGW(TAG, "GPS baud sync could not verify valid NMEA at target %lu baud after %lu ms. Bytes:%lu",
+               static_cast<unsigned long>(targetBaud), static_cast<unsigned long>(kGpsBaudVerifyWindowMs),
+               static_cast<unsigned long>(verify.bytesRead));
+    }
+  }
+  else
+  {
+    ESP_LOGW(TAG, "GPS baud detection did not find a valid NMEA sentence. Falling back to blind NEO-6M baud broadcast.");
+    broadcastNeo6mBaudCommand(targetBaud);
+  }
+
+  Serial1.flush();
+  Serial1.end();
+  delay(50);
+  ESP_LOGI(TAG, "GPS baud sync complete. Reopening GPS UART at configured target %lu baud.",
+           static_cast<unsigned long>(targetBaud));
+}
 
 /** Returns a readable label for the ESP reset cause captured at boot. */
 const char *espResetReasonLabel(esp_reset_reason_t reason)
@@ -537,16 +876,28 @@ void startGpsUart(const char *reason, bool logToSerial)
   const uint32_t baud = gpsConfiguredBaud();
   Serial1.flush();
   Serial1.end();
+  syncNeo6mReceiverBaud(baud);
   Serial1.begin(baud, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
   while (Serial1.available() > 0)
     Serial1.read();
 
+  clearGpsRawNmea();
   gps.activeBaud = baud;
+  gps.detectedBaud = 0;
+  gps.uartStartMillis = millis();
+  gps.passedChecksumAtUartStart = static_cast<uint32_t>(GPS.passedChecksum());
+  gps.failedChecksumAtUartStart = static_cast<uint32_t>(GPS.failedChecksum());
+  gps.moduleDetected = false;
+  gps.firstByteMillis = 0;
+  gps.lastByteMillis = 0;
+  gps.packetdelay = 0;
+  gps.lastNoDataLogMillis = 0;
+  gps.lastInvalidTrafficLogMillis = 0;
   ++gps.uartRestartCount;
 
   if (logToSerial)
   {
-    ESP_LOGI(TAG, "GPS UART started on RX:%d TX:%d at %lu baud (%s). Waiting for module traffic and satellite lock.",
+    ESP_LOGI(TAG, "GPS UART started on RX:%d TX:%d at %lu baud (%s). Detected baud reset until live traffic arrives.",
              GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(baud), reason == nullptr ? "startup" : reason);
   }
 }
@@ -724,7 +1075,7 @@ extern "C" void app_main()
   ESP_LOGD(TAG, "Initializing GPS Module...");
   startGpsUart("startup", false);
   gps.uartRestartCount = 0;
-  ESP_LOGI(TAG, "GPS UART started on RX:%d TX:%d at %lu baud. Waiting for module traffic and satellite lock.",
+  ESP_LOGI(TAG, "GPS UART started on RX:%d TX:%d at %lu baud. Detected baud will be logged after live module traffic arrives.",
                  GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(gpsActiveBaud()));
   ESP_LOGD(TAG, "Initializing coroutine scheduler...");
   sysClock.setName("sysclock");
@@ -963,8 +1314,27 @@ void processGpsSerialByte(int incomingByte)
   if (incomingByte < 0)
     return;
 
+  const uint32_t passedBefore = static_cast<uint32_t>(GPS.passedChecksum());
   appendGpsRawNmeaByte(static_cast<uint8_t>(incomingByte));
   GPS.encode(static_cast<char>(incomingByte));
+  const uint32_t passedAfter = static_cast<uint32_t>(GPS.passedChecksum());
+  if (passedAfter > passedBefore && passedAfter > gps.passedChecksumAtUartStart)
+  {
+    const uint32_t activeBaud = gpsActiveBaud();
+    if (gps.detectedBaud != activeBaud)
+    {
+      const uint32_t nowMillis = millis();
+      const uint32_t sinceUartStart = gps.uartStartMillis > 0 ? nowMillis - gps.uartStartMillis : nowMillis;
+      gps.detectedBaud = activeBaud;
+      ESP_LOGI(TAG, "GPS valid NMEA confirmed at %lu baud after %lu ms since UART start. Passed sentences since restart:%lu",
+               static_cast<unsigned long>(activeBaud),
+               static_cast<unsigned long>(sinceUartStart),
+               static_cast<unsigned long>(passedAfter - gps.passedChecksumAtUartStart));
+      noteDiagnosticPending(DiagnosticService::Gps, true, "Valid NMEA",
+                            String(F("GPS valid NMEA checksum confirmed at ")) + activeBaud +
+                                F(" baud. Waiting for satellites and a valid fix."));
+    }
+  }
 }
 
 // Regular Functions
@@ -1064,8 +1434,10 @@ void print_debugData(ConsoleMirrorPrint &out)
   out.printf("Clock - Status:%s | TimeSource:%s | CurrentTZ:%s | Timezone:%s | DstActive:%s | NtpReady:%s | NtpServer:%s(%s) | Skew:%d Seconds | LastAttempt:%s | NextAttempt:%s | NextNtp:%s | LastSync:%s\n", clock_status[systemClock.getSyncStatusCode()], runtimeState.timeSource, getSystemTimezoneOffsetString().c_str(), getSystemTimezoneName().c_str(), yesno[isSystemTimezoneDstActive()], yesno[gpsClock.ntpIsReady], runtimeState.ntpServer, runtimeState.ntpServerSource, systemClock.getClockSkew(), elapsedTime(systemClock.getSecondsSinceSyncAttempt()).c_str(), elapsedTime(systemClock.getSecondsToSyncAttempt()).c_str(), elapsedTime((now - runtimeState.lastNtpCheck) - NTPCHECKTIME * 60).c_str(), elapsedTime(now - systemClock.getLastSyncTime()).c_str());
   out.printf("Loc - SavedLat:%.5f | SavedLon:%.5f | CurrentLat:%.5f | CurrentLon:%.5f | LocValid:%s\n", atof(savedlat.value()), atof(savedlon.value()), current.lat, current.lon, yesno[isCoordsValid()]);
   out.printf("IPGeo - Complete:%s | Lat:%.5f | Lon:%.5f | TZoffset:%d | Timezone:%s | ValidApi:%s | Retries:%d | LastAttempt:%s | LastSuccess:%s\n", yesno[checkipgeo.complete], ipgeo.lat, ipgeo.lon, ipgeo.tzoffset, ipgeo.timezone, yesno[isApiValid(ipgeoapi.value())], checkipgeo.retries, elapsedTime(now - checkipgeo.lastattempt).c_str(), elapsedTime(now - checkipgeo.lastsuccess).c_str());
-  out.printf("GPS - Baud:%lu | Chars:%s | With-Fix:%s | Failed:%s | Passed:%s | Sats:%d | Hdop:%d | Elev:%d | Lat:%.5f | Lon:%.5f | FixAge:%s | LocAge:%s\n",
+  const String gpsDetectedBaud = gps.detectedBaud == 0 ? String(F("NotDetected")) : String(gps.detectedBaud);
+  out.printf("GPS - ActiveBaud:%lu | DetectedBaud:%s | Chars:%s | With-Fix:%s | Failed:%s | Passed:%s | Sats:%d | Hdop:%d | Elev:%d | Lat:%.5f | Lon:%.5f | FixAge:%s | LocAge:%s\n",
              static_cast<unsigned long>(gpsActiveBaud()),
+             gpsDetectedBaud.c_str(),
              formatLargeNumber(GPS.charsProcessed()).c_str(),
              formatLargeNumber(GPS.sentencesWithFix()).c_str(),
              formatLargeNumber(GPS.failedChecksum()).c_str(),
@@ -1142,10 +1514,11 @@ void print_gpsStatus(ConsoleMirrorPrint &out)
   String hdopAge = formatGpsDataAge(GPS.hdop.age());
   String lastResetAge = gps.lastResetMillis == 0 ? String(F("Never"))
                                                  : elapsedTime((nowMillis - gps.lastResetMillis + 999UL) / 1000UL);
+  String detectedBaud = gps.detectedBaud == 0 ? String(F("Not detected yet")) : String(gps.detectedBaud);
 
   out.printf("[^------------------------- GPS Status --------------------------^]\n");
-  out.printf("GPS UART - RX:%d | TX:%d | Baud:%lu | ModuleDetected:%s | LastByte:%s | SerialAvail:%d | Restarts:%lu\n",
-         GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(gpsActiveBaud()), yesno[gps.moduleDetected], lastByteAge.c_str(), Serial1.available(),
+  out.printf("GPS UART - RX:%d | TX:%d | ActiveBaud:%lu | DetectedBaud:%s | ModuleDetected:%s | LastByte:%s | SerialAvail:%d | Restarts:%lu\n",
+         GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(gpsActiveBaud()), detectedBaud.c_str(), yesno[gps.moduleDetected], lastByteAge.c_str(), Serial1.available(),
          static_cast<unsigned long>(gps.uartRestartCount));
   out.printf("GPS Parser - Chars:%s | Passed:%s | Failed:%s | SentencesWithFix:%s\n",
          formatLargeNumber(GPS.charsProcessed()).c_str(),
@@ -1251,6 +1624,183 @@ void print_runtimeHealth()
   print_runtimeHealth(out);
 }
 
+bool startsWithIgnoreCase(const String &value, const char *prefix)
+{
+  if (prefix == nullptr)
+    return false;
+
+  const size_t prefixLength = strlen(prefix);
+  if (value.length() < prefixLength)
+    return false;
+
+  for (size_t index = 0; index < prefixLength; ++index)
+  {
+    const char left = static_cast<char>(tolower(static_cast<unsigned char>(value[index])));
+    const char right = static_cast<char>(tolower(static_cast<unsigned char>(prefix[index])));
+    if (left != right)
+      return false;
+  }
+
+  return true;
+}
+
+int hexNibbleValue(char input)
+{
+  if (input >= '0' && input <= '9')
+    return input - '0';
+  if (input >= 'A' && input <= 'F')
+    return input - 'A' + 10;
+  if (input >= 'a' && input <= 'f')
+    return input - 'a' + 10;
+  return -1;
+}
+
+void printGpsUartCommandUsage(ConsoleMirrorPrint &out)
+{
+  out.printf("Usage:\n");
+  out.printf("  v <text>       Send ASCII text exactly as typed to GPS UART\n");
+  out.printf("  v line:<text>  Send ASCII text followed by CR/LF to GPS UART\n");
+  out.printf("  v hex:<bytes>  Send raw hex bytes, for example v hex:B5 62 06 09\n");
+}
+
+bool sendGpsUartHexPayload(const String &payload, ConsoleMirrorPrint &out)
+{
+  uint8_t bytes[kGpsConsoleHexMaxBytes]{};
+  size_t byteCount = 0;
+  int highNibble = -1;
+
+  for (size_t index = 0; index < payload.length(); ++index)
+  {
+    const char current = payload[index];
+    if (isspace(static_cast<unsigned char>(current)) || current == ',' || current == ':' || current == '-')
+      continue;
+
+    const int nibble = hexNibbleValue(current);
+    if (nibble < 0)
+    {
+      out.printf("GPS UART hex send failed: '%c' is not a hex digit.\n", current);
+      return true;
+    }
+
+    if (highNibble < 0)
+    {
+      highNibble = nibble;
+      continue;
+    }
+
+    if (byteCount >= kGpsConsoleHexMaxBytes)
+    {
+      out.printf("GPS UART hex send failed: maximum is %u bytes.\n", static_cast<unsigned>(kGpsConsoleHexMaxBytes));
+      return true;
+    }
+
+    bytes[byteCount++] = static_cast<uint8_t>((highNibble << 4) | nibble);
+    highNibble = -1;
+  }
+
+  if (highNibble >= 0)
+  {
+    out.printf("GPS UART hex send failed: odd number of hex digits.\n");
+    return true;
+  }
+
+  if (byteCount == 0)
+  {
+    out.printf("GPS UART hex send failed: no bytes were provided.\n");
+    return true;
+  }
+
+  Serial1.write(bytes, byteCount);
+  Serial1.flush();
+  ESP_LOGI(TAG, "Console sent %u raw hex byte(s) to GPS UART at %lu baud.",
+           static_cast<unsigned>(byteCount), static_cast<unsigned long>(gpsActiveBaud()));
+  out.printf("Sent %u raw hex byte(s) to GPS UART at %lu baud.\n",
+             static_cast<unsigned>(byteCount), static_cast<unsigned long>(gpsActiveBaud()));
+  return true;
+}
+
+bool sendGpsUartConsolePayload(const String &argument, ConsoleMirrorPrint &out)
+{
+  String payload = argument;
+  payload.trim();
+  if (payload.length() == 0)
+  {
+    printGpsUartCommandUsage(out);
+    return true;
+  }
+
+  if (payload.length() > kGpsConsoleCommandMaxLength)
+  {
+    out.printf("GPS UART send failed: payload is %u characters, maximum is %u.\n",
+               static_cast<unsigned>(payload.length()), static_cast<unsigned>(kGpsConsoleCommandMaxLength));
+    return true;
+  }
+
+  if (startsWithIgnoreCase(payload, "hex:"))
+  {
+    String hexPayload = payload.substring(4);
+    hexPayload.trim();
+    return sendGpsUartHexPayload(hexPayload, out);
+  }
+
+  bool appendLineEnding = false;
+  if (startsWithIgnoreCase(payload, "line:"))
+  {
+    payload = payload.substring(5);
+    payload.trim();
+    appendLineEnding = true;
+  }
+  else if (startsWithIgnoreCase(payload, "raw:"))
+  {
+    payload = payload.substring(4);
+  }
+
+  if (payload.length() == 0)
+  {
+    out.printf("GPS UART send failed: empty payload after mode prefix.\n");
+    return true;
+  }
+
+  Serial1.write(reinterpret_cast<const uint8_t *>(payload.c_str()), payload.length());
+  if (appendLineEnding)
+    Serial1.write(reinterpret_cast<const uint8_t *>("\r\n"), 2);
+  Serial1.flush();
+
+  const size_t sentBytes = payload.length() + (appendLineEnding ? 2U : 0U);
+  ESP_LOGI(TAG, "Console sent %u ASCII byte(s)%s to GPS UART at %lu baud.",
+           static_cast<unsigned>(sentBytes),
+           appendLineEnding ? " with CR/LF" : "",
+           static_cast<unsigned long>(gpsActiveBaud()));
+  out.printf("Sent %u ASCII byte(s)%s to GPS UART at %lu baud.\n",
+             static_cast<unsigned>(sentBytes),
+             appendLineEnding ? " with CR/LF" : "",
+             static_cast<unsigned long>(gpsActiveBaud()));
+  return true;
+}
+
+bool handleDebugCommandLine(const String &commandLine, ConsoleMirrorPrint &out, bool allowImmediateRestart)
+{
+  String line = commandLine;
+  line.trim();
+  if (line.length() == 0)
+    return false;
+
+  const char command = static_cast<char>(tolower(static_cast<unsigned char>(line[0])));
+  if (command == 'v')
+  {
+    String payload = line.substring(1);
+    return sendGpsUartConsolePayload(payload, out);
+  }
+
+  if (command == 'g' && line.length() > 1)
+  {
+    out.printf("Command 'g' is GPS status. Use 'v <payload>' to write to the GPS UART.\n");
+    return true;
+  }
+
+  return handleDebugCommand(command, out, allowImmediateRestart);
+}
+
 bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediateRestart)
 {
   const char command = static_cast<char>(tolower(static_cast<unsigned char>(input)));
@@ -1272,6 +1822,9 @@ bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediate
   case 'u':
     restartGpsUart("debug command");
     out.printf("GPS UART restarted at %lu baud.\n", static_cast<unsigned long>(gpsActiveBaud()));
+    return true;
+  case 'v':
+    printGpsUartCommandUsage(out);
     return true;
   case 's':
     CoroutineScheduler::list(out);
@@ -1364,6 +1917,7 @@ bool handleDebugCommand(char input, ConsoleMirrorPrint &out, bool allowImmediate
     out.printf("  n: Display retained raw GPS NMEA tail\n");
     out.printf("  p: Reset GPS parser and restart GPS UART\n");
     out.printf("  u: Restart GPS UART using the configured baud\n");
+    out.printf("  v <payload>: Send text to GPS UART (line:<text> adds CR/LF, hex:<bytes> sends raw bytes)\n");
     out.printf("  s: Display coroutines states\n");
     out.printf("  m: Display runtime health snapshot\n");
     out.printf("  a: Test AQI scroller without changing schedule\n");

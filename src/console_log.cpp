@@ -2,6 +2,7 @@
 
 #include <cstdarg>
 #include <cstdlib>
+#include <cstring>
 
 namespace
 {
@@ -19,6 +20,34 @@ portMUX_TYPE sConsoleLogMux = portMUX_INITIALIZER_UNLOCKED;
 vprintf_like_t sOriginalLogWriter = nullptr;
 bool sConsoleLogInstalled = false;
 volatile bool sConsoleSerialMirrorEnabled = false;
+
+/** Returns true when a format string is intended to produce a line-terminated record. */
+bool formatEndsWithLineBreak(const char *format)
+{
+  if (format == nullptr)
+    return false;
+
+  const size_t length = strlen(format);
+  return length > 0 && (format[length - 1U] == '\n' || format[length - 1U] == '\r');
+}
+
+/** Replaces the end of a truncated formatted line while preserving a needed line break. */
+size_t finishTruncatedConsoleLine(char *line, size_t used, bool keepLineBreak)
+{
+  if (line == nullptr || used == 0)
+    return 0;
+
+  if (keepLineBreak && used >= 4U)
+  {
+    memcpy(line + used - 4U, "...\n", 4U);
+    return used;
+  }
+
+  if (used >= 3U)
+    memcpy(line + used - 3U, "...", 3U);
+
+  return used;
+}
 
 /** Appends raw bytes into the circular RAM console buffer. */
 void appendConsoleBytesLocked(const char *data, size_t length)
@@ -103,10 +132,7 @@ int consoleLogVprintf(const char *format, va_list args)
   {
     size_t used = min(static_cast<size_t>(written), sizeof(line) - 1U);
     if (static_cast<size_t>(written) >= sizeof(line) && used >= 4U)
-    {
-      memcpy(line + used - 4U, "...", 4U);
-      used = sizeof(line) - 1U;
-    }
+      used = finishTruncatedConsoleLine(line, used, formatEndsWithLineBreak(format));
     portENTER_CRITICAL(&sConsoleLogMux);
     appendConsoleBytesLocked(line, used);
     portEXIT_CRITICAL(&sConsoleLogMux);
@@ -154,10 +180,7 @@ int ConsoleMirrorPrint::printf(const char *format, ...)
 
   size_t used = min(static_cast<size_t>(written), sizeof(line) - 1U);
   if (static_cast<size_t>(written) >= sizeof(line) && used >= 4U)
-  {
-    memcpy(line + used - 4U, "...", 4U);
-    used = sizeof(line) - 1U;
-  }
+    used = finishTruncatedConsoleLine(line, used, formatEndsWithLineBreak(format));
   write(reinterpret_cast<const uint8_t *>(line), used);
   return written;
 }

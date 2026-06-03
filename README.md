@@ -54,6 +54,29 @@ The current project assumes:
 
 The PlatformIO target is currently `esp32dev`. Earlier project notes referenced ESP32-S3 hardware, so confirm your actual board target and pinout before flashing.
 
+### ESP32 Pinout
+
+These are the GPIO assignments used by the current firmware for the `esp32dev` target.
+
+| Device | Device Pin | ESP32 Pin | Firmware Reference | Notes |
+| --- | --- | --- | --- | --- |
+| WS2812B 8x32 LED matrix | `DIN` / data in | GPIO 23 | `HSPI_MOSI` | FastLED drives the matrix data line from this pin. |
+| NEO-6M GPS | `TX` | GPIO 16 | `GPS_RX_PIN` | GPS transmit connects to ESP32 receive. Default baud is `9600`, configurable in the web UI. |
+| NEO-6M GPS | `RX` | GPIO 17 | `GPS_TX_PIN` | ESP32 transmit connects to GPS receive for receiver commands and recovery tools. |
+| DS3231 RTC | `SDA` | GPIO 21 | Arduino `SDA` / `TSL2561_SDA` | Shared I2C data line with the TSL2561. |
+| DS3231 RTC | `SCL` | GPIO 22 | Arduino `SCL` / `TSL2561_SCL` | Shared I2C clock line with the TSL2561. |
+| TSL2561 light sensor | `SDA` | GPIO 21 | Arduino `SDA` / `TSL2561_SDA` | Connect to the same I2C bus as the RTC. |
+| TSL2561 light sensor | `SCL` | GPIO 22 | Arduino `SCL` / `TSL2561_SCL` | Connect to the same I2C bus as the RTC. |
+| Optional configuration button | One side of momentary switch | GPIO 19 | `CONFIG_PIN` | IotWebConf config input uses `INPUT_PULLUP`; connect the other side of the switch to `GND`. |
+| Built-in status LED | On-board LED | GPIO 2 | `STATUS_PIN` | Usually no external wiring is needed on common ESP32 dev boards. |
+
+Power notes:
+
+- Power the LED matrix from a 5V supply sized for the full panel current, not from the ESP32 5V pin.
+- Connect ESP32 `GND`, LED matrix `GND`, GPS `GND`, RTC `GND`, light sensor `GND`, and the external 5V supply ground together.
+- Keep I2C pull-ups on `SDA`/`SCL` at 3.3V, or use level shifting if a breakout pulls the bus up to 5V.
+- ESP32 GPIO is 3.3V logic. Use modules that are 3.3V-compatible, and add a level shifter on the WS2812B data line if the matrix is unreliable with a 3.3V data signal.
+
 ## Web Interface
 
 The firmware exposes these main pages:

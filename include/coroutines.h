@@ -511,6 +511,11 @@ COROUTINE(serialInput)
 {
   COROUTINE_LOOP() 
   {
+    constexpr size_t kSerialDebugCommandBufferSize = 193;
+    static char commandLine[kSerialDebugCommandBufferSize]{};
+    static size_t commandLineLength = 0;
+    static bool collectingCommandLine = false;
+
     COROUTINE_DELAY(50);
     while (Serial.available() > 0)
     {
@@ -519,10 +524,43 @@ COROUTINE(serialInput)
         break;
 
       const char input = static_cast<char>(incoming);
+      if (collectingCommandLine)
+      {
+        if (input == '\r' || input == '\n')
+        {
+          commandLine[commandLineLength] = '\0';
+          ConsoleMirrorPrint out(true);
+          handleDebugCommandLine(String(commandLine), out, true);
+          commandLineLength = 0;
+          collectingCommandLine = false;
+          continue;
+        }
+
+        if (commandLineLength + 1U >= kSerialDebugCommandBufferSize)
+        {
+          ConsoleMirrorPrint out(true);
+          out.printf("Serial debug command is too long; discarded.\n");
+          commandLineLength = 0;
+          collectingCommandLine = false;
+          continue;
+        }
+
+        commandLine[commandLineLength++] = input;
+        continue;
+      }
+
       if (input == '\r' || input == '\n' || input == ' ' || input == '\t')
         continue;
 
       ConsoleMirrorPrint out(true);
+      if (tolower(static_cast<unsigned char>(input)) == 'v')
+      {
+        commandLine[0] = input;
+        commandLineLength = 1;
+        collectingCommandLine = true;
+        continue;
+      }
+
       handleDebugCommand(input, out, true);
     }
   }
@@ -1119,6 +1157,7 @@ COROUTINE(gps_checkData) {
 COROUTINE_LOOP() 
 {
     constexpr uint32_t kGpsNoDataLogIntervalMs = 15000;
+    constexpr uint32_t kGpsInvalidTrafficLogIntervalMs = 15000;
     constexpr uint32_t kGpsAcquiringLogIntervalMs = 30000;
     uint32_t nowMillis = millis();
     size_t bytesRead = 0;
@@ -1129,13 +1168,32 @@ COROUTINE_LOOP()
     }
     if (bytesRead > 0)
     {
+        const uint32_t activeBaud = gpsActiveBaud();
+        const uint32_t passedSinceRestart =
+            static_cast<uint32_t>(GPS.passedChecksum()) - gps.passedChecksumAtUartStart;
+        const uint32_t failedSinceRestart =
+            static_cast<uint32_t>(GPS.failedChecksum()) - gps.failedChecksumAtUartStart;
         if (!gps.moduleDetected)
         {
             gps.moduleDetected = true;
             gps.firstByteMillis = nowMillis;
-            ESP_LOGI(TAG, "GPS UART traffic detected after %lu ms. Parser is receiving NMEA data.", static_cast<unsigned long>(nowMillis));
-            noteDiagnosticPending(DiagnosticService::Gps, true, "UART detected",
-                                  F("GPS UART traffic is active. Waiting for satellites and a valid fix."));
+            ESP_LOGI(TAG, "GPS UART bytes detected at %lu baud after %lu ms since boot. Waiting for a valid NMEA checksum.",
+                     static_cast<unsigned long>(activeBaud),
+                     static_cast<unsigned long>(nowMillis));
+            noteDiagnosticPending(DiagnosticService::Gps, true, "UART traffic",
+                                  String(F("GPS UART bytes are arriving at ")) + activeBaud +
+                                      F(" baud. Waiting for a valid NMEA checksum."));
+        }
+        if (gps.detectedBaud == 0 &&
+            passedSinceRestart == 0 &&
+            (gps.lastInvalidTrafficLogMillis == 0 ||
+             static_cast<uint32_t>(nowMillis - gps.lastInvalidTrafficLogMillis) >= kGpsInvalidTrafficLogIntervalMs))
+        {
+            ESP_LOGW(TAG, "GPS UART bytes received at %lu baud, but no valid NMEA checksum has passed yet. Bytes this poll:%lu | Failed checksums since UART start:%lu. Raw output may be corrupted if the baud is wrong or the signal is noisy.",
+                     static_cast<unsigned long>(activeBaud),
+                     static_cast<unsigned long>(bytesRead),
+                     static_cast<unsigned long>(failedSinceRestart));
+            gps.lastInvalidTrafficLogMillis = nowMillis;
         }
         gps.lastByteMillis = nowMillis;
         gps.packetdelay = 0;

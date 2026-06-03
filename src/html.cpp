@@ -1586,7 +1586,7 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
     enable_fixed_loc: 'Uses the custom latitude and longitude below instead of GPS, reverse geocoding, or IP-based coordinates.',
     fixedLat: 'Latitude used for weather, AQI, alerts, and sun-event fallback when fixed location is enabled.',
     fixedLon: 'Longitude used for weather, AQI, alerts, and sun-event fallback when fixed location is enabled.',
-    gps_baud: 'UART speed for the GPS receiver. Choose the rate your module is configured for; common NEO-6M modules use 9600.',
+    gps_baud: 'UART speed for the GPS receiver. On startup and baud changes, the clock tries each supported speed and asks NEO-6M modules to switch to this rate.',
     serialdebug: 'Mirrors verbose runtime diagnostics to USB serial and the web console buffer.',
     resetdefaults: 'On save, wipes all saved configuration and returns the device to setup AP mode.'
   };
@@ -4042,11 +4042,12 @@ void appendConsolePage(String &html, const String &accessToken)
   html += F("<span class='status-chip'><strong>Buffer Scope</strong><span>Recent runtime output retained in RAM only</span></span>");
   html += F("</div><pre id='console-output' class='console-view' data-cursor='0'></pre><p id='console-status' class='console-status'>Connecting to live console feed...</p></section>");
 
-  html += F("<section id='console-commands' class='card card-span'><div class='card-header'><h2>Send Debug Commands</h2><p class='card-subtitle'>Commands map to the existing serial shortcuts. The first non-space character is used, so enter values such as h, d, g, m, or s.</p></div><dl class='kv-list'>");
+  html += F("<section id='console-commands' class='card card-span'><div class='card-header'><h2>Send Debug Commands</h2><p class='card-subtitle'>Single-letter commands map to the existing serial shortcuts. Use <code>v &lt;payload&gt;</code> when the command needs to write data to the GPS UART.</p></div><dl class='kv-list'>");
   appendKeyValueRow(html, "Common Commands", F("<code>h</code> help, <code>d</code> dump debug, <code>g</code> GPS status, <code>m</code> runtime health, <code>n</code> raw NMEA, <code>p</code> GPS reset, <code>s</code> coroutine states, <code>l</code> toggle debug logging"));
   appendKeyValueRow(html, "Display Tests", F("<code>a</code> AQI scroller, <code>w</code> current weather, <code>q</code> daily weather, <code>x</code> alert scroller, <code>y</code> temp + icon, <code>e</code> date, <code>t</code> alert flash"));
   appendKeyValueRow(html, "Schedule Impact", F("<code>a</code>, <code>w</code>, <code>q</code>, <code>x</code>, and <code>y</code> run one-shot tests without changing the next scheduled display time."));
   appendKeyValueRow(html, "Receiver Recovery", F("<code>p</code> resets the GPS parser and restarts the UART, <code>u</code> restarts only the GPS UART using the configured baud"));
+  appendKeyValueRow(html, "GPS UART Write", F("<code>v CFG-CFG</code> sends ASCII text, <code>v line:&lt;text&gt;</code> appends CR/LF, and <code>v hex:B5 62</code> sends raw bytes"));
   appendKeyValueRow(html, "Caution", F("<code>r</code> queues a reboot from the web console after the HTTP response returns"));
   html += F("</dl><div class='console-toolbar'>");
   html += F("<button type='button' data-console-command='h'>Help</button>");
@@ -4063,7 +4064,7 @@ void appendConsolePage(String &html, const String &accessToken)
   html += F("<button type='button' data-console-command='s'>Coroutines</button>");
   html += F("<button type='button' data-console-command='l'>Toggle Debug</button>");
   html += F("<button type='button' data-console-command='r'>Reboot</button>");
-  html += F("</div><form id='console-command-form' class='console-command-form'><div class='console-command-row'><input id='console-command' name='cmd' type='text' maxlength='8' placeholder='Enter a command such as m, w, q, a, x, y, g, n, or r'><button type='submit'>Send Command</button></div></form>");
+  html += F("</div><form id='console-command-form' class='console-command-form'><div class='console-command-row'><input id='console-command' name='cmd' type='text' maxlength='192' placeholder='Enter h, d, g, n, or v CFG-CFG'><button type='submit'>Send Command</button></div></form>");
   html += F("<p class='console-note'>Web commands use the same handlers as the USB serial console, and their output is written back into this same RAM log buffer.</p></section>");
   html += F("</main><script>");
   html += FPSTR(kConsolePageScript);
@@ -4093,6 +4094,7 @@ void appendDiagnosticsContent(String &html)
   const size_t attentionCount = countAttentionDiagnostics();
   const String gpsRawSnapshot = getGpsRawNmeaSnapshot();
   const String gpsLastByteAge = gps.moduleDetected ? elapsedTime((nowMillis - gps.lastByteMillis + 999UL) / 1000UL) : String(F("Never"));
+  const String gpsDetectedBaud = gps.detectedBaud == 0 ? String(F("Not detected yet")) : String(gps.detectedBaud);
   const String gpsLastResetAge = gps.lastResetMillis == 0 ? String(F("Never"))
                                                           : elapsedTime((nowMillis - gps.lastResetMillis + 999UL) / 1000UL);
 
@@ -4158,6 +4160,7 @@ void appendDiagnosticsContent(String &html)
   appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::Gps));
   appendKeyValueRow(html, "Configured Baud", htmlEscape(String(gpsConfiguredBaud())));
   appendKeyValueRow(html, "Active UART Baud", htmlEscape(String(gpsActiveBaud())));
+  appendKeyValueRow(html, "Detected UART Baud", htmlEscape(gpsDetectedBaud));
   appendKeyValueRow(html, "Module Detected", gps.moduleDetected ? F("Yes") : F("No"));
   appendKeyValueRow(html, "Last UART Byte", htmlEscape(gpsLastByteAge));
   appendKeyValueRow(html, "Fix", gps.fix ? F("Yes") : F("No"));
@@ -4181,7 +4184,7 @@ void appendDiagnosticsContent(String &html)
   html += F("</div>");
   appendCardEnd(html);
 
-  appendTonedCardStart(html, "GPS Raw NMEA", "Recent raw NMEA traffic captured from the GPS UART. Use it to confirm the receiver is alive, the baud is correct, and complete sentences are arriving.", diagnosticTone(DiagnosticService::Gps));
+  appendTonedCardStart(html, "GPS Raw NMEA", "Recent raw NMEA traffic captured from the GPS UART. Complete readable lines confirm the baud and wiring; repeated replacement characters usually mean a baud mismatch or noisy signal.", diagnosticTone(DiagnosticService::Gps));
   appendKeyValueRow(html, "Retained Bytes", htmlEscape(String(gpsRawNmeaLength())));
   appendKeyValueRow(html, "Captured Bytes", htmlEscape(formatLargeNumber(static_cast<int>(gps.rawBytesCaptured))));
   appendKeyValueRow(html, "Captured Sentences", htmlEscape(formatLargeNumber(static_cast<int>(gps.rawSentenceCount))));
@@ -5251,7 +5254,7 @@ void handleConsoleDownload()
   server.send(200, "text/plain; charset=UTF-8", payload);
 }
 
-/** Accepts a one-character debug command from the web console. */
+/** Accepts a debug command from the web console. */
 void handleConsoleCommand()
 {
   if (iotWebConf.handleCaptivePortal())
@@ -5260,25 +5263,17 @@ void handleConsoleCommand()
     return;
 
   String command = server.hasArg("cmd") ? server.arg("cmd") : String();
-  char input = '\0';
-  for (size_t index = 0; index < command.length(); ++index)
-  {
-    if (!isspace(static_cast<unsigned char>(command[index])))
-    {
-      input = command[index];
-      break;
-    }
-  }
+  command.trim();
 
-  if (input == '\0')
+  if (command.length() == 0)
   {
     server.send(400, "application/json; charset=UTF-8", F("{\"ok\":false,\"error\":\"Missing command.\"}"));
     return;
   }
 
   ConsoleMirrorPrint out(isConsoleSerialMirrorEnabled());
-  out.printf("[web] command: %c\n", input);
-  bool handled = handleDebugCommand(input, out, false);
+  out.printf("[web] command: %s\n", command.c_str());
+  bool handled = handleDebugCommandLine(command, out, false);
   if (!handled)
   {
     server.send(400, "application/json; charset=UTF-8", F("{\"ok\":false,\"error\":\"Unknown command.\"}"));

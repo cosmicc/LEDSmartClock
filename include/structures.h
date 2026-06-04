@@ -27,6 +27,8 @@ struct GPSData
   uint32_t lastNoDataLogMillis = 0;
   uint32_t lastProgressLogMillis = 0;
   uint32_t activeBaud = DEFAULT_GPS_BAUD;
+  int16_t activeRxPin = LEDCLOCK_DEFAULT_GPS_RX_PIN;
+  int16_t activeTxPin = LEDCLOCK_DEFAULT_GPS_TX_PIN;
   uint32_t detectedBaud = 0;
   uint32_t uartStartMillis = 0;
   uint32_t passedChecksumAtUartStart = 0;

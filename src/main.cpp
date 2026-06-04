@@ -44,6 +44,7 @@ ExtendedZoneManager timezoneManager(
 uint32_t lastAutoPersistMillis = 0;
 bool pendingAutoPersist = false;
 char pendingAutoPersistReason[48]{};
+int16_t activeLedDataPin = LEDCLOCK_DEFAULT_LED_DATA_PIN;
 
 struct GpsBaudProbeResult
 {
@@ -52,6 +53,136 @@ struct GpsBaudProbeResult
   uint32_t bytesRead = 0;
   char sentenceId[6]{};
 };
+
+template <uint8_t Pin>
+void addMatrixLedsOnPin()
+{
+  FastLED.addLeds<NEOPIXEL, Pin>(leds, NUMMATRIX).setCorrection(TypicalLEDStrip);
+}
+
+bool initializeMatrixLeds()
+{
+  const int16_t pin = ledDataPin();
+  switch (pin)
+  {
+    case 2:
+      addMatrixLedsOnPin<2>();
+      break;
+    case 4:
+      addMatrixLedsOnPin<4>();
+      break;
+    case 5:
+      addMatrixLedsOnPin<5>();
+      break;
+    case 12:
+      addMatrixLedsOnPin<12>();
+      break;
+    case 13:
+      addMatrixLedsOnPin<13>();
+      break;
+    case 14:
+      addMatrixLedsOnPin<14>();
+      break;
+    case 15:
+      addMatrixLedsOnPin<15>();
+      break;
+    case 16:
+      addMatrixLedsOnPin<16>();
+      break;
+    case 17:
+      addMatrixLedsOnPin<17>();
+      break;
+    case 18:
+      addMatrixLedsOnPin<18>();
+      break;
+    case 19:
+      addMatrixLedsOnPin<19>();
+      break;
+    case 21:
+      addMatrixLedsOnPin<21>();
+      break;
+    case 22:
+      addMatrixLedsOnPin<22>();
+      break;
+    case 23:
+      addMatrixLedsOnPin<23>();
+      break;
+    case 25:
+      addMatrixLedsOnPin<25>();
+      break;
+    case 26:
+      addMatrixLedsOnPin<26>();
+      break;
+    case 27:
+      addMatrixLedsOnPin<27>();
+      break;
+    case 32:
+      addMatrixLedsOnPin<32>();
+      break;
+    case 33:
+      addMatrixLedsOnPin<33>();
+      break;
+#ifndef CONFIG_IDF_TARGET_ESP32
+    case 34:
+      addMatrixLedsOnPin<34>();
+      break;
+    case 35:
+      addMatrixLedsOnPin<35>();
+      break;
+    case 36:
+      addMatrixLedsOnPin<36>();
+      break;
+    case 37:
+      addMatrixLedsOnPin<37>();
+      break;
+    case 38:
+      addMatrixLedsOnPin<38>();
+      break;
+    case 39:
+      addMatrixLedsOnPin<39>();
+      break;
+#if LEDCLOCK_MAX_GPIO_PIN >= 40
+    case 40:
+      addMatrixLedsOnPin<40>();
+      break;
+    case 41:
+      addMatrixLedsOnPin<41>();
+      break;
+    case 42:
+      addMatrixLedsOnPin<42>();
+      break;
+    case 43:
+      addMatrixLedsOnPin<43>();
+      break;
+    case 44:
+      addMatrixLedsOnPin<44>();
+      break;
+    case 45:
+      addMatrixLedsOnPin<45>();
+      break;
+    case 46:
+      addMatrixLedsOnPin<46>();
+      break;
+    case 47:
+      addMatrixLedsOnPin<47>();
+      break;
+    case 48:
+      addMatrixLedsOnPin<48>();
+      break;
+#endif
+#endif
+    default:
+      ESP_LOGE(TAG, "LED data GPIO %d is not supported by this firmware build. Falling back to GPIO %d.",
+               pin, LEDCLOCK_DEFAULT_LED_DATA_PIN);
+      addMatrixLedsOnPin<LEDCLOCK_DEFAULT_LED_DATA_PIN>();
+      activeLedDataPin = LEDCLOCK_DEFAULT_LED_DATA_PIN;
+      return false;
+  }
+
+  activeLedDataPin = pin;
+  ESP_LOGI(TAG, "LED matrix data pin initialized on GPIO %d.", pin);
+  return true;
+}
 
 class NmeaChecksumProbe
 {
@@ -173,10 +304,12 @@ GpsBaudProbeResult probeGpsReceiverBaud(uint32_t baud, uint32_t windowMs)
 {
   GpsBaudProbeResult result;
   NmeaChecksumProbe nmeaProbe;
+  const int16_t rxPin = gpsRxPin();
+  const int16_t txPin = gpsTxPin();
   Serial1.flush();
   Serial1.end();
   delay(20);
-  Serial1.begin(baud, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+  Serial1.begin(baud, SERIAL_8N1, rxPin, txPin);
 
   const uint32_t started = millis();
   while (static_cast<uint32_t>(millis() - started) < windowMs)
@@ -259,9 +392,11 @@ void broadcastNeo6mBaudCommand(uint32_t targetBaud)
   for (size_t probeIndex = 0; probeIndex < kGpsBaudProbeCount; ++probeIndex)
   {
     const uint32_t probeBaud = kGpsBaudProbeRates[probeIndex];
+    const int16_t rxPin = gpsRxPin();
+    const int16_t txPin = gpsTxPin();
     Serial1.flush();
     Serial1.end();
-    Serial1.begin(probeBaud, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+    Serial1.begin(probeBaud, SERIAL_8N1, rxPin, txPin);
     ESP_LOGI(TAG, "GPS baud sync fallback %u/%u: sending NEO-6M CFG-PRT target %lu while UART is at %lu baud.",
              static_cast<unsigned>(probeIndex + 1U), static_cast<unsigned>(kGpsBaudProbeCount),
              static_cast<unsigned long>(targetBaud), static_cast<unsigned long>(probeBaud));
@@ -874,15 +1009,19 @@ void clearGpsRuntimeState()
 void startGpsUart(const char *reason, bool logToSerial)
 {
   const uint32_t baud = gpsConfiguredBaud();
+  const int16_t rxPin = gpsRxPin();
+  const int16_t txPin = gpsTxPin();
   Serial1.flush();
   Serial1.end();
   syncNeo6mReceiverBaud(baud);
-  Serial1.begin(baud, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+  Serial1.begin(baud, SERIAL_8N1, rxPin, txPin);
   while (Serial1.available() > 0)
     Serial1.read();
 
   clearGpsRawNmea();
   gps.activeBaud = baud;
+  gps.activeRxPin = rxPin;
+  gps.activeTxPin = txPin;
   gps.detectedBaud = 0;
   gps.uartStartMillis = millis();
   gps.passedChecksumAtUartStart = static_cast<uint32_t>(GPS.passedChecksum());
@@ -898,7 +1037,7 @@ void startGpsUart(const char *reason, bool logToSerial)
   if (logToSerial)
   {
     ESP_LOGI(TAG, "GPS UART started on RX:%d TX:%d at %lu baud (%s). Detected baud reset until live traffic arrives.",
-             GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(baud), reason == nullptr ? "startup" : reason);
+             rxPin, txPin, static_cast<unsigned long>(baud), reason == nullptr ? "startup" : reason);
   }
 }
 
@@ -1039,6 +1178,13 @@ extern "C" void app_main()
   {
     ESP_LOGI(TAG, "No persisted configuration store found. Using defaults until first save.");
   }
+  if (i2cActiveSdaPin() != i2cSdaPin() || i2cActiveSclPin() != i2cSclPin())
+  {
+    ESP_LOGI(TAG, "Stored I2C pin configuration differs from startup defaults. Reinitializing I2C before RTC/light-sensor use.");
+    initializeI2cBus("stored config");
+    systemClock.setup();
+    setTimeSource(systemClock.isInit() ? F("rtc") : F("none"));
+  }
   if (loadedStoredConfiguration && iotWebConf.getWifiSsidParameter()->valueBuffer[0] != '\0')
   {
     iotWebConf.skipApStartup();
@@ -1076,7 +1222,7 @@ extern "C" void app_main()
   startGpsUart("startup", false);
   gps.uartRestartCount = 0;
   ESP_LOGI(TAG, "GPS UART started on RX:%d TX:%d at %lu baud. Detected baud will be logged after live module traffic arrives.",
-                 GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(gpsActiveBaud()));
+                 gpsActiveRxPin(), gpsActiveTxPin(), static_cast<unsigned long>(gpsActiveBaud()));
   ESP_LOGD(TAG, "Initializing coroutine scheduler...");
   sysClock.setName("sysclock");
   coroutineManager.setName("manager");
@@ -1138,7 +1284,7 @@ extern "C" void app_main()
   if (flickerfast.isChecked())
     showclock.fstop = 20;
   ESP_LOGD(TAG, "Initializing the display...");
-  FastLED.addLeds<NEOPIXEL, HSPI_MOSI>(leds, NUMMATRIX).setCorrection(TypicalLEDStrip);
+  initializeMatrixLeds();
   matrix->begin();
   matrix->setBrightness(runtimeState.userBrightness);
   matrix->setTextWrap(false);
@@ -1176,8 +1322,22 @@ void applyRuntimeConfiguration()
   applySerialDebugRuntimeConfiguration();
   updateCoords();
   processTimezone();
-  if (gps.activeBaud != gpsConfiguredBaud())
+  if (gps.activeBaud != gpsConfiguredBaud() ||
+      gps.activeRxPin != gpsRxPin() ||
+      gps.activeTxPin != gpsTxPin())
     restartGpsUart("config update");
+  if (i2cActiveSdaPin() != i2cSdaPin() || i2cActiveSclPin() != i2cSclPin())
+  {
+    initializeI2cBus("config update");
+    initializeLightSensor(1000UL);
+  }
+  if (activeLedDataPin != ledDataPin())
+  {
+    ESP_LOGW(TAG, "LED data GPIO changed from %d to %d. Reboot requested so FastLED can bind the new pin.",
+             activeLedDataPin, ledDataPin());
+    runtimeState.rebootRequested = true;
+    runtimeState.rebootRequestMillis = millis();
+  }
   gpsClock.refreshNtpServer();
   rebuildApiUrls();
   noteDiagnosticPending(DiagnosticService::Weather, isApiValid(weatherapi.value()),
@@ -1253,6 +1413,16 @@ uint32_t gpsActiveBaud()
   return gps.activeBaud != 0 ? gps.activeBaud : gpsConfiguredBaud();
 }
 
+int16_t gpsActiveRxPin()
+{
+  return gps.activeRxPin >= 0 ? gps.activeRxPin : gpsRxPin();
+}
+
+int16_t gpsActiveTxPin()
+{
+  return gps.activeTxPin >= 0 ? gps.activeTxPin : gpsTxPin();
+}
+
 void clearGpsRawNmea()
 {
   sGpsRawNmeaHead = 0;
@@ -1305,8 +1475,8 @@ void resetGpsParser(const char *reason, bool restartUart)
     startGpsUart(gps.lastResetReason, true);
 
   noteDiagnosticPending(DiagnosticService::Gps, true, restartUart ? "Parser reset" : "Parser cleared",
-                        String(F("GPS parser state was reset. Listening on RX ")) + GPS_RX_PIN +
-                            F(" / TX ") + GPS_TX_PIN + F(" at ") + gpsActiveBaud() + F(" baud."));
+                        String(F("GPS parser state was reset. Listening on RX ")) + gpsActiveRxPin() +
+                            F(" / TX ") + gpsActiveTxPin() + F(" at ") + gpsActiveBaud() + F(" baud."));
 }
 
 void processGpsSerialByte(int incomingByte)
@@ -1518,7 +1688,7 @@ void print_gpsStatus(ConsoleMirrorPrint &out)
 
   out.printf("[^------------------------- GPS Status --------------------------^]\n");
   out.printf("GPS UART - RX:%d | TX:%d | ActiveBaud:%lu | DetectedBaud:%s | ModuleDetected:%s | LastByte:%s | SerialAvail:%d | Restarts:%lu\n",
-         GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(gpsActiveBaud()), detectedBaud.c_str(), yesno[gps.moduleDetected], lastByteAge.c_str(), Serial1.available(),
+         gpsActiveRxPin(), gpsActiveTxPin(), static_cast<unsigned long>(gpsActiveBaud()), detectedBaud.c_str(), yesno[gps.moduleDetected], lastByteAge.c_str(), Serial1.available(),
          static_cast<unsigned long>(gps.uartRestartCount));
   out.printf("GPS Parser - Chars:%s | Passed:%s | Failed:%s | SentencesWithFix:%s\n",
          formatLargeNumber(GPS.charsProcessed()).c_str(),

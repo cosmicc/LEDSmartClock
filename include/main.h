@@ -1,5 +1,37 @@
-// Emable SPI for FastLED
-#define HSPI_MOSI   23
+// Hardware profile defaults. Override these with PlatformIO build_flags for a
+// different ESP32 board profile without changing source files.
+#ifndef LEDCLOCK_BOARD_PROFILE
+#define LEDCLOCK_BOARD_PROFILE "esp32dev"
+#endif
+#ifndef LEDCLOCK_MAX_GPIO_PIN
+#define LEDCLOCK_MAX_GPIO_PIN 39
+#endif
+#ifndef LEDCLOCK_DEFAULT_LED_DATA_PIN
+#define LEDCLOCK_DEFAULT_LED_DATA_PIN 23
+#endif
+#ifndef LEDCLOCK_DEFAULT_I2C_SDA_PIN
+#define LEDCLOCK_DEFAULT_I2C_SDA_PIN 21
+#endif
+#ifndef LEDCLOCK_DEFAULT_I2C_SCL_PIN
+#define LEDCLOCK_DEFAULT_I2C_SCL_PIN 22
+#endif
+#ifndef LEDCLOCK_DEFAULT_CONFIG_PIN
+#define LEDCLOCK_DEFAULT_CONFIG_PIN 19
+#endif
+#ifndef LEDCLOCK_DEFAULT_STATUS_PIN
+#define LEDCLOCK_DEFAULT_STATUS_PIN 2
+#endif
+#ifndef LEDCLOCK_DEFAULT_GPS_RX_PIN
+#define LEDCLOCK_DEFAULT_GPS_RX_PIN 16
+#endif
+#ifndef LEDCLOCK_DEFAULT_GPS_TX_PIN
+#define LEDCLOCK_DEFAULT_GPS_TX_PIN 17
+#endif
+
+// Enable SPI for FastLED.
+#ifndef HSPI_MOSI
+#define HSPI_MOSI LEDCLOCK_DEFAULT_LED_DATA_PIN
+#endif
 #define FASTLED_ALL_PINS_HARDWARE_SPI
 #define FASTLED_ESP32_SPI_BUS HSPI
 
@@ -12,11 +44,17 @@
 #undef DISABLE_ALERTCHECK          // Disable Weather Alert checks
 #undef DISABLE_IPGEOCHECK          // Disable IPGEO checks
 #define WDT_TIMEOUT 30             // Watchdog Timeout seconds
-#define CONFIG_PIN 19              // Config reset button pin
-#define STATUS_PIN 2               // Use built-in ESP32 led for iotwebconf status
+#define CONFIG_PIN LEDCLOCK_DEFAULT_CONFIG_PIN // Config reset button pin
+#define STATUS_PIN LEDCLOCK_DEFAULT_STATUS_PIN // Use built-in ESP32 led for iotwebconf status
 #define DEFAULT_GPS_BAUD 9600      // Default GPS UART baud rate
-#define GPS_RX_PIN 16              // GPS UART RX PIN
-#define GPS_TX_PIN 17              // GPS UART TX PIN
+#define GPS_RX_PIN LEDCLOCK_DEFAULT_GPS_RX_PIN // GPS UART RX PIN
+#define GPS_TX_PIN LEDCLOCK_DEFAULT_GPS_TX_PIN // GPS UART TX PIN
+#ifndef TSL2561_SDA
+#define TSL2561_SDA LEDCLOCK_DEFAULT_I2C_SDA_PIN
+#endif
+#ifndef TSL2561_SCL
+#define TSL2561_SCL LEDCLOCK_DEFAULT_I2C_SCL_PIN
+#endif
 #define DAYHUE 35                  // 6am daytime hue start
 #define NIGHTHUE 175               // 10pm nighttime hue end
 #define LUXMIN 5                   // Lowest brightness min
@@ -123,6 +161,43 @@ extern const char yesno[][4];
 /** Shared true/false lookup strings for debug and status output. */
 extern const char truefalse[][6];
 
+/** Runtime-configurable wiring pins for project hardware modules. */
+struct HardwarePinSettings
+{
+  int16_t ledDataPin;
+  int16_t gpsRxPin;
+  int16_t gpsTxPin;
+  int16_t i2cSdaPin;
+  int16_t i2cSclPin;
+};
+
+/** Returns the hardware profile label compiled into this firmware build. */
+const char *compiledHardwareProfile();
+/** Returns the compiled default wiring profile. */
+HardwarePinSettings defaultHardwarePinSettings();
+/** Returns the current configured wiring profile. */
+HardwarePinSettings configuredHardwarePinSettings();
+/** Returns true when a GPIO can be used as a runtime input signal. */
+bool isHardwareInputPinUsable(int16_t pin);
+/** Returns true when a GPIO can be used as a runtime output signal. */
+bool isHardwareOutputPinUsable(int16_t pin);
+/** Returns true when a GPIO is included in the LED data-pin switch table. */
+bool isSupportedLedDataPin(int16_t pin);
+/** Validates a full runtime hardware-pin configuration and writes a readable error on failure. */
+bool isHardwarePinConfigurationValid(const HardwarePinSettings &settings, String &error);
+/** Normalizes invalid stored hardware-pin values back to the compiled defaults. */
+bool normalizeHardwarePinSettings();
+/** Returns the configured LED matrix data pin. */
+int16_t ledDataPin();
+/** Returns the configured GPS UART RX pin. */
+int16_t gpsRxPin();
+/** Returns the configured GPS UART TX pin. */
+int16_t gpsTxPin();
+/** Returns the configured I2C SDA pin. */
+int16_t i2cSdaPin();
+/** Returns the configured I2C SCL pin. */
+int16_t i2cSclPin();
+
 /** Hostname and AP SSID used by IotWebConf. */
 extern const char thingName[];
 /** Initial password for the captive-portal access point before reconfiguration. */
@@ -212,6 +287,10 @@ bool isSupportedGpsBaud(uint32_t baud);
 uint32_t gpsConfiguredBaud();
 /** Returns the baud rate currently active on the GPS UART. */
 uint32_t gpsActiveBaud();
+/** Returns the RX pin currently active on the GPS UART. */
+int16_t gpsActiveRxPin();
+/** Returns the TX pin currently active on the GPS UART. */
+int16_t gpsActiveTxPin();
 /** Restarts the GPS UART using the current configured baud. */
 void restartGpsUart(const char *reason);
 /** Resets the GPS parser state and optionally restarts the UART at the current baud. */
@@ -238,6 +317,10 @@ void applyRuntimeConfiguration();
 void flushDeferredConfigurationState();
 /** Initializes the shared I2C bus with the project timeout settings. */
 void initializeI2cBus(const char *reason = nullptr);
+/** Returns the SDA pin used by the last I2C bus initialization. */
+int16_t i2cActiveSdaPin();
+/** Returns the SCL pin used by the last I2C bus initialization. */
+int16_t i2cActiveSclPin();
 /** Initializes the TSL2561 light sensor, returning false when fixed brightness should be used. */
 bool initializeLightSensor(uint32_t timeoutMs);
 /** Returns the last known health state of the TSL2561 without probing the bus. */

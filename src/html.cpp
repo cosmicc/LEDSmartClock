@@ -1522,6 +1522,7 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
     Status: 'Corner status pixels that summarize system, AQI, and UV state. Turn any of the three corners off entirely here.',
     Sun: 'Sunrise and sunset messages based on local solar events.',
     Location: 'Coordinate overrides and location-change messaging.',
+    Hardware: 'Board profile label and GPIO assignments for the attached display, GPS receiver, RTC, and light sensor.',
     GPS: 'Receiver-specific settings for the attached GPS module.',
     Maintenance: 'Debug and recovery controls. These are kept at the bottom because they are only needed during troubleshooting.'
   };
@@ -1586,6 +1587,12 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
     enable_fixed_loc: 'Uses the custom latitude and longitude below instead of GPS, reverse geocoding, or IP-based coordinates.',
     fixedLat: 'Latitude used for weather, AQI, alerts, and sun-event fallback when fixed location is enabled.',
     fixedLon: 'Longitude used for weather, AQI, alerts, and sun-event fallback when fixed location is enabled.',
+    hardware_profile: 'Label for the wiring profile. The default comes from the firmware build; use custom if you change the pins below.',
+    led_data_pin: 'GPIO that drives the WS2812B matrix data input. Saving a changed LED pin requests a reboot so FastLED can bind it at startup.',
+    gps_rx_pin: 'ESP32 RX GPIO connected to the GPS module TX pin. This is applied immediately when saved.',
+    gps_tx_pin: 'ESP32 TX GPIO connected to the GPS module RX pin for receiver commands. This is applied immediately when saved.',
+    i2c_sda_pin: 'Shared I2C SDA GPIO for the DS3231 RTC and TSL2561 light sensor. This is applied immediately when saved.',
+    i2c_scl_pin: 'Shared I2C SCL GPIO for the DS3231 RTC and TSL2561 light sensor. This is applied immediately when saved.',
     gps_baud: 'UART speed for the GPS receiver. On startup and baud changes, the clock tries each supported speed and asks NEO-6M modules to switch to this rate.',
     serialdebug: 'Mirrors verbose runtime diagnostics to USB serial and the web console buffer.',
     resetdefaults: 'On save, wipes all saved configuration and returns the device to setup AP mode.'
@@ -2645,6 +2652,90 @@ bool isProtectedPortalState()
   return iotWebConf.getState() == iotwebconf::OnLine && web_password_protection.isChecked();
 }
 
+/** Returns true when a Host header is already targeting the local clock portal. */
+bool isLocalPortalHost(String host)
+{
+  host.trim();
+  host.toLowerCase();
+  const int portSeparator = host.indexOf(':');
+  if (portSeparator >= 0)
+    host = host.substring(0, portSeparator);
+
+  if (host.length() == 0)
+    return true;
+
+  bool looksLikeIp = true;
+  bool hasDot = false;
+  for (size_t index = 0; index < host.length(); ++index)
+  {
+    const char current = host.charAt(index);
+    if (current == '.')
+    {
+      hasDot = true;
+      continue;
+    }
+    if (!isdigit(static_cast<unsigned char>(current)))
+    {
+      looksLikeIp = false;
+      break;
+    }
+  }
+  if (looksLikeIp && hasDot)
+    return true;
+
+  String thingName = String(iotWebConf.getThingName());
+  thingName.toLowerCase();
+  return host.startsWith(thingName);
+}
+
+/** Returns true for common OS/browser captive-network probe URLs. */
+bool isCaptiveProbePath(String uri)
+{
+  const int queryStart = uri.indexOf('?');
+  if (queryStart >= 0)
+    uri = uri.substring(0, queryStart);
+  uri.toLowerCase();
+
+  return uri == F("/generate_204") ||
+         uri == F("/gen_204") ||
+         uri == F("/hotspot-detect.html") ||
+         uri == F("/library/test/success.html") ||
+         uri == F("/success.txt") ||
+         uri == F("/connecttest.txt") ||
+         uri == F("/ncsi.txt") ||
+         uri == F("/redirect") ||
+         uri == F("/canonical.html") ||
+         uri == F("/connectivity-check.html");
+}
+
+/** Redirects captive-network checks to the first-run setup page on the AP IP. */
+void redirectToCaptiveSetup()
+{
+  String location = F("http://");
+  location += WiFi.softAPIP().toString();
+  location += kOnboardingPath;
+
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Location", location, true);
+  server.send(302, "text/plain; charset=UTF-8", F("Redirecting to setup portal."));
+}
+
+/** Handles setup-mode captive portal redirects without relying on client-local IP detection. */
+bool handleClockCaptivePortal()
+{
+  if (!isSetupPortalState())
+    return iotWebConf.handleCaptivePortal();
+
+  if (!isLocalPortalHost(server.hostHeader()) || isCaptiveProbePath(server.uri()))
+  {
+    redirectToCaptiveSetup();
+    return true;
+  }
+
+  return false;
+}
+
 /** Appends the Log Out action only when web password protection is enabled. */
 void appendLogoutAction(String &html)
 {
@@ -3669,7 +3760,7 @@ void appendDiagnosticsHardwareStatusSection(String &html)
                            F("Detected"),
                            F("Not detected"),
                            String(F("GPS UART traffic has been received at ")) + gpsActiveBaud() + F(" baud."),
-                           String(F("No GPS UART traffic has been seen yet on RX ")) + GPS_RX_PIN + F(" / TX ") + GPS_TX_PIN + F("."));
+                           String(F("No GPS UART traffic has been seen yet on RX ")) + gpsActiveRxPin() + F(" / TX ") + gpsActiveTxPin() + F("."));
   appendHardwareStatusItem(html,
                            "Light Sensor Module",
                            lightDetected,
@@ -4592,7 +4683,7 @@ bool applyOnboardingDraft(const OnboardingDraft &draft, String &error)
 /** Handles GET requests for the password-only login page. */
 void handleLoginPage()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
 
   if (!isProtectedPortalState())
@@ -4620,7 +4711,7 @@ void handleLoginPage()
 /** Handles POST requests from the password-only login form. */
 void handleLoginPost()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
 
   if (!isProtectedPortalState())
@@ -4660,7 +4751,7 @@ void handleLogout()
 /** Handles GET requests for first-boot or recovery-mode onboarding. */
 void handleOnboarding()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
 
   if (!isSetupPortalState())
@@ -4685,7 +4776,7 @@ void handleOnboarding()
 /** Handles POST submissions from the onboarding wizard. */
 void handleOnboardingPost()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
 
   if (!isSetupPortalState())
@@ -4720,7 +4811,7 @@ void handleOnboardingPost()
 /** Triggers a visible matrix scroll test and redirects back to the onboarding or main UI. */
 void handleOnboardingMatrixTest()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
 
   if (isProtectedPortalState() && !authorizeAdminRequest())
@@ -4738,7 +4829,7 @@ void handleOnboardingMatrixTest()
 /** Routes the advanced configuration portal through the custom session-aware request wrapper. */
 void handleConfigPage()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
 
   SessionWebRequestWrapper requestWrapper;
@@ -4748,7 +4839,7 @@ void handleConfigPage()
 /** Resets saved settings to defaults while keeping connectivity credentials and API keys. */
 void handleConfigResetDefaults()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeAdminRequest())
     return;
@@ -4779,7 +4870,7 @@ void setFirmwareUploadErrorFromUpdater()
 /** Renders the GET view for the themed firmware upload page. */
 void handleFirmwareUpdate()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeAdminRequest())
     return;
@@ -4795,7 +4886,7 @@ void handleFirmwareUpdate()
 /** Finalizes a firmware upload request and returns a themed success or error screen. */
 void handleFirmwareUpdatePost()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeAdminRequest())
     return;
@@ -4909,7 +5000,7 @@ void handleFirmwareUpload()
 /** Streams the current configuration as a downloadable JSON attachment. */
 void handleConfigExport()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeAdminRequest())
     return;
@@ -4935,7 +5026,7 @@ void handleConfigExport()
 /** Renders the GET view for the configuration backup and restore page. */
 void handleConfigImport()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeAdminRequest())
     return;
@@ -4951,7 +5042,7 @@ void handleConfigImport()
 /** Finalizes a posted configuration backup and applies it if the upload was valid. */
 void handleConfigImportPost()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeAdminRequest())
     return;
@@ -5053,7 +5144,7 @@ void handleConfigImportUpload()
 /** Renders the live web console page backed by the RAM log buffer. */
 void handleGpsRaw()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeAdminRequest())
     return;
@@ -5066,7 +5157,7 @@ void handleGpsRaw()
 /** Executes one GPS troubleshooting action requested from the diagnostics page. */
 void handleGpsAction()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeAdminRequest())
     return;
@@ -5171,7 +5262,7 @@ bool queueDisplayTestAction(const String &action, String &message, String &error
 /** Executes one display test requested from the diagnostics page. */
 void handleDisplayTestAction()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeAdminRequest())
     return;
@@ -5198,7 +5289,7 @@ void handleDisplayTestAction()
 /** Renders the live web console page backed by the RAM log buffer. */
 void handleConsolePage()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeAdminRequest())
     return;
@@ -5216,7 +5307,7 @@ void handleConsolePage()
 /** Streams incremental console output newer than the supplied cursor. */
 void handleConsoleLog()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeConsoleRequest())
     return;
@@ -5239,7 +5330,7 @@ void handleConsoleLog()
 /** Downloads the current retained RAM console buffer as plain text. */
 void handleConsoleDownload()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeConsoleRequest())
     return;
@@ -5257,7 +5348,7 @@ void handleConsoleDownload()
 /** Accepts a debug command from the web console. */
 void handleConsoleCommand()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeConsoleRequest())
     return;
@@ -5287,7 +5378,7 @@ void handleConsoleCommand()
 /** Clears the retained RAM console buffer from the web console page. */
 void handleConsoleClear()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeConsoleRequest())
     return;
@@ -5317,7 +5408,7 @@ void registerWebRoutes()
   server.on(kOnboardingMatrixTestPath, HTTP_GET, handleOnboardingMatrixTest);
   server.on("/", handleRoot);
   server.on(kDiagnosticsPath, []() {
-    if (iotWebConf.handleCaptivePortal())
+    if (handleClockCaptivePortal())
       return;
     if (!authorizeAdminRequest())
       return;
@@ -5357,6 +5448,8 @@ void registerWebRoutes()
   server.on(kRebootPath, handleReboot);
   server.onNotFound([]()
                     {
+                      if (handleClockCaptivePortal())
+                        return;
                       if (isProtectedPortalState() && !hasValidWebSession())
                       {
                         redirectToLogin(server.uri());
@@ -5368,7 +5461,7 @@ void registerWebRoutes()
 
 void handleRoot()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!isSetupPortalState() && !authorizeAdminRequest())
     return;
@@ -5395,7 +5488,7 @@ void handleRoot()
 
 void handleReboot()
 {
-  if (iotWebConf.handleCaptivePortal())
+  if (handleClockCaptivePortal())
     return;
   if (!authorizeAdminRequest())
     return;
@@ -5460,6 +5553,58 @@ bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
           !isSupportedGpsBaud(parsedBaud))
       {
         gps_baud.errorMessage = "Choose a supported GPS baud rate.";
+        return false;
+      }
+    }
+
+    const bool hardwarePinsSubmitted =
+        webRequestWrapper->hasArg("led_data_pin") ||
+        webRequestWrapper->hasArg("gps_rx_pin") ||
+        webRequestWrapper->hasArg("gps_tx_pin") ||
+        webRequestWrapper->hasArg("i2c_sda_pin") ||
+        webRequestWrapper->hasArg("i2c_scl_pin");
+    if (hardwarePinsSubmitted)
+    {
+      auto parseSubmittedHardwarePin =
+          [&](const char *id, iotwebconf::IntTParameter<int16_t> &parameter, int16_t &target) -> bool
+      {
+        if (!webRequestWrapper->hasArg(id))
+          return true;
+
+        String submittedPin = webRequestWrapper->arg(id);
+        submittedPin.trim();
+        char *end = nullptr;
+        const long parsedPin = strtol(submittedPin.c_str(), &end, 10);
+        if (submittedPin.length() == 0 || end == submittedPin.c_str() || (end != nullptr && *end != '\0') ||
+            parsedPin < -32768L || parsedPin > 32767L)
+        {
+          parameter.errorMessage = "Enter a GPIO number.";
+          return false;
+        }
+
+        target = static_cast<int16_t>(parsedPin);
+        return true;
+      };
+
+      HardwarePinSettings submittedPins = configuredHardwarePinSettings();
+      if (!parseSubmittedHardwarePin("led_data_pin", led_data_pin, submittedPins.ledDataPin) ||
+          !parseSubmittedHardwarePin("gps_rx_pin", gps_rx_pin, submittedPins.gpsRxPin) ||
+          !parseSubmittedHardwarePin("gps_tx_pin", gps_tx_pin, submittedPins.gpsTxPin) ||
+          !parseSubmittedHardwarePin("i2c_sda_pin", i2c_sda_pin, submittedPins.i2cSdaPin) ||
+          !parseSubmittedHardwarePin("i2c_scl_pin", i2c_scl_pin, submittedPins.i2cSclPin))
+      {
+        return false;
+      }
+
+      String pinError;
+      if (!isHardwarePinConfigurationValid(submittedPins, pinError))
+      {
+        ESP_LOGW(TAG, "Rejected hardware pin form values: %s", pinError.c_str());
+        led_data_pin.errorMessage = "Choose valid, unique GPIOs that are not reserved by flash.";
+        gps_rx_pin.errorMessage = "Choose valid, unique GPIOs that are not reserved by flash.";
+        gps_tx_pin.errorMessage = "Choose valid, unique GPIOs that are not reserved by flash.";
+        i2c_sda_pin.errorMessage = "Choose valid, unique GPIOs that are not reserved by flash.";
+        i2c_scl_pin.errorMessage = "Choose valid, unique GPIOs that are not reserved by flash.";
         return false;
       }
     }

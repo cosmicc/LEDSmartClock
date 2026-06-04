@@ -55,6 +55,7 @@ The onboarding flow walks through:
 
 Useful setup notes:
 
+- If the automatic Wi-Fi login/setup page is refused or does not open after joining the `LEDSMARTCLOCK` network, open `http://192.168.4.1` manually in a browser.
 - If you already have a config backup, restore it before entering everything by hand.
 - Web password protection is optional.
 - If GPS is unavailable, the clock can still operate with fixed coordinates, a manual timezone name such as `America/New_York`, or a fixed GMT offset.

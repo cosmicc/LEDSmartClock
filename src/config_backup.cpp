@@ -15,6 +15,13 @@ struct ConfigBackupField
   bool (*importValue)(JsonVariantConst value);
 };
 
+enum class HardwarePinCapability
+{
+  Input,
+  Output,
+  LedData,
+};
+
 /** Writes a classic IotWebConf text/password buffer into the JSON values object. */
 void exportClassicBuffer(JsonObject values, const char *key, iotwebconf::Parameter &parameter)
 {
@@ -206,6 +213,34 @@ bool importGpsBaudValue(JsonVariantConst value)
   return true;
 }
 
+/** Restores one hardware-pin setting while enforcing capability-specific safety checks. */
+bool importHardwarePinValue(JsonVariantConst value, iotwebconf::IntTParameter<int16_t> &destination, HardwarePinCapability capability)
+{
+  int32_t parsed = 0;
+  if (!parseImportedInt(value, parsed) || parsed < -32768L || parsed > 32767L)
+    return false;
+
+  const int16_t pin = static_cast<int16_t>(parsed);
+  switch (capability)
+  {
+    case HardwarePinCapability::Input:
+      if (!isHardwareInputPinUsable(pin))
+        return false;
+      break;
+    case HardwarePinCapability::Output:
+      if (!isHardwareOutputPinUsable(pin))
+        return false;
+      break;
+    case HardwarePinCapability::LedData:
+      if (!isHardwareOutputPinUsable(pin) || !isSupportedLedDataPin(pin))
+        return false;
+      break;
+  }
+
+  destination.value() = pin;
+  return true;
+}
+
 #define CLASSIC_FIELD(idLiteral, paramExpr)                                                                                  \
   {                                                                                                                          \
     idLiteral, [](JsonObject values, const char *key) { exportClassicBuffer(values, key, *(paramExpr)); },                  \
@@ -243,6 +278,12 @@ bool importGpsBaudValue(JsonVariantConst value)
       [](JsonVariantConst value) { return importGpsBaudValue(value); }                                                       \
   }
 
+#define HARDWARE_PIN_FIELD(idLiteral, param, capability)                                                                      \
+  {                                                                                                                          \
+    idLiteral, [](JsonObject values, const char *key) { values[key] = param.value(); },                                      \
+      [](JsonVariantConst value) { return importHardwarePinValue(value, param, capability); }                                \
+  }
+
 /** Stable backup schema used to export and import config by key instead of storage order. */
 const ConfigBackupField kConfigBackupFields[] = {
     CLASSIC_FIELD("iwcThingName", iotWebConf.getThingNameParameter()),
@@ -278,6 +319,12 @@ const ConfigBackupField kConfigBackupFields[] = {
     TEXT_FIELD("ntp_server", ntp_server),
     BOOL_FIELD("override_dhcp_ntp", override_dhcp_ntp),
     GPS_BAUD_FIELD("gps_baud"),
+    TEXT_FIELD("hardware_profile", hardware_profile),
+    HARDWARE_PIN_FIELD("led_data_pin", led_data_pin, HardwarePinCapability::LedData),
+    HARDWARE_PIN_FIELD("gps_rx_pin", gps_rx_pin, HardwarePinCapability::Input),
+    HARDWARE_PIN_FIELD("gps_tx_pin", gps_tx_pin, HardwarePinCapability::Output),
+    HARDWARE_PIN_FIELD("i2c_sda_pin", i2c_sda_pin, HardwarePinCapability::Output),
+    HARDWARE_PIN_FIELD("i2c_scl_pin", i2c_scl_pin, HardwarePinCapability::Output),
     BOOL_FIELD("colonflicker", colonflicker),
     BOOL_FIELD("flickerfast", flickerfast),
     BOOL_FIELD("enable_clock_color", enable_clock_color),
@@ -366,7 +413,7 @@ bool serializeLiveConfiguration(String &json, String &error, bool includeMetadat
   error = "";
   json = "";
 
-  DynamicJsonDocument document(16384);
+  DynamicJsonDocument document(18432);
   if (!buildConfigurationDocument(document, includeMetadata))
   {
     error = F("Unable to allocate configuration document.");
@@ -456,7 +503,7 @@ bool importConfigurationBackup(const String &json, ConfigImportResult &result)
     return false;
   }
 
-  DynamicJsonDocument document(24576);
+  DynamicJsonDocument document(26624);
   DeserializationError parseError = deserializeJson(document, json);
   if (parseError)
   {
@@ -522,7 +569,7 @@ bool loadStoredConfiguration(String &error)
     return false;
   }
 
-  DynamicJsonDocument document(24576);
+  DynamicJsonDocument document(26624);
   DeserializationError parseError = deserializeJson(document, json);
   if (parseError)
   {

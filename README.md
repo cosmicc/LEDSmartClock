@@ -10,7 +10,7 @@ LED Smart Clock is an ESP32-based wall clock for an 8x32 WS2812B LED matrix. It 
 
 <p align="center">
   <a href="https://www.pcbway.com/" target="_blank">
-    <img src="pcbway-logo.png" alt="PCBWay logo" width="420">
+    <img src="docs/images/pcbway-logo.png" alt="PCBWay logo" width="420">
   </a>
 </p>
 
@@ -37,6 +37,7 @@ Thank you to PCBWay for supporting this project and for helping makers, develope
 - Web dashboard with service health, build metadata, GPS state, weather, AQI, alerts, and sun-event source.
 - Diagnostics page with live service status, GPS recovery actions, raw NMEA, and one-shot display tests.
 - Live web console with downloadable in-memory logs and web-triggered debug commands.
+- Advanced hardware-pin settings for adapting the LED matrix, GPS UART, and shared I2C bus to different ESP32 boards.
 - First-boot onboarding, optional password protection, dark mode, Basic and Advanced config views, factory-default reset, OTA updates, and version-tolerant config backup and restore.
 
 ## Quick Links
@@ -50,7 +51,7 @@ Thank you to PCBWay for supporting this project and for helping makers, develope
 
 The current project assumes:
 
-- ESP32 development board
+- ESP32 development board with enough usable GPIO for the display, GPS UART, shared I2C bus, and optional config/status pins
 - 8x32 WS2812B LED matrix
 - DS3231 RTC module
 - TSL2561 light sensor
@@ -58,23 +59,47 @@ The current project assumes:
 - 5V power supply sized for the LED matrix
 - Custom PCB revision manufactured with support from PCBWay for cleaner module interconnects and power wiring
 
-The PlatformIO target is currently `esp32dev`. Earlier project notes referenced ESP32-S3 hardware, so confirm your actual board target and pinout before flashing.
+The default PlatformIO environment is `esp32dev`, but the wiring is configurable. Choose the PlatformIO board target and pin settings that match your actual ESP32 module before flashing.
 
 ### ESP32 Pinout
 
-These are the GPIO assignments used by the current firmware for the `esp32dev` target.
+These are the shipped default GPIO assignments. They are not a requirement; use the Advanced `Hardware Pins` settings or build flags below when your ESP32 module uses a different pinout.
 
 | Device | Device Pin | ESP32 Pin | Firmware Reference | Notes |
 | --- | --- | --- | --- | --- |
-| WS2812B 8x32 LED matrix | `DIN` / data in | GPIO 23 | `HSPI_MOSI` | FastLED drives the matrix data line from this pin. |
-| NEO-6M GPS | `TX` | GPIO 16 | `GPS_RX_PIN` | GPS transmit connects to ESP32 receive. Default baud is `9600`, configurable in the web UI. |
-| NEO-6M GPS | `RX` | GPIO 17 | `GPS_TX_PIN` | ESP32 transmit connects to GPS receive for receiver commands and recovery tools. |
-| DS3231 RTC | `SDA` | GPIO 21 | Arduino `SDA` / `TSL2561_SDA` | Shared I2C data line with the TSL2561. |
-| DS3231 RTC | `SCL` | GPIO 22 | Arduino `SCL` / `TSL2561_SCL` | Shared I2C clock line with the TSL2561. |
-| TSL2561 light sensor | `SDA` | GPIO 21 | Arduino `SDA` / `TSL2561_SDA` | Connect to the same I2C bus as the RTC. |
-| TSL2561 light sensor | `SCL` | GPIO 22 | Arduino `SCL` / `TSL2561_SCL` | Connect to the same I2C bus as the RTC. |
-| Optional configuration button | One side of momentary switch | GPIO 19 | `CONFIG_PIN` | IotWebConf config input uses `INPUT_PULLUP`; connect the other side of the switch to `GND`. |
-| Built-in status LED | On-board LED | GPIO 2 | `STATUS_PIN` | Usually no external wiring is needed on common ESP32 dev boards. |
+| WS2812B 8x32 LED matrix | `DIN` / data in | GPIO 23 | `LEDCLOCK_DEFAULT_LED_DATA_PIN` / `led_data_pin` | FastLED drives the matrix data line from this pin. Changing it in Advanced config requests a reboot. |
+| NEO-6M GPS | `TX` | GPIO 16 | `LEDCLOCK_DEFAULT_GPS_RX_PIN` / `gps_rx_pin` | GPS transmit connects to ESP32 receive. Default baud is `9600`, configurable in the web UI. |
+| NEO-6M GPS | `RX` | GPIO 17 | `LEDCLOCK_DEFAULT_GPS_TX_PIN` / `gps_tx_pin` | ESP32 transmit connects to GPS receive for receiver commands and recovery tools. |
+| DS3231 RTC | `SDA` | GPIO 21 | `LEDCLOCK_DEFAULT_I2C_SDA_PIN` / `i2c_sda_pin` | Shared I2C data line with the TSL2561. Applies when saved. |
+| DS3231 RTC | `SCL` | GPIO 22 | `LEDCLOCK_DEFAULT_I2C_SCL_PIN` / `i2c_scl_pin` | Shared I2C clock line with the TSL2561. Applies when saved. |
+| TSL2561 light sensor | `SDA` | GPIO 21 | `LEDCLOCK_DEFAULT_I2C_SDA_PIN` / `i2c_sda_pin` | Connect to the same I2C bus as the RTC. |
+| TSL2561 light sensor | `SCL` | GPIO 22 | `LEDCLOCK_DEFAULT_I2C_SCL_PIN` / `i2c_scl_pin` | Connect to the same I2C bus as the RTC. |
+| Optional configuration button | One side of momentary switch | GPIO 19 | `LEDCLOCK_DEFAULT_CONFIG_PIN` / `CONFIG_PIN` | Compile-time recovery pin. IotWebConf reads it before saved config is loaded; connect the other side of the switch to `GND`. |
+| Built-in status LED | On-board LED | GPIO 2 | `LEDCLOCK_DEFAULT_STATUS_PIN` / `STATUS_PIN` | Compile-time IotWebConf status LED. Usually no external wiring is needed on common ESP32 dev boards. |
+
+Pin customization:
+
+- In the web interface, open `Configuration` -> `Advanced` -> `Hardware Pins` to change `led_data_pin`, `gps_rx_pin`, `gps_tx_pin`, `i2c_sda_pin`, and `i2c_scl_pin`.
+- GPS and I2C pin changes are applied when saved. LED data pin changes request a reboot because FastLED binds the GPIO during startup.
+- The backup/export file includes the hardware profile label and runtime pin settings, so pin customizations move with the rest of the saved configuration.
+- Runtime pins cannot overlap each other or the compile-time config button/status LED pins. Move `LEDCLOCK_DEFAULT_CONFIG_PIN` or `LEDCLOCK_DEFAULT_STATUS_PIN` with build flags first if your board needs those GPIOs for another signal.
+- Avoid GPIO 6-11 because they are normally connected to flash. On classic ESP32 boards, GPIO 34-39 are input-only and cannot drive the LED matrix, GPS TX, or I2C. Boot strapping pins can affect startup on some boards, so check your board's pinout before moving signals there.
+
+To change the compile-time defaults for a board profile, add PlatformIO `build_flags` for the target environment. Example:
+
+```ini
+build_flags =
+  -DLEDCLOCK_BOARD_PROFILE=\"custom-esp32\"
+  -DLEDCLOCK_DEFAULT_LED_DATA_PIN=23
+  -DLEDCLOCK_DEFAULT_GPS_RX_PIN=16
+  -DLEDCLOCK_DEFAULT_GPS_TX_PIN=17
+  -DLEDCLOCK_DEFAULT_I2C_SDA_PIN=21
+  -DLEDCLOCK_DEFAULT_I2C_SCL_PIN=22
+  -DLEDCLOCK_DEFAULT_CONFIG_PIN=19
+  -DLEDCLOCK_DEFAULT_STATUS_PIN=2
+```
+
+For ESP32 variants with GPIO numbers above 39, also set `LEDCLOCK_MAX_GPIO_PIN` for that board build.
 
 Power notes:
 
@@ -92,7 +117,7 @@ The firmware exposes these main pages:
 | Dashboard | Current clock state, service health, firmware version, git commit, board target, build date, location, GPS, weather, AQI, alerts, and sun events. |
 | Diagnostics | Per-service health, retry state, last errors, GPS raw NMEA, GPS parser/UART recovery, and display-test actions. |
 | Console | Live in-memory debug output, downloadable logs, clear-console action, and web-triggered debug commands. |
-| Configuration | Detailed grouped settings for Wi-Fi, display, clock behavior, current weather, daily weather, air quality, weather alerts, status indicators, sun events, location, GPS, Basic/Advanced mode, dark mode, and maintenance. |
+| Configuration | Detailed grouped settings for Wi-Fi, display, clock behavior, current weather, daily weather, air quality, weather alerts, status indicators, sun events, location, hardware pins, GPS, Basic/Advanced mode, dark mode, and maintenance. |
 | Firmware Update | OTA upload for `update.bin` with progress, validation, success/failure feedback, and backup reminders. |
 | Backup & Restore | JSON export and import of saved settings using stable field IDs. |
 
@@ -110,7 +135,7 @@ Settings are stored by stable key instead of positional EEPROM-style layout. New
 
 Backup and restore behavior:
 
-- Exports include Wi-Fi credentials, web and AP passwords, API keys, display settings, location overrides, and saved fallback state.
+- Exports include Wi-Fi credentials, web and AP passwords, API keys, display settings, hardware-pin settings, location overrides, and saved fallback state.
 - Restore matches known settings by stable JSON field IDs.
 - Unknown fields are ignored.
 - Invalid recognized values are rejected individually instead of failing the entire import.
@@ -145,13 +170,12 @@ If serial debug output is enabled in configuration, the same runtime diagnostics
 - `scripts/` - build metadata, release package, and artifact helpers
 - `web-installer/` - hosted/local browser installer template
 - `docs/feature-changelog.md` - completed work and planned feature changes for the v2 firmware line
-- `docs/images/` - project photos used in this README
-- `pcbway-logo.png` - PCBWay sponsor logo used in this README
+- `docs/images/` - README images
 - `INSTALL.md` - end-user install, first boot, update, and release artifact notes
 
 ## Known Caveats
 
-- The current PlatformIO target is `esp32dev`, while older project notes referenced ESP32-S3 hardware.
+- The default PlatformIO environment is `esp32dev`; change the board target and hardware-pin settings when building for a different ESP32 module.
 - OTA updates use `update.bin` only. First-time installs and full recovery flashes use `firmware.bin`.
 - Weather and geolocation features depend on valid API keys and network access.
 - GPS issues can be caused by hardware, wiring, antenna placement, or sky visibility rather than firmware alone.

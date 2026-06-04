@@ -1,7 +1,7 @@
 # LEDSmartClock Feature Changelog
 
 This file tracks completed work and the ranked roadmap for the v2 firmware line.
-It is updated through firmware v2.7.2.
+It is updated through firmware v2.8.0.
 
 ## Current Priorities
 

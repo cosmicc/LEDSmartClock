@@ -9,6 +9,8 @@ constexpr uint32_t kLightSensorRecoveryDelayMs = 30000UL;
 bool lightSensorHealthy = false;
 uint8_t lightSensorFailures = 0;
 uint32_t nextLightSensorRecoveryMillis = 0;
+int16_t activeI2cSdaPin = LEDCLOCK_DEFAULT_I2C_SDA_PIN;
+int16_t activeI2cSclPin = LEDCLOCK_DEFAULT_I2C_SCL_PIN;
 
 void setFixedBrightnessFallback()
 {
@@ -60,16 +62,28 @@ bool bringUpLightSensor()
 
 void initializeI2cBus(const char *reason)
 {
+  activeI2cSdaPin = i2cSdaPin();
+  activeI2cSclPin = i2cSclPin();
   Wire.end();
   delay(2);
-  Wire.begin(TSL2561_SDA, TSL2561_SCL);
+  Wire.begin(activeI2cSdaPin, activeI2cSclPin);
   Wire.setTimeOut(kI2cTransactionTimeoutMs);
   wireInterface.begin();
   ESP_LOGI(TAG, "I2C bus initialized on SDA:%d SCL:%d with %u ms transaction timeout (%s)",
-           TSL2561_SDA,
-           TSL2561_SCL,
+           activeI2cSdaPin,
+           activeI2cSclPin,
            static_cast<unsigned>(kI2cTransactionTimeoutMs),
            reason == nullptr ? "startup" : reason);
+}
+
+int16_t i2cActiveSdaPin()
+{
+  return activeI2cSdaPin;
+}
+
+int16_t i2cActiveSclPin()
+{
+  return activeI2cSclPin;
 }
 
 bool initializeLightSensor(uint32_t timeoutMs)

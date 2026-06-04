@@ -2,12 +2,14 @@
 
 namespace
 {
-// The application now treats the key-based NVS store as authoritative. Keep a
-// distinct marker for IotWebConf's internal blob so old positional layouts are
-// no longer recognized as valid application config during boot.
-constexpr char kIotWebConfStorageMarker[] = "NVS2";
+// The application treats the key-based NVS store as authoritative. Bump this
+// marker whenever IotWebConf's positional layout changes so an older blob is
+// ignored instead of decoded into the wrong parameters during boot.
+constexpr char kIotWebConfStorageMarker[] = "NVS3";
 constexpr size_t kGpsBaudOptionLength = 7;
 constexpr size_t kGpsBaudOptionCount = 10;
+constexpr int16_t kMinHardwareGpioPin = 0;
+constexpr int16_t kMaxHardwareGpioPin = LEDCLOCK_MAX_GPIO_PIN;
 constexpr char kDefaultGpsBaudValue[] = "9600";
 constexpr char kGpsBaudOptionValues[] =
   "1200\0\0\0"
@@ -20,6 +22,7 @@ constexpr char kGpsBaudOptionValues[] =
   "38400\0\0"
   "57600\0\0"
   "115200\0";
+bool hardwarePinParametersReady = false;
 }
 
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, kIotWebConfStorageMarker);
@@ -175,6 +178,19 @@ iotwebconf::TextTParameter<12> fixedLat =
 iotwebconf::TextTParameter<12> fixedLon =
   iotwebconf::Builder<iotwebconf::TextTParameter<12>>("fixedLon").label("Custom longitude").defaultValue("").build();
 iotwebconf::ParameterGroup group10 = iotwebconf::ParameterGroup("GPS", "GPS & Receiver");
+iotwebconf::ParameterGroup group13 = iotwebconf::ParameterGroup("Hardware", "Hardware Pins");
+iotwebconf::TextTParameter<24> hardware_profile =
+  iotwebconf::Builder<iotwebconf::TextTParameter<24>>("hardware_profile").label("Hardware profile label").defaultValue(LEDCLOCK_BOARD_PROFILE).build();
+iotwebconf::IntTParameter<int16_t> led_data_pin =
+  iotwebconf::Builder<iotwebconf::IntTParameter<int16_t>>("led_data_pin").label("LED matrix data GPIO").defaultValue(static_cast<int16_t>(LEDCLOCK_DEFAULT_LED_DATA_PIN)).min(kMinHardwareGpioPin).max(kMaxHardwareGpioPin).step(1).placeholder("GPIO").build();
+iotwebconf::IntTParameter<int16_t> gps_rx_pin =
+  iotwebconf::Builder<iotwebconf::IntTParameter<int16_t>>("gps_rx_pin").label("GPS RX GPIO").defaultValue(static_cast<int16_t>(LEDCLOCK_DEFAULT_GPS_RX_PIN)).min(kMinHardwareGpioPin).max(kMaxHardwareGpioPin).step(1).placeholder("GPIO").build();
+iotwebconf::IntTParameter<int16_t> gps_tx_pin =
+  iotwebconf::Builder<iotwebconf::IntTParameter<int16_t>>("gps_tx_pin").label("GPS TX GPIO").defaultValue(static_cast<int16_t>(LEDCLOCK_DEFAULT_GPS_TX_PIN)).min(kMinHardwareGpioPin).max(kMaxHardwareGpioPin).step(1).placeholder("GPIO").build();
+iotwebconf::IntTParameter<int16_t> i2c_sda_pin =
+  iotwebconf::Builder<iotwebconf::IntTParameter<int16_t>>("i2c_sda_pin").label("I2C SDA GPIO").defaultValue(static_cast<int16_t>(LEDCLOCK_DEFAULT_I2C_SDA_PIN)).min(kMinHardwareGpioPin).max(kMaxHardwareGpioPin).step(1).placeholder("GPIO").build();
+iotwebconf::IntTParameter<int16_t> i2c_scl_pin =
+  iotwebconf::Builder<iotwebconf::IntTParameter<int16_t>>("i2c_scl_pin").label("I2C SCL GPIO").defaultValue(static_cast<int16_t>(LEDCLOCK_DEFAULT_I2C_SCL_PIN)).min(kMinHardwareGpioPin).max(kMaxHardwareGpioPin).step(1).placeholder("GPIO").build();
 iotwebconf::ParameterGroup group12 = iotwebconf::ParameterGroup("Maintenance", "Maintenance");
 
 bool hasConfiguredWebPassword(const char *password)
@@ -184,6 +200,133 @@ bool hasConfiguredWebPassword(const char *password)
 
 namespace
 {
+/** Returns true when a GPIO is one of the ESP32 flash pins that should not be used for project wiring. */
+bool isReservedFlashGpio(int16_t pin)
+{
+  return pin >= 6 && pin <= 11;
+}
+
+/** Returns true for classic ESP32 pins that are input-only and cannot drive UART TX, I2C, or LEDs. */
+bool isClassicEsp32InputOnlyGpio(int16_t pin)
+{
+#ifdef CONFIG_IDF_TARGET_ESP32
+  return pin >= 34 && pin <= 39;
+#else
+  (void)pin;
+  return false;
+#endif
+}
+
+/** Returns true when the GPIO number exists in the configured board profile range. */
+bool isGpioInConfiguredRange(int16_t pin)
+{
+  return pin >= kMinHardwareGpioPin && pin <= kMaxHardwareGpioPin;
+}
+
+/** Validates one input-capable GPIO and writes a field-specific error on failure. */
+bool validateInputPin(const char *label, int16_t pin, String &error)
+{
+  if (!isHardwareInputPinUsable(pin))
+  {
+    error = String(label) + F(" must be a usable GPIO from 0 to ") + kMaxHardwareGpioPin +
+            F(" and cannot be flash GPIO 6-11.");
+    return false;
+  }
+  return true;
+}
+
+/** Validates one output-capable GPIO and writes a field-specific error on failure. */
+bool validateOutputPin(const char *label, int16_t pin, String &error)
+{
+  if (!isHardwareOutputPinUsable(pin))
+  {
+    error = String(label) + F(" must be an output-capable GPIO from 0 to ") + kMaxHardwareGpioPin +
+            F(" and cannot be flash GPIO 6-11 or an input-only pin.");
+    return false;
+  }
+  return true;
+}
+
+/** Returns true when two runtime hardware signals were assigned to the same GPIO. */
+bool hasDuplicateHardwarePins(const HardwarePinSettings &settings, String &error)
+{
+  struct NamedPin
+  {
+    const char *name;
+    int16_t pin;
+  };
+
+  const NamedPin pins[] = {
+      {"LED data", settings.ledDataPin},
+      {"GPS RX", settings.gpsRxPin},
+      {"GPS TX", settings.gpsTxPin},
+      {"I2C SDA", settings.i2cSdaPin},
+      {"I2C SCL", settings.i2cSclPin},
+  };
+
+  for (size_t left = 0; left < sizeof(pins) / sizeof(pins[0]); ++left)
+  {
+    for (size_t right = left + 1; right < sizeof(pins) / sizeof(pins[0]); ++right)
+    {
+      if (pins[left].pin == pins[right].pin)
+      {
+        error = String(F("GPIO ")) + pins[left].pin + F(" is assigned to both ") +
+                pins[left].name + F(" and ") + pins[right].name + F(".");
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/** Returns true when a runtime signal conflicts with the compile-time config/status pins. */
+bool hasCompileTimeControlPinConflict(const HardwarePinSettings &settings, String &error)
+{
+  struct NamedPin
+  {
+    const char *name;
+    int16_t pin;
+  };
+
+  const NamedPin pins[] = {
+      {"LED data", settings.ledDataPin},
+      {"GPS RX", settings.gpsRxPin},
+      {"GPS TX", settings.gpsTxPin},
+      {"I2C SDA", settings.i2cSdaPin},
+      {"I2C SCL", settings.i2cSclPin},
+  };
+
+  for (const NamedPin &pin : pins)
+  {
+    if (pin.pin == CONFIG_PIN)
+    {
+      error = String(pin.name) + F(" cannot use GPIO ") + CONFIG_PIN +
+              F(" because that GPIO is reserved for the compile-time config button.");
+      return true;
+    }
+    if (pin.pin == STATUS_PIN)
+    {
+      error = String(pin.name) + F(" cannot use GPIO ") + STATUS_PIN +
+              F(" because that GPIO is reserved for the compile-time IotWebConf status LED.");
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** Restores all runtime wiring pins to the compile-time profile defaults. */
+void applyDefaultHardwarePinSettings()
+{
+  const HardwarePinSettings defaults = defaultHardwarePinSettings();
+  led_data_pin.value() = defaults.ledDataPin;
+  gps_rx_pin.value() = defaults.gpsRxPin;
+  gps_tx_pin.value() = defaults.gpsTxPin;
+  i2c_sda_pin.value() = defaults.i2cSdaPin;
+  i2c_scl_pin.value() = defaults.i2cSclPin;
+}
+
 /** Clamps an integer config parameter into its supported range in memory. */
 template <typename T>
 bool normalizeIntParameter(iotwebconf::IntTParameter<T> &parameter, T minValue, T maxValue, T fallbackValue)
@@ -257,6 +400,12 @@ void normalizeLoadedConfigValuesImpl()
   if (!isSupportedGpsBaudValue(static_cast<int32_t>(strtol(gps_baud.value(), nullptr, 10))))
   {
     strlcpy(gps_baud.value(), kDefaultGpsBaudValue, sizeof(gps_baud.value()));
+    corrected = true;
+  }
+  corrected |= normalizeHardwarePinSettings();
+  if (hardware_profile.value()[0] == '\0')
+  {
+    strlcpy(hardware_profile.value(), compiledHardwareProfile(), sizeof(hardware_profile.value()));
     corrected = true;
   }
   if (ntp_server.value()[0] == '\0')
@@ -355,6 +504,13 @@ void populateParameterGroups()
 
   group10.addItem(&gps_baud);
 
+  group13.addItem(&hardware_profile);
+  group13.addItem(&led_data_pin);
+  group13.addItem(&gps_rx_pin);
+  group13.addItem(&gps_tx_pin);
+  group13.addItem(&i2c_sda_pin);
+  group13.addItem(&i2c_scl_pin);
+
   group12.addItem(&serialdebug);
   group12.addItem(&resetdefaults);
 }
@@ -372,10 +528,164 @@ void addParameterGroups()
   iotWebConf.addParameterGroup(&group7);
   iotWebConf.addParameterGroup(&group8);
   iotWebConf.addParameterGroup(&group9);
+  iotWebConf.addParameterGroup(&group13);
   iotWebConf.addParameterGroup(&group10);
   iotWebConf.addParameterGroup(&group12);
 }
 } // namespace
+
+const char *compiledHardwareProfile()
+{
+  return LEDCLOCK_BOARD_PROFILE;
+}
+
+HardwarePinSettings defaultHardwarePinSettings()
+{
+  return HardwarePinSettings{
+      static_cast<int16_t>(LEDCLOCK_DEFAULT_LED_DATA_PIN),
+      static_cast<int16_t>(LEDCLOCK_DEFAULT_GPS_RX_PIN),
+      static_cast<int16_t>(LEDCLOCK_DEFAULT_GPS_TX_PIN),
+      static_cast<int16_t>(LEDCLOCK_DEFAULT_I2C_SDA_PIN),
+      static_cast<int16_t>(LEDCLOCK_DEFAULT_I2C_SCL_PIN),
+  };
+}
+
+HardwarePinSettings rawConfiguredHardwarePinSettings()
+{
+  return HardwarePinSettings{
+      led_data_pin.value(),
+      gps_rx_pin.value(),
+      gps_tx_pin.value(),
+      i2c_sda_pin.value(),
+      i2c_scl_pin.value(),
+  };
+}
+
+HardwarePinSettings configuredHardwarePinSettings()
+{
+  return hardwarePinParametersReady ? rawConfiguredHardwarePinSettings() : defaultHardwarePinSettings();
+}
+
+bool isHardwareInputPinUsable(int16_t pin)
+{
+  return isGpioInConfiguredRange(pin) && !isReservedFlashGpio(pin);
+}
+
+bool isHardwareOutputPinUsable(int16_t pin)
+{
+  return isHardwareInputPinUsable(pin) && !isClassicEsp32InputOnlyGpio(pin);
+}
+
+bool isSupportedLedDataPin(int16_t pin)
+{
+  switch (pin)
+  {
+    case 2:
+    case 4:
+    case 5:
+    case 12:
+    case 13:
+    case 14:
+    case 15:
+    case 16:
+    case 17:
+    case 18:
+    case 19:
+    case 21:
+    case 22:
+    case 23:
+    case 25:
+    case 26:
+    case 27:
+    case 32:
+    case 33:
+      return true;
+#ifndef CONFIG_IDF_TARGET_ESP32
+    case 34:
+    case 35:
+    case 36:
+    case 37:
+    case 38:
+    case 39:
+#if LEDCLOCK_MAX_GPIO_PIN >= 40
+    case 40:
+    case 41:
+    case 42:
+    case 43:
+    case 44:
+    case 45:
+    case 46:
+    case 47:
+    case 48:
+#endif
+      return true;
+#endif
+    default:
+      return false;
+  }
+}
+
+bool isHardwarePinConfigurationValid(const HardwarePinSettings &settings, String &error)
+{
+  error = "";
+  if (!validateOutputPin("LED data pin", settings.ledDataPin, error))
+    return false;
+  if (!isSupportedLedDataPin(settings.ledDataPin))
+  {
+    error = F("LED data pin must use one of the GPIOs supported by this firmware build's FastLED switch table.");
+    return false;
+  }
+  if (!validateInputPin("GPS RX pin", settings.gpsRxPin, error))
+    return false;
+  if (!validateOutputPin("GPS TX pin", settings.gpsTxPin, error))
+    return false;
+  if (!validateOutputPin("I2C SDA pin", settings.i2cSdaPin, error))
+    return false;
+  if (!validateOutputPin("I2C SCL pin", settings.i2cSclPin, error))
+    return false;
+  if (hasDuplicateHardwarePins(settings, error))
+    return false;
+  if (hasCompileTimeControlPinConflict(settings, error))
+    return false;
+  return true;
+}
+
+bool normalizeHardwarePinSettings()
+{
+  String error;
+  if (isHardwarePinConfigurationValid(configuredHardwarePinSettings(), error))
+    return false;
+
+  applyDefaultHardwarePinSettings();
+  ESP_LOGW(TAG, "Invalid hardware pin configuration reset to %s defaults: %s",
+           compiledHardwareProfile(), error.c_str());
+  return true;
+}
+
+int16_t ledDataPin()
+{
+  return configuredHardwarePinSettings().ledDataPin;
+}
+
+int16_t gpsRxPin()
+{
+  return configuredHardwarePinSettings().gpsRxPin;
+}
+
+int16_t gpsTxPin()
+{
+  return configuredHardwarePinSettings().gpsTxPin;
+}
+
+int16_t i2cSdaPin()
+{
+  return configuredHardwarePinSettings().i2cSdaPin;
+}
+
+int16_t i2cSclPin()
+{
+  return configuredHardwarePinSettings().i2cSclPin;
+}
 
 void normalizeLoadedConfigValues()
 {
@@ -415,5 +725,6 @@ void setupIotWebConf()
   // The key-based Preferences store owns persistence now, so start from
   // defaults here and let the JSON/NVS loader apply authoritative values.
   iotWebConf.getRootParameterGroup()->applyDefaultValue();
+  hardwarePinParametersReady = true;
   normalizeLoadedConfigValues();
 }

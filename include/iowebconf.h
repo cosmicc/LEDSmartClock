@@ -172,5 +172,19 @@ extern iotwebconf::TextTParameter<12> fixedLon;
 
 /** GPS receiver configuration section. */
 extern iotwebconf::ParameterGroup group10;
+/** Hardware pin configuration section. */
+extern iotwebconf::ParameterGroup group13;
+/** Editable label describing the active hardware wiring profile. */
+extern iotwebconf::TextTParameter<24> hardware_profile;
+/** GPIO used for the WS2812B matrix data input. */
+extern iotwebconf::IntTParameter<int16_t> led_data_pin;
+/** GPIO used as ESP32 RX for incoming GPS serial data. */
+extern iotwebconf::IntTParameter<int16_t> gps_rx_pin;
+/** GPIO used as ESP32 TX for GPS receiver commands. */
+extern iotwebconf::IntTParameter<int16_t> gps_tx_pin;
+/** GPIO used for the shared DS3231/TSL2561 I2C SDA line. */
+extern iotwebconf::IntTParameter<int16_t> i2c_sda_pin;
+/** GPIO used for the shared DS3231/TSL2561 I2C SCL line. */
+extern iotwebconf::IntTParameter<int16_t> i2c_scl_pin;
 /** Maintenance and recovery configuration section. */
 extern iotwebconf::ParameterGroup group12;

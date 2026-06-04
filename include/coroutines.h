@@ -1209,9 +1209,9 @@ COROUTINE_LOOP()
         if (gps.lastNoDataLogMillis == 0 || (nowMillis - gps.lastNoDataLogMillis) >= kGpsNoDataLogIntervalMs)
         {
             ESP_LOGW(TAG, "GPS has not produced any UART traffic yet on RX:%d TX:%d @ %lu baud. Check module power, wiring, and baud rate.",
-                     GPS_RX_PIN, GPS_TX_PIN, static_cast<unsigned long>(gpsActiveBaud()));
+                     gpsActiveRxPin(), gpsActiveTxPin(), static_cast<unsigned long>(gpsActiveBaud()));
             noteDiagnosticPending(DiagnosticService::Gps, true, "Waiting for UART",
-                                  String(F("No GPS UART traffic has been seen yet on RX ")) + GPS_RX_PIN + F(" / TX ") + GPS_TX_PIN +
+                                  String(F("No GPS UART traffic has been seen yet on RX ")) + gpsActiveRxPin() + F(" / TX ") + gpsActiveTxPin() +
                                       F(" at ") + gpsActiveBaud() + F(" baud."));
             gps.lastNoDataLogMillis = nowMillis;
         }

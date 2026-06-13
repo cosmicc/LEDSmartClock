@@ -37,5 +37,7 @@ pt-readback.bin
 
 .vscode/
 .pio/
-sdkconfig.esp32dev
+sdkconfig.*
+!sdkconfig.defaults
+!sdkconfig.defaults.*
 build/

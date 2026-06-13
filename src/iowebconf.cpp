@@ -1,16 +1,23 @@
 #include "main.h"
+#include <cstring>
 
 namespace
 {
 // The application treats the key-based NVS store as authoritative. Bump this
 // marker whenever IotWebConf's positional layout changes so an older blob is
 // ignored instead of decoded into the wrong parameters during boot.
-constexpr char kIotWebConfStorageMarker[] = "NVS3";
+constexpr char kIotWebConfStorageMarker[] = "NVS4";
 constexpr size_t kGpsBaudOptionLength = 7;
 constexpr size_t kGpsBaudOptionCount = 10;
+constexpr size_t kMatrixOptionLength = 12;
+constexpr size_t kMatrixOptionCount = 2;
 constexpr int16_t kMinHardwareGpioPin = 0;
 constexpr int16_t kMaxHardwareGpioPin = LEDCLOCK_MAX_GPIO_PIN;
 constexpr char kDefaultGpsBaudValue[] = "9600";
+constexpr char kDefaultMatrixOriginValue[] = "bottom";
+constexpr char kDefaultMatrixCornerValue[] = "right";
+constexpr char kDefaultMatrixAxisValue[] = "columns";
+constexpr char kDefaultMatrixOrderValue[] = "zigzag";
 constexpr char kGpsBaudOptionValues[] =
   "1200\0\0\0"
   "2400\0\0\0"
@@ -22,6 +29,38 @@ constexpr char kGpsBaudOptionValues[] =
   "38400\0\0"
   "57600\0\0"
   "115200\0";
+constexpr char kMatrixOriginOptionValues[] =
+  "bottom\0\0\0\0\0\0"
+  "top\0\0\0\0\0\0\0\0\0";
+constexpr char kMatrixOriginOptionNames[] =
+  "Bottom\0\0\0\0\0\0"
+  "Top\0\0\0\0\0\0\0\0\0";
+constexpr char kMatrixCornerOptionValues[] =
+  "right\0\0\0\0\0\0\0"
+  "left\0\0\0\0\0\0\0\0";
+constexpr char kMatrixCornerOptionNames[] =
+  "Right\0\0\0\0\0\0\0"
+  "Left\0\0\0\0\0\0\0\0";
+constexpr char kMatrixAxisOptionValues[] =
+  "columns\0\0\0\0\0"
+  "rows\0\0\0\0\0\0\0\0";
+constexpr char kMatrixAxisOptionNames[] =
+  "Columns\0\0\0\0\0"
+  "Rows\0\0\0\0\0\0\0\0";
+constexpr char kMatrixOrderOptionValues[] =
+  "zigzag\0\0\0\0\0\0"
+  "progressive\0";
+constexpr char kMatrixOrderOptionNames[] =
+  "Zigzag\0\0\0\0\0\0"
+  "Progressive\0";
+static_assert(sizeof(kMatrixOriginOptionValues) == (kMatrixOptionLength * kMatrixOptionCount) + 1, "Matrix origin options must be fixed-width.");
+static_assert(sizeof(kMatrixOriginOptionNames) == (kMatrixOptionLength * kMatrixOptionCount) + 1, "Matrix origin names must be fixed-width.");
+static_assert(sizeof(kMatrixCornerOptionValues) == (kMatrixOptionLength * kMatrixOptionCount) + 1, "Matrix corner options must be fixed-width.");
+static_assert(sizeof(kMatrixCornerOptionNames) == (kMatrixOptionLength * kMatrixOptionCount) + 1, "Matrix corner names must be fixed-width.");
+static_assert(sizeof(kMatrixAxisOptionValues) == (kMatrixOptionLength * kMatrixOptionCount) + 1, "Matrix axis options must be fixed-width.");
+static_assert(sizeof(kMatrixAxisOptionNames) == (kMatrixOptionLength * kMatrixOptionCount) + 1, "Matrix axis names must be fixed-width.");
+static_assert(sizeof(kMatrixOrderOptionValues) == (kMatrixOptionLength * kMatrixOptionCount) + 1, "Matrix order options must be fixed-width.");
+static_assert(sizeof(kMatrixOrderOptionNames) == (kMatrixOptionLength * kMatrixOptionCount) + 1, "Matrix order names must be fixed-width.");
 bool hardwarePinParametersReady = false;
 }
 
@@ -94,17 +133,17 @@ iotwebconf::CheckboxTParameter colonflicker =
 iotwebconf::CheckboxTParameter flickerfast =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("flickerfast").label("Fast clock colon flash (Only works if \"enable colon flash\" is enabled above)").defaultValue(false).build();
 iotwebconf::CheckboxTParameter enable_clock_color =
-  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_clock_color").label("Use custom clock color (Disables auto color)").defaultValue(false).build();
+  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_clock_color").label("Use static clock color (overrides automatic day/night color)").defaultValue(false).build();
 iotwebconf::ColorTParameter clock_color =
-  iotwebconf::Builder<iotwebconf::ColorTParameter>("clock_color").label("Custom clock color").defaultValue(DEF_CLOCK_COLOR).build();
+  iotwebconf::Builder<iotwebconf::ColorTParameter>("clock_color").label("Static clock color").defaultValue(DEF_CLOCK_COLOR).build();
 
 iotwebconf::ParameterGroup group3 = iotwebconf::ParameterGroup("CurrentTemp", "Current Temp");
 iotwebconf::CheckboxTParameter show_current_temp =
   iotwebconf::Builder<iotwebconf::CheckboxTParameter>("show_current_temp").label("Display current temperature").defaultValue(true).build();
 iotwebconf::CheckboxTParameter enable_temp_color =
-  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_temp_color").label("Use custom temperature color (Disables auto color)").defaultValue(false).build();
+  iotwebconf::Builder<iotwebconf::CheckboxTParameter>("enable_temp_color").label("Use static temperature color (overrides automatic temperature color)").defaultValue(false).build();
 iotwebconf::ColorTParameter temp_color =
-  iotwebconf::Builder<iotwebconf::ColorTParameter>("temp_color").label("Custom temperature color").defaultValue(DEF_TEMP_COLOR).build();
+  iotwebconf::Builder<iotwebconf::ColorTParameter>("temp_color").label("Static temperature color").defaultValue(DEF_TEMP_COLOR).build();
 iotwebconf::IntTParameter<int8_t> current_temp_interval =
   iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("current_temp_interval").label("Current temperature display interval in minutes (1-120)").defaultValue(DEF_TEMP_INTERVAL).min(1).max(120).step(1).placeholder("1(min)..120(min)").build();
 iotwebconf::IntTParameter<int8_t> current_temp_duration =
@@ -178,7 +217,7 @@ iotwebconf::TextTParameter<12> fixedLat =
 iotwebconf::TextTParameter<12> fixedLon =
   iotwebconf::Builder<iotwebconf::TextTParameter<12>>("fixedLon").label("Custom longitude").defaultValue("").build();
 iotwebconf::ParameterGroup group10 = iotwebconf::ParameterGroup("GPS", "GPS & Receiver");
-iotwebconf::ParameterGroup group13 = iotwebconf::ParameterGroup("Hardware", "Hardware Pins");
+iotwebconf::ParameterGroup group13 = iotwebconf::ParameterGroup("Hardware", "Hardware Pins & Matrix Layout");
 iotwebconf::TextTParameter<24> hardware_profile =
   iotwebconf::Builder<iotwebconf::TextTParameter<24>>("hardware_profile").label("Hardware profile label").defaultValue(LEDCLOCK_BOARD_PROFILE).build();
 iotwebconf::IntTParameter<int16_t> led_data_pin =
@@ -191,6 +230,14 @@ iotwebconf::IntTParameter<int16_t> i2c_sda_pin =
   iotwebconf::Builder<iotwebconf::IntTParameter<int16_t>>("i2c_sda_pin").label("I2C SDA GPIO").defaultValue(static_cast<int16_t>(LEDCLOCK_DEFAULT_I2C_SDA_PIN)).min(kMinHardwareGpioPin).max(kMaxHardwareGpioPin).step(1).placeholder("GPIO").build();
 iotwebconf::IntTParameter<int16_t> i2c_scl_pin =
   iotwebconf::Builder<iotwebconf::IntTParameter<int16_t>>("i2c_scl_pin").label("I2C SCL GPIO").defaultValue(static_cast<int16_t>(LEDCLOCK_DEFAULT_I2C_SCL_PIN)).min(kMinHardwareGpioPin).max(kMaxHardwareGpioPin).step(1).placeholder("GPIO").build();
+iotwebconf::SelectTParameter<12> matrix_origin =
+  iotwebconf::Builder<iotwebconf::SelectTParameter<12>>("matrix_origin").label("Matrix LED #0 vertical edge").defaultValue(kDefaultMatrixOriginValue).optionValues(kMatrixOriginOptionValues).optionNames(kMatrixOriginOptionNames).optionCount(kMatrixOptionCount).nameLength(kMatrixOptionLength).build();
+iotwebconf::SelectTParameter<12> matrix_corner =
+  iotwebconf::Builder<iotwebconf::SelectTParameter<12>>("matrix_corner").label("Matrix LED #0 horizontal edge").defaultValue(kDefaultMatrixCornerValue).optionValues(kMatrixCornerOptionValues).optionNames(kMatrixCornerOptionNames).optionCount(kMatrixOptionCount).nameLength(kMatrixOptionLength).build();
+iotwebconf::SelectTParameter<12> matrix_axis =
+  iotwebconf::Builder<iotwebconf::SelectTParameter<12>>("matrix_axis").label("Matrix wiring direction").defaultValue(kDefaultMatrixAxisValue).optionValues(kMatrixAxisOptionValues).optionNames(kMatrixAxisOptionNames).optionCount(kMatrixOptionCount).nameLength(kMatrixOptionLength).build();
+iotwebconf::SelectTParameter<12> matrix_order =
+  iotwebconf::Builder<iotwebconf::SelectTParameter<12>>("matrix_order").label("Matrix wiring order").defaultValue(kDefaultMatrixOrderValue).optionValues(kMatrixOrderOptionValues).optionNames(kMatrixOrderOptionNames).optionCount(kMatrixOptionCount).nameLength(kMatrixOptionLength).build();
 iotwebconf::ParameterGroup group12 = iotwebconf::ParameterGroup("Maintenance", "Maintenance");
 
 bool hasConfiguredWebPassword(const char *password)
@@ -200,10 +247,27 @@ bool hasConfiguredWebPassword(const char *password)
 
 namespace
 {
-/** Returns true when a GPIO is one of the ESP32 flash pins that should not be used for project wiring. */
+/** Returns true when a GPIO is normally reserved for flash on the current ESP32 target. */
 bool isReservedFlashGpio(int16_t pin)
 {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  return pin >= 27 && pin <= 32;
+#else
   return pin >= 6 && pin <= 11;
+#endif
+}
+
+/** Returns true when the GPIO number is invalid for the current ESP32 target. */
+bool isTargetInvalidGpio(int16_t pin)
+{
+#if defined(CONFIG_IDF_TARGET_ESP32)
+  return pin == 20 || pin == 24 || (pin >= 28 && pin <= 31);
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+  return pin >= 22 && pin <= 25;
+#else
+  (void)pin;
+  return false;
+#endif
 }
 
 /** Returns true for classic ESP32 pins that are input-only and cannot drive UART TX, I2C, or LEDs. */
@@ -229,7 +293,7 @@ bool validateInputPin(const char *label, int16_t pin, String &error)
   if (!isHardwareInputPinUsable(pin))
   {
     error = String(label) + F(" must be a usable GPIO from 0 to ") + kMaxHardwareGpioPin +
-            F(" and cannot be flash GPIO 6-11.");
+            F(" and cannot be reserved or invalid for this ESP32 target.");
     return false;
   }
   return true;
@@ -241,7 +305,7 @@ bool validateOutputPin(const char *label, int16_t pin, String &error)
   if (!isHardwareOutputPinUsable(pin))
   {
     error = String(label) + F(" must be an output-capable GPIO from 0 to ") + kMaxHardwareGpioPin +
-            F(" and cannot be flash GPIO 6-11 or an input-only pin.");
+            F(" and cannot be reserved, invalid, or input-only for this ESP32 target.");
     return false;
   }
   return true;
@@ -327,6 +391,46 @@ void applyDefaultHardwarePinSettings()
   i2c_scl_pin.value() = defaults.i2cSclPin;
 }
 
+/** Returns true when a dropdown value matches one of the two supported options. */
+bool isSupportedMatrixOption(const char *value, const char *first, const char *second)
+{
+  return value != nullptr && (strcmp(value, first) == 0 || strcmp(value, second) == 0);
+}
+
+/** Returns true when the selected LED #0 vertical edge is supported. */
+bool isSupportedMatrixOrigin(const char *value)
+{
+  return isSupportedMatrixOption(value, "bottom", "top");
+}
+
+/** Returns true when the selected LED #0 horizontal edge is supported. */
+bool isSupportedMatrixCorner(const char *value)
+{
+  return isSupportedMatrixOption(value, "right", "left");
+}
+
+/** Returns true when the selected matrix wiring direction is supported. */
+bool isSupportedMatrixAxis(const char *value)
+{
+  return isSupportedMatrixOption(value, "columns", "rows");
+}
+
+/** Returns true when the selected matrix wiring order is supported. */
+bool isSupportedMatrixOrder(const char *value)
+{
+  return isSupportedMatrixOption(value, "zigzag", "progressive");
+}
+
+/** Restores the matrix layout dropdowns to the project defaults. */
+void applyDefaultMatrixLayoutSettings()
+{
+  const MatrixLayoutSettings defaults = defaultMatrixLayoutSettings();
+  strlcpy(matrix_origin.value(), defaults.origin, sizeof(matrix_origin.value()));
+  strlcpy(matrix_corner.value(), defaults.corner, sizeof(matrix_corner.value()));
+  strlcpy(matrix_axis.value(), defaults.axis, sizeof(matrix_axis.value()));
+  strlcpy(matrix_order.value(), defaults.order, sizeof(matrix_order.value()));
+}
+
 /** Clamps an integer config parameter into its supported range in memory. */
 template <typename T>
 bool normalizeIntParameter(iotwebconf::IntTParameter<T> &parameter, T minValue, T maxValue, T fallbackValue)
@@ -403,6 +507,7 @@ void normalizeLoadedConfigValuesImpl()
     corrected = true;
   }
   corrected |= normalizeHardwarePinSettings();
+  corrected |= normalizeMatrixLayoutSettings();
   if (hardware_profile.value()[0] == '\0')
   {
     strlcpy(hardware_profile.value(), compiledHardwareProfile(), sizeof(hardware_profile.value()));
@@ -510,6 +615,10 @@ void populateParameterGroups()
   group13.addItem(&gps_tx_pin);
   group13.addItem(&i2c_sda_pin);
   group13.addItem(&i2c_scl_pin);
+  group13.addItem(&matrix_origin);
+  group13.addItem(&matrix_corner);
+  group13.addItem(&matrix_axis);
+  group13.addItem(&matrix_order);
 
   group12.addItem(&serialdebug);
   group12.addItem(&resetdefaults);
@@ -566,9 +675,57 @@ HardwarePinSettings configuredHardwarePinSettings()
   return hardwarePinParametersReady ? rawConfiguredHardwarePinSettings() : defaultHardwarePinSettings();
 }
 
+MatrixLayoutSettings defaultMatrixLayoutSettings()
+{
+  return MatrixLayoutSettings{
+      kDefaultMatrixOriginValue,
+      kDefaultMatrixCornerValue,
+      kDefaultMatrixAxisValue,
+      kDefaultMatrixOrderValue,
+  };
+}
+
+MatrixLayoutSettings rawConfiguredMatrixLayoutSettings()
+{
+  return MatrixLayoutSettings{
+      matrix_origin.value(),
+      matrix_corner.value(),
+      matrix_axis.value(),
+      matrix_order.value(),
+  };
+}
+
+MatrixLayoutSettings configuredMatrixLayoutSettings()
+{
+  return hardwarePinParametersReady ? rawConfiguredMatrixLayoutSettings() : defaultMatrixLayoutSettings();
+}
+
+uint8_t matrixLayoutFlags(const MatrixLayoutSettings &settings)
+{
+  const char *originValue = settings.origin != nullptr ? settings.origin : "";
+  const char *cornerValue = settings.corner != nullptr ? settings.corner : "";
+  const char *axisValue = settings.axis != nullptr ? settings.axis : "";
+  const char *orderValue = settings.order != nullptr ? settings.order : "";
+  const uint8_t origin = strcmp(originValue, "top") == 0 ? NEO_MATRIX_TOP : NEO_MATRIX_BOTTOM;
+  const uint8_t corner = strcmp(cornerValue, "left") == 0 ? NEO_MATRIX_LEFT : NEO_MATRIX_RIGHT;
+  const uint8_t axis = strcmp(axisValue, "rows") == 0 ? NEO_MATRIX_ROWS : NEO_MATRIX_COLUMNS;
+  const uint8_t order = strcmp(orderValue, "progressive") == 0 ? NEO_MATRIX_PROGRESSIVE : NEO_MATRIX_ZIGZAG;
+  return origin + corner + axis + order;
+}
+
+uint8_t defaultMatrixLayoutFlags()
+{
+  return matrixLayoutFlags(defaultMatrixLayoutSettings());
+}
+
+uint8_t configuredMatrixLayoutFlags()
+{
+  return matrixLayoutFlags(configuredMatrixLayoutSettings());
+}
+
 bool isHardwareInputPinUsable(int16_t pin)
 {
-  return isGpioInConfiguredRange(pin) && !isReservedFlashGpio(pin);
+  return isGpioInConfiguredRange(pin) && !isReservedFlashGpio(pin) && !isTargetInvalidGpio(pin);
 }
 
 bool isHardwareOutputPinUsable(int16_t pin)
@@ -580,6 +737,7 @@ bool isSupportedLedDataPin(int16_t pin)
 {
   switch (pin)
   {
+#if defined(CONFIG_IDF_TARGET_ESP32)
     case 2:
     case 4:
     case 5:
@@ -600,7 +758,21 @@ bool isSupportedLedDataPin(int16_t pin)
     case 32:
     case 33:
       return true;
-#ifndef CONFIG_IDF_TARGET_ESP32
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+    case 2:
+    case 4:
+    case 5:
+    case 12:
+    case 13:
+    case 14:
+    case 15:
+    case 16:
+    case 17:
+    case 18:
+    case 19:
+    case 21:
+    case 26:
+    case 33:
     case 34:
     case 35:
     case 36:
@@ -618,6 +790,11 @@ bool isSupportedLedDataPin(int16_t pin)
     case 47:
     case 48:
 #endif
+      return true;
+#else
+    case 2:
+    case 4:
+    case 5:
       return true;
 #endif
     default:
@@ -650,6 +827,32 @@ bool isHardwarePinConfigurationValid(const HardwarePinSettings &settings, String
   return true;
 }
 
+bool isMatrixLayoutConfigurationValid(const MatrixLayoutSettings &settings, String &error)
+{
+  error = "";
+  if (!isSupportedMatrixOrigin(settings.origin))
+  {
+    error = F("Matrix LED #0 vertical edge must be bottom or top.");
+    return false;
+  }
+  if (!isSupportedMatrixCorner(settings.corner))
+  {
+    error = F("Matrix LED #0 horizontal edge must be right or left.");
+    return false;
+  }
+  if (!isSupportedMatrixAxis(settings.axis))
+  {
+    error = F("Matrix wiring direction must be columns or rows.");
+    return false;
+  }
+  if (!isSupportedMatrixOrder(settings.order))
+  {
+    error = F("Matrix wiring order must be zigzag or progressive.");
+    return false;
+  }
+  return true;
+}
+
 bool normalizeHardwarePinSettings()
 {
   String error;
@@ -659,6 +862,17 @@ bool normalizeHardwarePinSettings()
   applyDefaultHardwarePinSettings();
   ESP_LOGW(TAG, "Invalid hardware pin configuration reset to %s defaults: %s",
            compiledHardwareProfile(), error.c_str());
+  return true;
+}
+
+bool normalizeMatrixLayoutSettings()
+{
+  String error;
+  if (isMatrixLayoutConfigurationValid(configuredMatrixLayoutSettings(), error))
+    return false;
+
+  applyDefaultMatrixLayoutSettings();
+  ESP_LOGW(TAG, "Invalid matrix layout reset to project defaults: %s", error.c_str());
   return true;
 }
 

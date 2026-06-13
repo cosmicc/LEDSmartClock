@@ -65,6 +65,7 @@ bool initializeMatrixLeds()
   const int16_t pin = ledDataPin();
   switch (pin)
   {
+#if defined(CONFIG_IDF_TARGET_ESP32)
     case 2:
       addMatrixLedsOnPin<2>();
       break;
@@ -122,7 +123,49 @@ bool initializeMatrixLeds()
     case 33:
       addMatrixLedsOnPin<33>();
       break;
-#ifndef CONFIG_IDF_TARGET_ESP32
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+    case 2:
+      addMatrixLedsOnPin<2>();
+      break;
+    case 4:
+      addMatrixLedsOnPin<4>();
+      break;
+    case 5:
+      addMatrixLedsOnPin<5>();
+      break;
+    case 12:
+      addMatrixLedsOnPin<12>();
+      break;
+    case 13:
+      addMatrixLedsOnPin<13>();
+      break;
+    case 14:
+      addMatrixLedsOnPin<14>();
+      break;
+    case 15:
+      addMatrixLedsOnPin<15>();
+      break;
+    case 16:
+      addMatrixLedsOnPin<16>();
+      break;
+    case 17:
+      addMatrixLedsOnPin<17>();
+      break;
+    case 18:
+      addMatrixLedsOnPin<18>();
+      break;
+    case 19:
+      addMatrixLedsOnPin<19>();
+      break;
+    case 21:
+      addMatrixLedsOnPin<21>();
+      break;
+    case 26:
+      addMatrixLedsOnPin<26>();
+      break;
+    case 33:
+      addMatrixLedsOnPin<33>();
+      break;
     case 34:
       addMatrixLedsOnPin<34>();
       break;
@@ -170,6 +213,16 @@ bool initializeMatrixLeds()
       addMatrixLedsOnPin<48>();
       break;
 #endif
+#else
+    case 2:
+      addMatrixLedsOnPin<2>();
+      break;
+    case 4:
+      addMatrixLedsOnPin<4>();
+      break;
+    case 5:
+      addMatrixLedsOnPin<5>();
+      break;
 #endif
     default:
       ESP_LOGE(TAG, "LED data GPIO %d is not supported by this firmware build. Falling back to GPIO %d.",
@@ -1128,6 +1181,7 @@ extern "C" void app_main()
   captureLastRebootReason();
   ESP_LOGI(TAG, "Boot reset reason: %s", runtimeState.lastRebootReason);
   uint32_t init_timer = millis();
+  runtimeState.bootMillis = init_timer;
   nvs_flash_init();
   ESP_LOGD(TAG, "Initializing Hardware Watchdog...");
   esp_task_wdt_init(WDT_TIMEOUT, true); // enable panic so ESP32 restarts
@@ -1285,6 +1339,7 @@ extern "C" void app_main()
     showclock.fstop = 20;
   ESP_LOGD(TAG, "Initializing the display...");
   initializeMatrixLeds();
+  configureMatrixLayout();
   matrix->begin();
   matrix->setBrightness(runtimeState.userBrightness);
   matrix->setTextWrap(false);
@@ -1338,8 +1393,33 @@ void applyRuntimeConfiguration()
     runtimeState.rebootRequested = true;
     runtimeState.rebootRequestMillis = millis();
   }
+  if (activeMatrixLayoutFlags() != configuredMatrixLayoutFlags())
+  {
+    ESP_LOGW(TAG, "LED matrix layout changed from flags 0x%02x to 0x%02x. Reboot requested so the display can use the new layout.",
+             activeMatrixLayoutFlags(), configuredMatrixLayoutFlags());
+    runtimeState.rebootRequested = true;
+    runtimeState.rebootRequestMillis = millis();
+  }
   gpsClock.refreshNtpServer();
   rebuildApiUrls();
+#ifndef DISABLE_IPGEOCHECK
+  if (isApiValid(ipgeoapi.value()) && !checkipgeo.complete && checkipgeo.retries >= HTTP_MAX_RETRIES)
+  {
+    checkipgeo.retries = 0;
+    checkipgeo.lastattempt = systemClock.getNow() - T1M - 1;
+    checkIpgeo.reset();
+    checkIpgeo.resume();
+    ESP_LOGI(TAG, "Reset IP geolocation retries after configuration update.");
+  }
+#endif
+  if (isApiValid(weatherapi.value()) && isCoordsValid() && checkgeocode.retries >= HTTP_MAX_RETRIES)
+  {
+    checkgeocode.retries = 0;
+    checkgeocode.lastattempt = systemClock.getNow() - T1M - 1;
+    checkGeocode.reset();
+    checkGeocode.resume();
+    ESP_LOGI(TAG, "Reset reverse-geocode retries after configuration update.");
+  }
   noteDiagnosticPending(DiagnosticService::Weather, isApiValid(weatherapi.value()),
                         isApiValid(weatherapi.value()) ? "Configured" : "Missing API key",
                         isApiValid(weatherapi.value())
@@ -1352,12 +1432,17 @@ void applyRuntimeConfiguration()
                             ? String(F("AQI refresh will run when Wi-Fi, coordinates, and schedules allow it."))
                             : String(F("OpenWeather API key is not configured for AQI requests.")),
                         checkaqi.retries);
-  noteDiagnosticPending(DiagnosticService::IpGeo, isApiValid(ipgeoapi.value()),
-                        isApiValid(ipgeoapi.value()) ? "Configured" : "Missing API key",
-                        isApiValid(ipgeoapi.value())
-                            ? String(F("IP geolocation will refresh after Wi-Fi is online."))
-                            : String(F("ipgeolocation.io API key is not configured.")),
-                        checkipgeo.retries);
+  // ipGeoConfigured records whether the IPGeolocation.io API key is present after the latest save.
+  const bool ipGeoConfigured = isApiValid(ipgeoapi.value());
+  if (!checkipgeo.complete || !ipGeoConfigured)
+  {
+    noteDiagnosticPending(DiagnosticService::IpGeo, ipGeoConfigured,
+                          ipGeoConfigured ? "Configured" : "Missing API key",
+                          ipGeoConfigured
+                              ? String(F("IP geolocation will refresh after Wi-Fi is online."))
+                              : String(F("ipgeolocation.io API key is not configured.")),
+                          checkipgeo.retries);
+  }
   showclock.fstop = 250;
   if (flickerfast.isChecked())
     showclock.fstop = 20;
@@ -1598,7 +1683,7 @@ void print_debugData(ConsoleMirrorPrint &out)
              (connection_state[iotWebConf.getState()]),
              (yesno[isHttpReady()]),
              ((WiFi.localIP()).toString()).c_str(),
-             elapsedTime(now - runtimeState.bootTime).c_str(),
+             uptimeLabel().c_str(),
              static_cast<unsigned long>(ESP.getFreeHeap()),
              static_cast<unsigned long>(ESP.getMinFreeHeap()));
   out.printf("Clock - Status:%s | TimeSource:%s | CurrentTZ:%s | Timezone:%s | DstActive:%s | NtpReady:%s | NtpServer:%s(%s) | Skew:%d Seconds | LastAttempt:%s | NextAttempt:%s | NextNtp:%s | LastSync:%s\n", clock_status[systemClock.getSyncStatusCode()], runtimeState.timeSource, getSystemTimezoneOffsetString().c_str(), getSystemTimezoneName().c_str(), yesno[isSystemTimezoneDstActive()], yesno[gpsClock.ntpIsReady], runtimeState.ntpServer, runtimeState.ntpServerSource, systemClock.getClockSkew(), elapsedTime(systemClock.getSecondsSinceSyncAttempt()).c_str(), elapsedTime(systemClock.getSecondsToSyncAttempt()).c_str(), elapsedTime((now - runtimeState.lastNtpCheck) - NTPCHECKTIME * 60).c_str(), elapsedTime(now - systemClock.getLastSyncTime()).c_str());

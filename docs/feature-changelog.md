@@ -1,7 +1,7 @@
 # LEDSmartClock Feature Changelog
 
 This file tracks completed work and the ranked roadmap for the v2 firmware line.
-It is updated through firmware v2.8.0.
+It is updated through firmware v2.8.1.
 
 ## Current Priorities
 
@@ -13,6 +13,11 @@ It is updated through firmware v2.8.0.
 
 ## Recently Completed
 
+- [x] Improve the web UI typography with a local professional system font stack across dashboard, diagnostics, configuration, console, OTA, onboarding, login, and installer pages.
+- [x] Fix uptime reporting so the dashboard, diagnostics, and debug output use monotonic device runtime instead of wall-clock time.
+- [x] Clarify IP geolocation and reverse-geocode diagnostics with API-key status, request-gate details, and retry reset after corrected configuration saves.
+- [x] Add named PlatformIO environments for common ESP32 boards and ESP32-S3-DevKitC-1 build defaults.
+- [x] Add configurable LED matrix layout settings so users can match top/bottom, left/right, row/column, and zigzag/progressive wiring without code edits.
 - [x] Add manual timezone selection by IANA zone name, with form validation, onboarding support, backup/restore fields, and DST-aware runtime priority ahead of automatic fallbacks.
 - [x] Add detailed per-option help text to the configuration page and reorganize the settings into clearer sections: Current Weather, Daily Weather, Air Quality, Weather Alerts, GPS & Receiver, and bottom-of-page Maintenance.
 - [x] Change GPS UART baud configuration from a freeform number to a dropdown of common rates through 115200, defaulting to 9600.

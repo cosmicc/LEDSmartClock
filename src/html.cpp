@@ -17,7 +17,7 @@ constexpr char kDisplayTestPath[] = "/display-test";
 constexpr char kGpsActionPath[] = "/gps/action";
 constexpr char kGpsRawPath[] = "/gps/raw";
 constexpr char kThemeCssPath[] = "/theme.css";
-constexpr char kThemeCssRevision[] = "5";
+constexpr char kThemeCssRevision[] = "6";
 constexpr char kLoginPath[] = "/login";
 constexpr char kLogoutPath[] = "/logout";
 constexpr char kRebootPath[] = "/reboot";
@@ -117,6 +117,8 @@ const char kWebThemeCss[] PROGMEM = R"clockcss(
   --ghost-button-text:var(--hero);
   --console-bg:#11222d;
   --console-text:#dbe9ee;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:"SFMono-Regular","Cascadia Code",Consolas,"Liberation Mono",Menlo,monospace;
 }
 html[data-web-theme='dark']{
   --bg-top:#08131b;
@@ -168,7 +170,7 @@ body{
   margin:0;
   min-height:100vh;
   color:var(--text);
-  font-family:"Trebuchet MS","Gill Sans","Segoe UI",sans-serif;
+  font-family:var(--font-sans);
   background:
     radial-gradient(circle at top left, rgba(15,118,110,0.16), transparent 30%),
     radial-gradient(circle at top right, rgba(199,103,30,0.18), transparent 34%),
@@ -205,7 +207,7 @@ a:hover{text-decoration:underline}
 }
 .hero h1,.portal-hero h1{
   margin:10px 0 8px;
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:clamp(2rem,4vw,3.4rem);
   line-height:1.06;
 }
@@ -296,7 +298,7 @@ a:hover{text-decoration:underline}
 }
 .metric-card strong{
   display:block;
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:1.45rem;
   line-height:1.2;
   overflow-wrap:anywhere;
@@ -317,7 +319,7 @@ a:hover{text-decoration:underline}
 }
 .service-health-card h3{
   margin:0;
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:1.1rem;
 }
 .service-health-card-head{
@@ -389,7 +391,7 @@ a:hover{text-decoration:underline}
 .card,.portal-card{padding:22px}
 .card-header h2{
   margin:0 0 6px;
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:1.45rem;
 }
 .card-subtitle{
@@ -448,7 +450,7 @@ a:hover{text-decoration:underline}
 }
 .setup-step h3{
   margin:0 0 8px;
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:1.15rem;
 }
 .setup-step p{
@@ -589,7 +591,7 @@ a:hover{text-decoration:underline}
 }
 .self-test-item h3{
   margin:0 0 6px;
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:1.05rem;
   color:var(--heading);
 }
@@ -630,7 +632,7 @@ html[data-web-theme='dark'] .hardware-status-section .self-test-item.tone-bad{
 }
 .recovery-panel h2{
   margin:0 0 8px;
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:1.2rem;
   color:var(--heading);
 }
@@ -705,7 +707,7 @@ html[data-web-theme='dark'] .hardware-status-section .self-test-item.tone-bad{
 .portal-form legend{
   padding:0 10px;
   color:var(--heading);
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:1.15rem;
 }
 .portal-section-note{
@@ -726,7 +728,7 @@ html[data-web-theme='dark'] .hardware-status-section .self-test-item.tone-bad{
 }
 .portal-subsection h3{
   margin:0 0 6px;
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:1.05rem;
   color:var(--heading);
 }
@@ -889,7 +891,7 @@ button{
 }
 .upload-field h3{
   margin:0 0 8px;
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:1.1rem;
   color:var(--heading);
 }
@@ -962,7 +964,7 @@ button{
 }
 .upload-popup-card h3{
   margin:0 0 8px;
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:1.45rem;
   color:var(--heading);
 }
@@ -1031,7 +1033,7 @@ button{
   background:var(--console-bg);
   color:var(--console-text);
   box-shadow:inset 0 1px 2px rgba(255,255,255,0.04);
-  font-family:"Courier New","SFMono-Regular",monospace;
+  font-family:var(--font-mono);
   font-size:0.92rem;
   line-height:1.5;
   white-space:pre-wrap;
@@ -1157,7 +1159,7 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
 .portal-form legend{
   padding:0 10px;
   color:var(--heading);
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:1.15rem;
 }
 .portal-section-note{
@@ -1178,7 +1180,7 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
 }
 .portal-subsection h3{
   margin:0 0 6px;
-  font-family:"Georgia","Times New Roman",serif;
+  font-family:var(--font-sans);
   font-size:1.05rem;
   color:var(--heading);
 }
@@ -1337,7 +1339,7 @@ const char kPortalConsoleCss[] PROGMEM = R"clockcss(
   background:var(--console-bg);
   color:var(--console-text);
   box-shadow:inset 0 1px 2px rgba(255,255,255,0.04);
-  font-family:"Courier New","SFMono-Regular",monospace;
+  font-family:var(--font-mono);
   font-size:0.92rem;
   line-height:1.5;
   white-space:pre-wrap;
@@ -1513,8 +1515,8 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
   var sectionNotes = {
     iwcSys: 'Network identity, credentials, web theme, and API keys.',
     Display: 'Brightness, scrolling, colors, and date messaging.',
-    Clock: 'Clock format, timezone selection, NTP source, and clock-face appearance.',
-    CurrentTemp: 'Temperature display cadence and custom coloring.',
+    Clock: 'Clock format, timezone selection, NTP source, and automatic or static clock color.',
+    CurrentTemp: 'Temperature display cadence and automatic or static temperature coloring.',
     CurrentWeather: 'Current-conditions scrolling and presentation timing.',
     DailyWeather: 'Daily forecast summary text, color, and rotation timing.',
     AirQuality: 'AQI display settings from OpenWeather air-pollution data.',
@@ -1553,11 +1555,11 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
     override_dhcp_ntp: 'Forces the preferred NTP server even when your router advertises its own NTP server.',
     colonflicker: 'Blinks the colon between clock digits.',
     flickerfast: 'Uses a faster colon blink when colon blinking is enabled.',
-    enable_clock_color: 'Locks the clock digits to the custom color instead of automatic clock coloring.',
-    clock_color: 'Color used for clock digits when custom clock color is enabled.',
+    enable_clock_color: 'When off, clock digits automatically start yellow at 6 AM, move through green, and become blue at night. Enable this to use one static color instead.',
+    clock_color: 'Static color used for clock digits when static clock color is enabled.',
     show_current_temp: 'Adds the standalone current-temperature block to the display rotation.',
-    enable_temp_color: 'Locks temperature text to the custom color instead of automatic temperature coloring.',
-    temp_color: 'Color used for temperature text when custom temperature color is enabled.',
+    enable_temp_color: 'When off, temperature text is blue when cold, moves through green and yellow, and becomes red when hot. Enable this to use one static color instead.',
+    temp_color: 'Static color used for temperature text when static temperature color is enabled.',
     current_temp_interval: 'Minutes between current-temperature displays.',
     current_temp_duration: 'Seconds the temperature block stays on screen when it appears.',
     show_current_weather: 'Adds current weather conditions to the display rotation.',
@@ -1593,6 +1595,10 @@ const char kConfigPortalScript[] PROGMEM = R"clockjs(
     gps_tx_pin: 'ESP32 TX GPIO connected to the GPS module RX pin for receiver commands. This is applied immediately when saved.',
     i2c_sda_pin: 'Shared I2C SDA GPIO for the DS3231 RTC and TSL2561 light sensor. This is applied immediately when saved.',
     i2c_scl_pin: 'Shared I2C SCL GPIO for the DS3231 RTC and TSL2561 light sensor. This is applied immediately when saved.',
+    matrix_origin: 'Physical vertical edge where LED #0 starts. Changing matrix layout requests a reboot so the display can be rebuilt at startup.',
+    matrix_corner: 'Physical horizontal edge where LED #0 starts. Match this to the side of the panel where the first pixel is wired.',
+    matrix_axis: 'Direction the pixels are wired across the matrix. Use Rows for a horizontal serpentine panel, Columns for the project default.',
+    matrix_order: 'Pixel order within each row or column. Zigzag is serpentine; Progressive runs the same direction each line.',
     gps_baud: 'UART speed for the GPS receiver. On startup and baud changes, the clock tries each supported speed and asks NEO-6M modules to switch to this rate.',
     serialdebug: 'Mirrors verbose runtime diagnostics to USB serial and the web console buffer.',
     resetdefaults: 'On save, wipes all saved configuration and returns the device to setup AP mode.'
@@ -3165,6 +3171,66 @@ String formatUntil(acetime_t now, acetime_t lastShown, uint32_t intervalSeconds)
   return String(F("in ")) + elapsedTime(static_cast<uint32_t>(nextDue - now));
 }
 
+/** Explains which endpoint currently owns the shared HTTP client. */
+String networkBusyGateLabel()
+{
+  // endpointName stores the active endpoint label, or a neutral fallback when no label was captured.
+  const String endpointName = runtimeState.networkBusyEndpoint[0] != '\0'
+                                  ? String(runtimeState.networkBusyEndpoint)
+                                  : String(F("another request"));
+  return String(F("HTTP client is busy with ")) + endpointName + F(".");
+}
+
+/** Explains the current request gate for the IP geolocation service. */
+String ipGeoRequestGateLabel()
+{
+#ifdef DISABLE_IPGEOCHECK
+  return F("Firmware build disabled IP geolocation.");
+#else
+  if (checkipgeo.complete)
+    return F("Resolved. The one-shot IP geolocation check has already completed.");
+  if (!isApiValid(ipgeoapi.value()))
+    return F("Missing IPGeolocation.io API key.");
+  if (runtimeState.firstTimeFailsafe)
+    return F("First-time setup mode is active.");
+  if (iotWebConf.getState() != iotwebconf::OnLine)
+    return String(F("Waiting for Wi-Fi online state. Current state: ")) + currentConnectionStateLabel() + F(".");
+  if (networkService.busy)
+    return networkBusyGateLabel();
+  if (!displaytoken.isReady(0))
+    return F("Display ownership is busy; HTTP checks wait until the clock display is idle.");
+  if (checkipgeo.retries >= HTTP_MAX_RETRIES)
+    return F("Retry limit reached. Save configuration or reboot after correcting the key or network.");
+  if (!isNextAttemptReady(checkipgeo.lastattempt))
+    return F("Waiting for the retry backoff window.");
+  return F("Ready to request.");
+#endif
+}
+
+/** Explains the current request gate for OpenWeather reverse geocoding. */
+String geocodeRequestGateLabel()
+{
+  if (!isApiValid(weatherapi.value()))
+    return F("Missing OpenWeather API key; reverse geocode does not use the IPGeolocation.io key.");
+  if (!isCoordsValid())
+    return F("Waiting for valid coordinates from GPS, fixed/saved coordinates, or IP geolocation.");
+  if (!checkgeocode.ready)
+    return F("Waiting for a coordinate change or IP geolocation update before the next lookup.");
+  if (runtimeState.firstTimeFailsafe)
+    return F("First-time setup mode is active.");
+  if (iotWebConf.getState() != iotwebconf::OnLine)
+    return String(F("Waiting for Wi-Fi online state. Current state: ")) + currentConnectionStateLabel() + F(".");
+  if (networkService.busy)
+    return networkBusyGateLabel();
+  if (!displaytoken.isReady(0))
+    return F("Display ownership is busy; HTTP checks wait until the clock display is idle.");
+  if (checkgeocode.retries >= HTTP_MAX_RETRIES)
+    return F("Retry limit reached. Save configuration or reboot after correcting the key, network, or coordinates.");
+  if (!isNextAttemptReady(checkgeocode.lastattempt))
+    return F("Waiting for the retry backoff window.");
+  return F("Ready to request.");
+}
+
 /** Formats the best available location label from the current resolved location. */
 String currentLocationLabel()
 {
@@ -4222,7 +4288,7 @@ void appendDiagnosticsContent(String &html)
   appendKeyValueRow(html, "Connection State", htmlEscape(currentConnectionStateLabel()));
   appendKeyValueRow(html, "Address", activeAddressLabel());
   appendKeyValueRow(html, "Last Reboot Reason", safeText(String(runtimeState.lastRebootReason), "Unknown"));
-  appendKeyValueRow(html, "Uptime", htmlEscape(elapsedTime(static_cast<uint32_t>(now - runtimeState.bootTime))));
+  appendKeyValueRow(html, "Uptime", htmlEscape(uptimeLabel()));
   appendKeyValueRow(html, "Captive Portal", isSetupPortalState() ? F("Active") : F("Off"));
   appendKeyValueRow(html, "HTTP Client Ready", isHttpReady() ? F("Yes") : F("No"));
   appendKeyValueRow(html, "Last Success", formatAgo(now, serviceDiagnostic(DiagnosticService::Wifi).lastSuccess));
@@ -4341,6 +4407,8 @@ void appendDiagnosticsContent(String &html)
   appendTonedCardStart(html, "IP Geolocation", "Public-IP-based timezone and coarse coordinate fallback state.", diagnosticTone(DiagnosticService::IpGeo));
   appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::IpGeo));
   appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::IpGeo));
+  appendKeyValueRow(html, "API Key", isApiValid(ipgeoapi.value()) ? F("Configured") : F("Missing"));
+  appendKeyValueRow(html, "Request Gate", htmlEscape(ipGeoRequestGateLabel()));
   appendKeyValueRow(html, "Timezone", safeText(String(ipgeo.timezone), "Waiting"));
   appendKeyValueRow(html, "Coordinates", htmlEscape(String(ipgeo.lat, 5) + F(", ") + String(ipgeo.lon, 5)));
   appendKeyValueRow(html, "Retries", htmlEscape(String(serviceDiagnostic(DiagnosticService::IpGeo).retries)));
@@ -4349,9 +4417,11 @@ void appendDiagnosticsContent(String &html)
   appendKeyValueRow(html, "Last Code", diagnosticCodeLabel(DiagnosticService::IpGeo));
   appendCardEnd(html);
 
-  appendTonedCardStart(html, "Reverse Geocode", "City and region resolution based on the active service coordinates.", diagnosticTone(DiagnosticService::Geocode));
+  appendTonedCardStart(html, "Reverse Geocode", "OpenWeather city and region lookup based on the active service coordinates.", diagnosticTone(DiagnosticService::Geocode));
   appendKeyValueRow(html, "Status", diagnosticSummary(DiagnosticService::Geocode));
   appendKeyValueRow(html, "Detail", diagnosticDetail(DiagnosticService::Geocode));
+  appendKeyValueRow(html, "OpenWeather Key", isApiValid(weatherapi.value()) ? F("Configured") : F("Missing"));
+  appendKeyValueRow(html, "Request Gate", htmlEscape(geocodeRequestGateLabel()));
   appendKeyValueRow(html, "Location", currentLocationLabel());
   appendKeyValueRow(html, "Coordinates", currentCoordinatesLabel());
   appendKeyValueRow(html, "Location Source", safeText(String(current.locsource), "Unknown"));
@@ -4401,7 +4471,7 @@ void appendStatusContent(String &html)
   appendStatusChip(html, "Address", activeAddressLabel());
   appendStatusChip(html, "Location", currentLocationLabel());
   html += F("</div><div class='metric-grid'>");
-  appendMetricCard(html, "Uptime", htmlEscape(elapsedTime(static_cast<uint32_t>(now - runtimeState.bootTime))), "tone-neutral");
+  appendMetricCard(html, "Uptime", htmlEscape(uptimeLabel()), "tone-neutral");
   appendMetricCard(html, "Time Source", timeSourceLabel(),
                    (strcmp(runtimeState.timeSource, "gps") == 0 || strcmp(runtimeState.timeSource, "ntp") == 0)
                        ? "tone-good"
@@ -4445,7 +4515,7 @@ void appendStatusContent(String &html)
   appendKeyValueRow(html, "Build Date (UTC)", htmlEscape(String(BUILD_DATE_UTC)));
   appendKeyValueRow(html, "Connection State", htmlEscape(currentConnectionStateLabel()));
   appendKeyValueRow(html, "Current Address", activeAddressLabel());
-  appendKeyValueRow(html, "Uptime", htmlEscape(elapsedTime(static_cast<uint32_t>(now - runtimeState.bootTime))));
+  appendKeyValueRow(html, "Uptime", htmlEscape(uptimeLabel()));
   appendKeyValueRow(html, "Last Time Sync", formatAgo(now, systemClock.getLastSyncTime()));
   appendKeyValueRow(html, "Time Source", timeSourceLabel());
   appendKeyValueRow(html, "NTP Server", dashboardClampValue(ntpServerLabel()));
@@ -4460,8 +4530,12 @@ void appendStatusContent(String &html)
   appendKeyValueRow(html, "Location", dashboardClampValue(currentLocationLabel()));
   appendKeyValueRow(html, "Coordinates", currentCoordinatesLabel());
   appendKeyValueRow(html, "Location Source", dashboardClampValue(safeText(String(current.locsource), "Unknown")));
-  appendKeyValueRow(html, "IP Geo Success", formatAgo(now, checkipgeo.lastsuccess));
-  appendKeyValueRow(html, "Geocode Success", formatAgo(now, checkgeocode.lastsuccess));
+  appendKeyValueRow(html, "IP Geo Status", htmlEscape(diagnosticSummary(DiagnosticService::IpGeo)));
+  appendKeyValueRow(html, "IP Geo Gate", dashboardClampValue(htmlEscape(ipGeoRequestGateLabel())));
+  appendKeyValueRow(html, "IP Geo Success", formatAgo(now, serviceDiagnostic(DiagnosticService::IpGeo).lastSuccess));
+  appendKeyValueRow(html, "Geocode Status", htmlEscape(diagnosticSummary(DiagnosticService::Geocode)));
+  appendKeyValueRow(html, "Geocode Gate", dashboardClampValue(htmlEscape(geocodeRequestGateLabel())));
+  appendKeyValueRow(html, "Geocode Success", formatAgo(now, serviceDiagnostic(DiagnosticService::Geocode).lastSuccess));
   appendKeyValueRow(html, "Saved City", dashboardClampValue(isLocationValid("saved") ? safeText(String(savedcity.value()), "Not saved") : String(F("Not saved"))));
   appendCardEnd(html);
 
@@ -5605,6 +5679,56 @@ bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
         gps_tx_pin.errorMessage = "Choose valid, unique GPIOs that are not reserved by flash.";
         i2c_sda_pin.errorMessage = "Choose valid, unique GPIOs that are not reserved by flash.";
         i2c_scl_pin.errorMessage = "Choose valid, unique GPIOs that are not reserved by flash.";
+        return false;
+      }
+    }
+
+    const bool matrixLayoutSubmitted =
+        webRequestWrapper->hasArg("matrix_origin") ||
+        webRequestWrapper->hasArg("matrix_corner") ||
+        webRequestWrapper->hasArg("matrix_axis") ||
+        webRequestWrapper->hasArg("matrix_order");
+    if (matrixLayoutSubmitted)
+    {
+      String submittedOrigin = matrix_origin.value();
+      String submittedCorner = matrix_corner.value();
+      String submittedAxis = matrix_axis.value();
+      String submittedOrder = matrix_order.value();
+      if (webRequestWrapper->hasArg("matrix_origin"))
+      {
+        submittedOrigin = webRequestWrapper->arg("matrix_origin");
+        submittedOrigin.trim();
+      }
+      if (webRequestWrapper->hasArg("matrix_corner"))
+      {
+        submittedCorner = webRequestWrapper->arg("matrix_corner");
+        submittedCorner.trim();
+      }
+      if (webRequestWrapper->hasArg("matrix_axis"))
+      {
+        submittedAxis = webRequestWrapper->arg("matrix_axis");
+        submittedAxis.trim();
+      }
+      if (webRequestWrapper->hasArg("matrix_order"))
+      {
+        submittedOrder = webRequestWrapper->arg("matrix_order");
+        submittedOrder.trim();
+      }
+
+      const MatrixLayoutSettings submittedLayout = {
+          submittedOrigin.c_str(),
+          submittedCorner.c_str(),
+          submittedAxis.c_str(),
+          submittedOrder.c_str(),
+      };
+      String layoutError;
+      if (!isMatrixLayoutConfigurationValid(submittedLayout, layoutError))
+      {
+        ESP_LOGW(TAG, "Rejected matrix layout form values: %s", layoutError.c_str());
+        matrix_origin.errorMessage = "Choose one of the listed matrix layout options.";
+        matrix_corner.errorMessage = "Choose one of the listed matrix layout options.";
+        matrix_axis.errorMessage = "Choose one of the listed matrix layout options.";
+        matrix_order.errorMessage = "Choose one of the listed matrix layout options.";
         return false;
       }
     }

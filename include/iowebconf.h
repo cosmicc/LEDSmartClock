@@ -78,18 +78,18 @@ extern iotwebconf::SelectTParameter<7> gps_baud;
 extern iotwebconf::CheckboxTParameter colonflicker;
 /** Speeds up the colon blink cadence when blinking is enabled. */
 extern iotwebconf::CheckboxTParameter flickerfast;
-/** Locks the clock digits to a custom color instead of auto hue logic. */
+/** Locks the clock digits to a static color instead of the automatic day/night hue. */
 extern iotwebconf::CheckboxTParameter enable_clock_color;
-/** Custom color used by the clock digits when auto hue is disabled. */
+/** Static color used by the clock digits when automatic day/night hue is disabled. */
 extern iotwebconf::ColorTParameter clock_color;
 
 /** Current-temperature configuration section. */
 extern iotwebconf::ParameterGroup group3;
 /** Enables the standalone current-temperature display block. */
 extern iotwebconf::CheckboxTParameter show_current_temp;
-/** Locks temperature rendering to a custom color instead of auto hue logic. */
+/** Locks temperature rendering to a static color instead of the automatic temperature hue. */
 extern iotwebconf::CheckboxTParameter enable_temp_color;
-/** Custom color used by temperature rendering when auto hue is disabled. */
+/** Static color used by temperature rendering when automatic temperature hue is disabled. */
 extern iotwebconf::ColorTParameter temp_color;
 /** Interval between current-temperature displays. */
 extern iotwebconf::IntTParameter<int8_t> current_temp_interval;
@@ -186,5 +186,13 @@ extern iotwebconf::IntTParameter<int16_t> gps_tx_pin;
 extern iotwebconf::IntTParameter<int16_t> i2c_sda_pin;
 /** GPIO used for the shared DS3231/TSL2561 I2C SCL line. */
 extern iotwebconf::IntTParameter<int16_t> i2c_scl_pin;
+/** Physical vertical edge where LED #0 starts on the matrix. */
+extern iotwebconf::SelectTParameter<12> matrix_origin;
+/** Physical horizontal edge where LED #0 starts on the matrix. */
+extern iotwebconf::SelectTParameter<12> matrix_corner;
+/** Physical wiring direction across the matrix. */
+extern iotwebconf::SelectTParameter<12> matrix_axis;
+/** Physical wiring order across each row or column. */
+extern iotwebconf::SelectTParameter<12> matrix_order;
 /** Maintenance and recovery configuration section. */
 extern iotwebconf::ParameterGroup group12;

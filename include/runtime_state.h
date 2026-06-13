@@ -118,6 +118,8 @@ struct RuntimeState
   bool clockDisplayOffset = false;
   /** Timestamp captured during boot and reused for uptime reporting. */
   ace_time::acetime_t bootTime = 0;
+  /** Monotonic millisecond counter captured during boot for uptime reporting independent of wall-clock sync. */
+  uint32_t bootMillis = 0;
   /** Human-readable ESP reset cause captured at boot for post-reboot diagnostics. */
   char lastRebootReason[64] = "Unknown";
   /** Short tag describing the active time source, such as gps, ntp, rtc, or none. */

@@ -171,12 +171,31 @@ struct HardwarePinSettings
   int16_t i2cSclPin;
 };
 
+/** Runtime-configurable FastLED_NeoMatrix physical layout settings. */
+struct MatrixLayoutSettings
+{
+  const char *origin;
+  const char *corner;
+  const char *axis;
+  const char *order;
+};
+
 /** Returns the hardware profile label compiled into this firmware build. */
 const char *compiledHardwareProfile();
 /** Returns the compiled default wiring profile. */
 HardwarePinSettings defaultHardwarePinSettings();
 /** Returns the current configured wiring profile. */
 HardwarePinSettings configuredHardwarePinSettings();
+/** Returns the compiled default matrix layout. */
+MatrixLayoutSettings defaultMatrixLayoutSettings();
+/** Returns the current configured matrix layout. */
+MatrixLayoutSettings configuredMatrixLayoutSettings();
+/** Converts a matrix layout setting set into FastLED_NeoMatrix flags. */
+uint8_t matrixLayoutFlags(const MatrixLayoutSettings &settings);
+/** Returns the compiled default FastLED_NeoMatrix layout flags. */
+uint8_t defaultMatrixLayoutFlags();
+/** Returns the configured FastLED_NeoMatrix layout flags. */
+uint8_t configuredMatrixLayoutFlags();
 /** Returns true when a GPIO can be used as a runtime input signal. */
 bool isHardwareInputPinUsable(int16_t pin);
 /** Returns true when a GPIO can be used as a runtime output signal. */
@@ -185,8 +204,12 @@ bool isHardwareOutputPinUsable(int16_t pin);
 bool isSupportedLedDataPin(int16_t pin);
 /** Validates a full runtime hardware-pin configuration and writes a readable error on failure. */
 bool isHardwarePinConfigurationValid(const HardwarePinSettings &settings, String &error);
+/** Validates a full runtime matrix-layout configuration and writes a readable error on failure. */
+bool isMatrixLayoutConfigurationValid(const MatrixLayoutSettings &settings, String &error);
 /** Normalizes invalid stored hardware-pin values back to the compiled defaults. */
 bool normalizeHardwarePinSettings();
+/** Normalizes invalid stored matrix-layout values back to the compiled defaults. */
+bool normalizeMatrixLayoutSettings();
 /** Returns the configured LED matrix data pin. */
 int16_t ledDataPin();
 /** Returns the configured GPS UART RX pin. */
@@ -210,6 +233,10 @@ extern DS3231Clock<WireInterface> dsClock;
 extern CRGB leds[NUMMATRIX];
 /** Matrix abstraction used by rendering code to draw text and bitmaps. */
 extern FastLED_NeoMatrix *matrix;
+/** Returns the layout flags used by the currently allocated matrix instance. */
+uint8_t activeMatrixLayoutFlags();
+/** Reallocates the matrix object with the configured FastLED_NeoMatrix layout. */
+void configureMatrixLayout();
 /** TinyGPS parser that consumes sentences from the hardware UART. */
 extern TinyGPSPlus GPS;
 /** Ambient light sensor driver used for automatic brightness control. */

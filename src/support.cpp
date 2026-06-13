@@ -67,13 +67,26 @@ String elapsedTime(uint32_t seconds)
           }
           else
           {
-            result = "Never";
+            // years stores complete 12-month groups so long durations remain readable.
+            uint32_t years = months / 12;
+            result = String(years) + " years, " + String(months % 12) + " months";
           }
         }
       }
     }
   }
   return result;
+}
+
+String uptimeLabel()
+{
+  // Uptime must use millis() because the wall clock may be unset, corrected by
+  // NTP, or corrected by GPS after the firmware has already booted.
+  // elapsedMillis stores the rollover-safe monotonic duration since setup.
+  const uint32_t elapsedMillis = millis() - runtimeState.bootMillis;
+  // roundedSeconds rounds partial seconds up so a newly booted device shows activity.
+  const uint32_t roundedSeconds = (elapsedMillis + 999UL) / 1000UL;
+  return elapsedTime(roundedSeconds);
 }
 
 char *capString(char *str)

@@ -6,6 +6,8 @@
 
 /** Formats an elapsed duration into a human-readable string. */
 String elapsedTime(uint32_t seconds);
+/** Formats device uptime from the monotonic boot counter instead of the wall clock. */
+String uptimeLabel();
 /** Capitalizes the first letter of each word in-place. */
 char *capString(char *str);
 /** Converts an NTP epoch into the AceTime epoch. */

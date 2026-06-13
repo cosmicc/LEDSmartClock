@@ -17,7 +17,11 @@ const char wifiInitialApPassword[] = "ledsmartclock";
 WireInterface wireInterface(Wire);
 DS3231Clock<WireInterface> dsClock(wireInterface);
 CRGB leds[NUMMATRIX];
-FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(leds, mw, mh, NEO_MATRIX_BOTTOM + NEO_MATRIX_RIGHT + NEO_MATRIX_COLUMNS + NEO_MATRIX_ZIGZAG);
+namespace
+{
+uint8_t currentMatrixLayoutFlags = NEO_MATRIX_BOTTOM + NEO_MATRIX_RIGHT + NEO_MATRIX_COLUMNS + NEO_MATRIX_ZIGZAG;
+}
+FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(leds, mw, mh, currentMatrixLayoutFlags);
 TinyGPSPlus GPS;
 Tsl2561 Tsl(Wire);
 DNSServer dnsServer;
@@ -51,3 +55,24 @@ DisplayToken displaytoken;
 // Shared color lookup tables used by alert and AQI rendering.
 const uint32_t AQIColorLookup[] = {GREEN, YELLOW, ORANGE, RED, PURPLE, WHITE};
 const uint32_t alertcolors[] = {RED, YELLOW};
+
+uint8_t activeMatrixLayoutFlags()
+{
+  return currentMatrixLayoutFlags;
+}
+
+void configureMatrixLayout()
+{
+  const MatrixLayoutSettings settings = configuredMatrixLayoutSettings();
+  const uint8_t layoutFlags = matrixLayoutFlags(settings);
+  if (matrix != nullptr)
+  {
+    delete matrix;
+    matrix = nullptr;
+  }
+
+  matrix = new FastLED_NeoMatrix(leds, mw, mh, layoutFlags);
+  currentMatrixLayoutFlags = layoutFlags;
+  ESP_LOGI(TAG, "LED matrix layout initialized: origin=%s corner=%s direction=%s order=%s flags=0x%02x.",
+           settings.origin, settings.corner, settings.axis, settings.order, layoutFlags);
+}

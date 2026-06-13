@@ -33,6 +33,7 @@ Thank you to PCBWay for supporting this project and for helping makers, develope
 - Automatic DST when a named timezone is available, with manual zone-name selection plus fixed-offset and GPS-longitude fallbacks.
 - Location from GPS, saved coordinates, reverse geocoding, or IP geolocation fallback.
 - Rotating matrix messages for date, current temperature, current weather, daily forecast, AQI, weather alerts, sunrise, and sunset.
+- Automatic display colors: time shifts from yellow at 6 AM through green toward blue at night, and temperature shifts from cold blue through green/yellow to hot red.
 - Ambient-light brightness control with user-configurable display behavior.
 - Web dashboard with service health, build metadata, GPS state, weather, AQI, alerts, and sun-event source.
 - Diagnostics page with live service status, GPS recovery actions, raw NMEA, and one-shot display tests.
@@ -47,6 +48,17 @@ Thank you to PCBWay for supporting this project and for helping makers, develope
 - Latest releases: `https://github.com/cosmicc/LEDSmartClock/releases`
 - Feature changelog and roadmap: [docs/feature-changelog.md](docs/feature-changelog.md)
 
+## Display Colors
+
+By default, the clock face uses an automatic time-of-day color. The time starts yellow at 6:00 AM, progressively moves through green, and reaches blue at night.
+
+Current temperature uses automatic temperature coloring. Cold readings are blue, moderate readings move through green and yellow, and hot readings become red.
+
+Both automatic behaviors can be overridden in the web configuration with static colors:
+
+- `Configuration` -> `Advanced` -> `Clock & Time` -> `Use static clock color` and `Static clock color`
+- `Configuration` -> `Advanced` -> `Current Temp` -> `Use static temperature color` and `Static temperature color`
+
 ## Hardware
 
 The current project assumes:
@@ -59,11 +71,24 @@ The current project assumes:
 - 5V power supply sized for the LED matrix
 - Custom PCB revision manufactured with support from PCBWay for cleaner module interconnects and power wiring
 
-The default PlatformIO environment is `esp32dev`, but the wiring is configurable. Choose the PlatformIO board target and pin settings that match your actual ESP32 module before flashing.
+The default PlatformIO environment is `esp32dev`, but named environments are available for common ESP32 boards. Choose the PlatformIO environment and pin settings that match your actual ESP32 module before flashing.
+
+Common PlatformIO environments:
+
+| Environment | PlatformIO board ID | Board/profile | Default pin notes |
+| --- | --- | --- | --- |
+| `esp32dev` | `esp32dev` | Generic Espressif ESP32 Dev Module, default build | Uses the project defaults below |
+| `esp32doit-devkit-v1` | `esp32doit-devkit-v1` | DOIT ESP32 DEVKIT V1 | Uses the project defaults below |
+| `nodemcu-32s` | `nodemcu-32s` | NodeMCU-32S | Uses the project defaults below |
+| `wemos_d1_mini32` | `wemos_d1_mini32` | WEMOS D1 Mini ESP32 | Uses the project defaults below |
+| `lolin32` | `lolin32` | WEMOS LOLIN32 | Uses the project defaults below |
+| `esp32-s3-devkitc-1` | `esp32-s3-devkitc-1` | Espressif ESP32-S3-DevKitC-1 | Defaults to LED data GPIO 33 and I2C GPIO 8/9 |
+
+Build a specific board with `platformio run -e <environment>`, for example `platformio run -e esp32-s3-devkitc-1`. These environments select the PlatformIO board target and firmware hardware-profile label; use the web `Hardware Pins & Matrix Layout` settings when your wiring differs from the project defaults.
 
 ### ESP32 Pinout
 
-These are the shipped default GPIO assignments. They are not a requirement; use the Advanced `Hardware Pins` settings or build flags below when your ESP32 module uses a different pinout.
+These are the shipped default GPIO assignments for the default `esp32dev` build. They are not a requirement; use the Advanced `Hardware Pins & Matrix Layout` settings or build flags below when your ESP32 module uses a different pinout.
 
 | Device | Device Pin | ESP32 Pin | Firmware Reference | Notes |
 | --- | --- | --- | --- | --- |
@@ -79,11 +104,20 @@ These are the shipped default GPIO assignments. They are not a requirement; use 
 
 Pin customization:
 
-- In the web interface, open `Configuration` -> `Advanced` -> `Hardware Pins` to change `led_data_pin`, `gps_rx_pin`, `gps_tx_pin`, `i2c_sda_pin`, and `i2c_scl_pin`.
-- GPS and I2C pin changes are applied when saved. LED data pin changes request a reboot because FastLED binds the GPIO during startup.
-- The backup/export file includes the hardware profile label and runtime pin settings, so pin customizations move with the rest of the saved configuration.
+- In the web interface, open `Configuration` -> `Advanced` -> `Hardware Pins & Matrix Layout` to change `led_data_pin`, `gps_rx_pin`, `gps_tx_pin`, `i2c_sda_pin`, `i2c_scl_pin`, and the LED matrix layout dropdowns.
+- GPS and I2C pin changes are applied when saved. LED data pin and matrix layout changes request a reboot because FastLED binds those display settings during startup.
+- The backup/export file includes the hardware profile label, runtime pin settings, and matrix layout settings, so hardware customizations move with the rest of the saved configuration.
 - Runtime pins cannot overlap each other or the compile-time config button/status LED pins. Move `LEDCLOCK_DEFAULT_CONFIG_PIN` or `LEDCLOCK_DEFAULT_STATUS_PIN` with build flags first if your board needs those GPIOs for another signal.
-- Avoid GPIO 6-11 because they are normally connected to flash. On classic ESP32 boards, GPIO 34-39 are input-only and cannot drive the LED matrix, GPS TX, or I2C. Boot strapping pins can affect startup on some boards, so check your board's pinout before moving signals there.
+- Avoid GPIO 6-11 on classic ESP32 boards because they are normally connected to flash. On ESP32-S3 boards, avoid GPIO 27-32 because they are normally flash pins, and GPIO 22-25 are not valid on the S3 target. On classic ESP32 boards, GPIO 34-39 are input-only and cannot drive the LED matrix, GPS TX, or I2C. Boot strapping pins can affect startup on some boards, so check your board's pinout before moving signals there.
+
+Matrix layout defaults:
+
+| Web setting | Default | FastLED_NeoMatrix flag | When to change it |
+| --- | --- | --- | --- |
+| Matrix LED #0 vertical edge | Bottom | `NEO_MATRIX_BOTTOM` | Change to Top if the first physical pixel starts on the top edge. |
+| Matrix LED #0 horizontal edge | Right | `NEO_MATRIX_RIGHT` | Change to Left if the first physical pixel starts on the left edge. |
+| Matrix wiring direction | Columns | `NEO_MATRIX_COLUMNS` | Use Rows for a typical 8x32 serpentine panel wired in horizontal rows. |
+| Matrix wiring order | Zigzag | `NEO_MATRIX_ZIGZAG` | Use Progressive when each row or column runs the same direction instead of serpentine. |
 
 To change the compile-time defaults for a board profile, add PlatformIO `build_flags` for the target environment. Example:
 
@@ -99,7 +133,7 @@ build_flags =
   -DLEDCLOCK_DEFAULT_STATUS_PIN=2
 ```
 
-For ESP32 variants with GPIO numbers above 39, also set `LEDCLOCK_MAX_GPIO_PIN` for that board build.
+For ESP32 variants with GPIO numbers above 39, also set `LEDCLOCK_MAX_GPIO_PIN` for that board build. The included ESP32-S3 environment already sets it to `48`.
 
 Power notes:
 

@@ -12,6 +12,8 @@
   --accent-strong: #0b5c56;
   --shadow: 0 24px 48px rgba(19, 43, 53, 0.16);
   --radius: 24px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SFMono-Regular", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace;
 }
 
 * {
@@ -20,7 +22,7 @@
 
 body {
   margin: 0;
-  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+  font-family: var(--font-sans);
   color: var(--text);
   background:
     radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 30%),
@@ -131,7 +133,7 @@ ul {
 }
 
 code {
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono);
   padding: 1px 4px;
   border-radius: 6px;
   background: rgba(15, 118, 110, 0.08);
